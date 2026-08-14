@@ -1,0 +1,505 @@
+<Window
+    x:Class="MusicPlayer.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:MusicPlayer"
+    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
+    xmlns:primitives="using:Microsoft.UI.Xaml.Controls.Primitives"
+    xmlns:services="using:MusicPlayer.Services"
+    xmlns:models="using:MusicPlayer.Models"
+    Title="音乐播放器">
+
+    <Grid x:Name="RootGrid" Background="#08080c" RequestedTheme="Dark" KeyDown="MainWindow_KeyDown">
+
+        <Grid.Resources>
+            <services:TimeSpanConverter x:Key="TimeSpanConverter" />
+            <SolidColorBrush x:Key="QqGreen" Color="#31c27c" />
+            <SolidColorBrush x:Key="Surface" Color="#101017" />
+            <SolidColorBrush x:Key="Surface2" Color="#16161f" />
+            <SolidColorBrush x:Key="CardBg" Color="#1a1a24" />
+            <SolidColorBrush x:Key="TextPrimary" Color="#f2f2f5" />
+            <SolidColorBrush x:Key="TextSecondary" Color="#8b8b97" />
+            <SolidColorBrush x:Key="NavHover" Color="#1c1c26" />
+            <SolidColorBrush x:Key="NavSelected" Color="#23232f" />
+            <SolidColorBrush x:Key="BorderSoft" Color="#23232e" />
+
+            <LinearGradientBrush x:Key="CardPlaceholder" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#2c2c3a" Offset="0" />
+                <GradientStop Color="#191922" Offset="1" />
+            </LinearGradientBrush>
+
+            <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#181820" Offset="0" />
+                <GradientStop Color="#0c0c12" Offset="1" />
+            </LinearGradientBrush>
+
+            <LinearGradientBrush x:Key="AccentGlow" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#31c27c" Offset="0" />
+                <GradientStop Color="#1f9e9e" Offset="1" />
+            </LinearGradientBrush>
+
+            <Style x:Key="NavButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Padding" Value="12,10" />
+                <Setter Property="FontSize" Value="13" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+
+            <Style x:Key="ActionButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="#1d1d28" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="12,7" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+
+            <Style x:Key="CirclePlayStyle" TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource QqGreen}" />
+                <Setter Property="Foreground" Value="White" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="26" />
+                <Setter Property="Width" Value="52" />
+                <Setter Property="Height" Value="52" />
+            </Style>
+
+            <DataTemplate x:Key="TrackCardTemplate">
+                <Grid Width="164" Margin="10,10,10,8" RightTapped="TrackItem_RightTapped">
+                    <Grid.ContextFlyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="指定歌词文件..." Click="AssignLyric_Click" />
+                            <MenuFlyoutItem Text="清除指定歌词" Click="ClearLyric_Click" />
+                        </MenuFlyout>
+                    </Grid.ContextFlyout>
+
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="164" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" PointerEntered="Card_PointerEntered" PointerExited="Card_PointerExited">
+                        <Border Width="164" Height="164" CornerRadius="14" Background="{StaticResource CardPlaceholder}">
+                            <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                        </Border>
+
+                        <Border x:Name="Dim" Width="164" Height="164" CornerRadius="14" Background="#000000" Opacity="0" />
+
+                        <Button x:Name="PlayBtn" Style="{StaticResource CirclePlayStyle}"
+                                HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,12"
+                                Opacity="0" Click="CardPlay_Click">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE102;" FontSize="18" />
+                        </Button>
+                    </Grid>
+
+                    <TextBlock Grid.Row="1" Text="{Binding Title}" Margin="2,9,2,0" FontSize="14"
+                               FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"
+                               TextTrimming="CharacterEllipsis" MaxLines="1" />
+                    <TextBlock Grid.Row="2" Text="{Binding Artist}" Margin="2,3,2,0" FontSize="12"
+                               Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="TrackRowTemplate">
+                <Grid Height="56" Margin="4,3" RightTapped="TrackItem_RightTapped" ColumnSpacing="14">
+                    <Grid.ContextFlyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="指定歌词文件..." Click="AssignLyric_Click" />
+                            <MenuFlyoutItem Text="清除指定歌词" Click="ClearLyric_Click" />
+                        </MenuFlyout>
+                    </Grid.ContextFlyout>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="48" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0" Width="48" Height="48">
+                        <Border Background="#23232c" CornerRadius="6" />
+                        <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                    </Grid>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextPrimary}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Artist}" FontSize="12" Foreground="{StaticResource TextSecondary}"
+                                   TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="2" Text="{Binding Album}" Foreground="{StaticResource TextSecondary}" FontSize="12"
+                               VerticalAlignment="Center" MaxWidth="170" TextTrimming="CharacterEllipsis" Margin="0,0,18,0" />
+                    <TextBlock Grid.Column="3" Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}"
+                               Foreground="{StaticResource TextSecondary}" FontSize="12" VerticalAlignment="Center" />
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="100" />
+        </Grid.RowDefinitions>
+
+        <!-- Body -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="224" />
+                <ColumnDefinition x:Name="CenterCol" Width="*" />
+            <ColumnDefinition x:Name="RightCol" Width="0" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left navigation sidebar -->
+            <Grid Grid.Column="0" Background="#0a0a10" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,0,1,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="16,16,0,14" VerticalAlignment="Center">
+                    <Ellipse Width="26" Height="26" Fill="{StaticResource AccentGlow}" />
+                    <TextBlock Text="MusicPlayer" FontSize="16" FontWeight="Bold"
+                               Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" Margin="10,0,0,0" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1" Spacing="3" Margin="10,0,10,6">
+                    <Button x:Name="NavRecent" Click="NavRecent_Click" Style="{StaticResource NavButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <TextBlock Text="最近播放" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="NavLocal" Click="NavLocal_Click" Style="{StaticResource NavButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8B7;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <TextBlock Text="本地音乐" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <Grid Grid.Row="2" Margin="10,4,10,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="6,0,4,6">
+                        <TextBlock Text="创建的歌单" Foreground="{StaticResource TextSecondary}" FontSize="12" VerticalAlignment="Center" />
+                        <Button x:Name="BtnNewPlaylist" HorizontalAlignment="Right" Width="30" Height="30" Padding="0"
+                                Background="{StaticResource QqGreen}" CornerRadius="15" BorderThickness="0"
+                                Click="BtnNewPlaylist_Click" ToolTipService.ToolTip="新建歌单">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE710;" FontSize="15" Foreground="White" />
+                        </Button>
+                    </Grid>
+                    <ListView x:Name="PlaylistsList" Grid.Row="1" Background="Transparent" BorderThickness="0"
+                              IsItemClickEnabled="True" ItemClick="PlaylistsList_ItemClick" SelectionMode="None">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Spacing="10" Margin="6,6">
+                                    <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE93C;" FontSize="14" Foreground="{StaticResource TextSecondary}" VerticalAlignment="Center" />
+                                    <TextBlock Text="{Binding Name}" Foreground="{StaticResource TextPrimary}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Tracks.Count}" Foreground="{StaticResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+
+                <Button x:Name="NavSettings" Grid.Row="3" Click="NavSettings_Click" Style="{StaticResource NavButtonStyle}"
+                        Margin="10,0,10,12">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE713;" FontSize="16" Foreground="{StaticResource TextSecondary}" />
+                        <TextBlock Text="设置" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <!-- Center content area -->
+            <Grid Grid.Column="1" x:Name="CenterGrid" Background="#08080c">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Grid.Row="0" Margin="22,18,22,4" Spacing="12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="ContentTitle" Text="本地音乐" FontSize="22" FontWeight="Bold"
+                                   Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" x:Name="LibraryHeader" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <ComboBox x:Name="ViewCombo" Width="96"
+                                      SelectionChanged="ViewCombo_SelectionChanged" Visibility="Collapsed">
+                                <ComboBoxItem Content="大图标" />
+                                <ComboBoxItem Content="列表" />
+                            </ComboBox>
+                            <ComboBox x:Name="SortCombo" Width="112"
+                                      SelectionChanged="SortCombo_SelectionChanged" Visibility="Collapsed">
+                                <ComboBoxItem Content="默认顺序" />
+                                <ComboBoxItem Content="标题" />
+                                <ComboBoxItem Content="歌手" />
+                                <ComboBoxItem Content="专辑" />
+                                <ComboBoxItem Content="添加时间" />
+                                <ComboBoxItem Content="时长" />
+                            </ComboBox>
+                            <TextBox x:Name="SearchBox" Width="220" Height="34" PlaceholderText="搜索歌曲、歌手、专辑"
+                                     Background="{StaticResource Surface2}" Foreground="{StaticResource TextPrimary}"
+                                     BorderThickness="0" CornerRadius="17" VerticalAlignment="Center"
+                                     TextChanged="SearchBox_TextChanged" />
+                        </StackPanel>
+                    </Grid>
+                    <StackPanel x:Name="ContentActions" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left">
+                        <Button x:Name="BtnAddFile" Content="添加文件" Style="{StaticResource ActionButtonStyle}" Click="BtnAddFile_Click" />
+                        <Button x:Name="BtnAddFolderRecursive" Content="递归文件夹" Style="{StaticResource ActionButtonStyle}" Click="BtnAddFolderRecursive_Click" />
+                        <Button x:Name="BtnAddFolderFlat" Content="本文件夹" Style="{StaticResource ActionButtonStyle}" Click="BtnAddFolderFlat_Click" />
+                        <Button x:Name="BtnOpenList" Content="打开列表" Style="{StaticResource ActionButtonStyle}" Click="BtnOpenList_Click" />
+                        <Button x:Name="BtnSaveList" Content="保存列表" Style="{StaticResource ActionButtonStyle}" Click="BtnSaveList_Click" />
+                        <Button x:Name="BtnClear" Content="清空" Style="{StaticResource ActionButtonStyle}" Click="BtnClear_Click" />
+                        <Button x:Name="BtnClearRecent" Content="清空最近" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnClearRecent_Click" />
+                        <Button x:Name="BtnPlayPlaylist" Content="播放" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnPlayPlaylist_Click" />
+                        <Button x:Name="BtnAddToPlaylist" Content="添加歌曲" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnAddToPlaylist_Click" />
+                        <Button x:Name="BtnDeletePlaylist" Content="删除歌单" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnDeletePlaylist_Click" />
+                    </StackPanel>
+                </StackPanel>
+
+                <Grid Grid.Row="1">
+                    <GridView x:Name="TrackGrid" Background="Transparent" BorderThickness="0" Margin="12,4,12,12"
+                              SelectionMode="None" IsItemClickEnabled="False"
+                              ItemTemplate="{StaticResource TrackCardTemplate}"
+                              DoubleTapped="TrackGrid_DoubleTapped"
+                              AllowDrop="True" DragOver="TrackGrid_DragOver" Drop="TrackGrid_Drop">
+                    </GridView>
+
+                    <ListView x:Name="TrackList" Background="Transparent" BorderThickness="0" Margin="12,4,12,12"
+                              Visibility="Collapsed" SelectionMode="None" IsItemClickEnabled="False"
+                              ItemTemplate="{StaticResource TrackRowTemplate}"
+                              DoubleTapped="TrackList_DoubleTapped"
+                              AllowDrop="True" DragOver="TrackGrid_DragOver" Drop="TrackGrid_Drop">
+                    </ListView>
+
+                    <TextBlock x:Name="EmptyHint" Text="这里还没有歌曲，点击上方「添加文件」或「递归文件夹」开始吧"
+                               Foreground="{StaticResource TextSecondary}" FontSize="14" HorizontalAlignment="Center"
+                               VerticalAlignment="Center" Visibility="Collapsed" />
+
+                    <ScrollViewer x:Name="SettingsScroll" Visibility="Collapsed" Margin="22,6,22,14">
+                        <StackPanel x:Name="SettingsPanel" Spacing="22" MaxWidth="600" HorizontalAlignment="Left">
+                            <TextBlock Text="外观" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" />
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="主题色（用于高亮、按钮、进度条等）" Foreground="{StaticResource TextSecondary}" FontSize="13" />
+                                <controls:ColorPicker x:Name="AccentColorPicker" ColorChanged="AccentColorPicker_ColorChanged" />
+                            </StackPanel>
+
+                            <TextBlock Text="桌面歌词样式" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" />
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="字体大小" Foreground="{StaticResource TextSecondary}" FontSize="13" />
+                                <Slider x:Name="LyricFontSlider" Minimum="14" Maximum="48" Value="24" Width="340" HorizontalAlignment="Left"
+                                        Foreground="{StaticResource QqGreen}" ValueChanged="LyricFontSlider_ValueChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="文字颜色" Foreground="{StaticResource TextSecondary}" FontSize="13" />
+                                <controls:ColorPicker x:Name="LyricColorPicker" ColorChanged="LyricColorPicker_ColorChanged" />
+                            </StackPanel>
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="背景不透明度（0 = 完全透明）" Foreground="{StaticResource TextSecondary}" FontSize="13" />
+                                <Slider x:Name="LyricOpacitySlider" Minimum="0" Maximum="100" Value="0" Width="340" HorizontalAlignment="Left"
+                                        Foreground="{StaticResource QqGreen}" ValueChanged="LyricOpacitySlider_ValueChanged" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Spacing="20">
+                                <ToggleSwitch x:Name="LyricBoldToggle" Header="加粗文字" OffContent="关" OnContent="开"
+                                              Toggled="LyricBoldToggle_Toggled" />
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="对齐方式" Foreground="{StaticResource TextSecondary}" FontSize="13" />
+                                    <ComboBox x:Name="LyricAlignCombo" SelectionChanged="LyricAlignCombo_SelectionChanged">
+                                        <ComboBoxItem Content="居中" />
+                                        <ComboBoxItem Content="居左" />
+                                    </ComboBox>
+                                </StackPanel>
+                            </StackPanel>
+                            <ToggleSwitch x:Name="LyricClickThroughToggle" Header="默认开启歌词点击穿透" OffContent="关" OnContent="开"
+                                          Toggled="LyricClickThroughToggle_Toggled" />
+
+                            <TextBlock Text="播放" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" Margin="0,4,0,0" />
+                            <ToggleSwitch x:Name="CoverSpinToggle" Header="歌曲封面旋转（黑胶转动效果）" OffContent="关" OnContent="开"
+                                          Toggled="CoverSpinToggle_Toggled" />
+
+                            <TextBlock Text="数据与缓存" FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" Margin="0,4,0,0" />
+                            <StackPanel Spacing="8">
+                                <TextBlock Text="数据/缓存存储位置（自动歌单、最近播放、歌单、进度、歌词绑定）。留空则使用默认 %LOCALAPPDATA%\MusicPlayer。"
+                                           Foreground="{StaticResource TextSecondary}" FontSize="13" TextWrapping="Wrap" />
+                                <TextBox x:Name="CacheDirBox" Width="460" HorizontalAlignment="Left" PlaceholderText="留空使用默认位置" />
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button x:Name="CacheDirBrowse" Content="浏览..." Click="CacheDirBrowse_Click" />
+                                    <Button x:Name="CacheDirApply" Content="应用" Click="CacheDirApply_Click" />
+                                    <Button x:Name="CacheDirReset" Content="恢复默认" Click="CacheDirReset_Click" />
+                                </StackPanel>
+                                <TextBlock x:Name="CacheDirStatus" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource TextSecondary}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+
+            <!-- Right now-playing + lyrics (toggled from the bottom bar) -->
+            <Grid x:Name="NowPlayingPanel" Grid.Column="2" Background="{StaticResource NowPanelBg}"
+                  BorderBrush="{StaticResource BorderSoft}" BorderThickness="1,0,0,0" Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Grid>
+                    <TextBlock Text="正在播放" FontSize="13" Foreground="{StaticResource TextSecondary}"
+                               Margin="20,18,0,0" VerticalAlignment="Center" />
+                    <Button x:Name="BtnCollapseCover" HorizontalAlignment="Right" Margin="0,12,16,0"
+                            Background="Transparent" BorderThickness="0" Click="BtnCollapseCover_Click"
+                            ToolTipService.ToolTip="收起 / 展开 封面">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" x:Name="CoverChevron" Glyph="&#xE74E;" FontSize="14"
+                                  Foreground="{StaticResource TextSecondary}" />
+                    </Button>
+                </Grid>
+
+                <Grid x:Name="CoverDisc" Grid.Row="1" Width="232" Height="232" Margin="0,12,0,0" HorizontalAlignment="Center">
+                    <Ellipse Width="232" Height="232" Fill="#15151c" Stroke="#2c2c38" StrokeThickness="2" />
+                    <Ellipse x:Name="NowCoverEllipse" Width="232" Height="232" Fill="#15151c" />
+                    <Ellipse Width="46" Height="46" Fill="#0c0c12" Stroke="#2c2c38" StrokeThickness="2"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Ellipse Width="10" Height="10" Fill="#31c27c" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Grid>
+
+                <StackPanel x:Name="NowInfoPanel" Grid.Row="2" HorizontalAlignment="Center" Spacing="5" Margin="12,14,12,8">
+                    <TextBlock x:Name="NowTitle" Text="未在播放" FontSize="20" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimary}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="300" />
+                    <TextBlock x:Name="NowArtist" Text="" FontSize="13" Foreground="{StaticResource TextSecondary}" TextAlignment="Center" />
+                    <TextBlock x:Name="NowAlbum" Text="" FontSize="11" Foreground="{StaticResource TextSecondary}" TextAlignment="Center" />
+                </StackPanel>
+
+                <ScrollViewer x:Name="LyricScroll" Grid.Row="3" Margin="10,2,10,12" VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="LyricStack" HorizontalAlignment="Center" Padding="10" />
+                </ScrollViewer>
+            </Grid>
+        </Grid>
+
+        <!-- Queue popup (sits above the bottom bar, spanning content + now-playing) -->
+        <Grid x:Name="QueuePanel" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2"
+              VerticalAlignment="Bottom" Height="340" Margin="0,0,0,0"
+              Background="#15151d" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,1,0,0"
+              Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid Grid.Row="0" Margin="18,12,18,10">
+                <TextBlock x:Name="QueueTitle" Text="播放列表" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" />
+                <Button x:Name="BtnQueueClose" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets" Width="32" Height="30" HorizontalAlignment="Right"
+                        Background="Transparent" Foreground="{StaticResource TextPrimary}" BorderThickness="0" Click="BtnQueueClose_Click" />
+            </Grid>
+            <ListView x:Name="QueueList" Grid.Row="1" Background="Transparent" BorderThickness="0" Margin="10,0,10,10"
+                      IsItemClickEnabled="True" ItemClick="QueueList_ItemClick">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="6,4" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="40" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid Grid.Column="0" Width="40" Height="40">
+                                <Border Background="#23232c" CornerRadius="6" />
+                                <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                            </Grid>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Title}" Foreground="{StaticResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Artist}" Foreground="{StaticResource TextSecondary}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0"
+                                       Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}" Foreground="{StaticResource TextSecondary}" FontSize="11" />
+                            <Button Grid.Column="3" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets" Width="30" Height="28" VerticalAlignment="Center"
+                                    Background="Transparent" Foreground="{StaticResource TextSecondary}" BorderThickness="0"
+                                    Click="QueueRemove_Click" ToolTipService.ToolTip="从列表移除" />
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+
+        <!-- Bottom transport bar -->
+        <Grid Grid.Row="1" Background="{StaticResource Surface}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,1,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="320" />
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="BtnToggleNowPlaying" Grid.Column="0" Background="Transparent" BorderThickness="0"
+                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="0"
+                    Click="BtnToggleNowPlaying_Click" ToolTipService.ToolTip="显示/隐藏 正在播放">
+                <StackPanel Orientation="Horizontal" Spacing="12" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <Grid Width="54" Height="54">
+                        <Border Background="#23232c" CornerRadius="8" />
+                        <Image x:Name="MiniCover" Stretch="UniformToFill" />
+                    </Grid>
+                    <StackPanel VerticalAlignment="Center" MaxWidth="210" Spacing="2">
+                        <TextBlock x:Name="MiniTitle" Text="未在播放" FontSize="13" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock x:Name="MiniArtist" Text="" FontSize="11" Foreground="{StaticResource TextSecondary}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </StackPanel>
+            </Button>
+
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="6" Margin="0,0,8,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="18">
+                    <Button x:Name="BtnPlayMode" Width="36" Height="30" Padding="0"
+                            Background="Transparent" BorderThickness="0"
+                            Click="BtnPlayMode_Click" ToolTipService.ToolTip="顺序播放">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" x:Name="PlayModeIcon" Glyph="&#xE8FD;" FontSize="16" Foreground="{StaticResource TextPrimary}" />
+                    </Button>
+                    <Button x:Name="BtnPrev" Width="38" Height="34" Background="Transparent" BorderThickness="0" Padding="0" Click="BtnPrev_Click">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE100;" FontSize="16" Foreground="White" />
+                    </Button>
+                    <Button x:Name="BtnPlay" Style="{StaticResource CirclePlayStyle}" Click="BtnPlay_Click">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE102;" FontSize="18" />
+                    </Button>
+                    <Button x:Name="BtnNext" Width="38" Height="34" Background="Transparent" BorderThickness="0" Padding="0" Click="BtnNext_Click">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE101;" FontSize="16" Foreground="White" />
+                    </Button>
+                    <Button x:Name="BtnQueueToggle" Width="74" Height="30" Background="Transparent" BorderThickness="0" Padding="0"
+                            Click="BtnQueueToggle_Click" ToolTipService.ToolTip="播放列表">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE142;" FontSize="15" Foreground="{StaticResource TextPrimary}" />
+                            <TextBlock Text="列表" Foreground="{StaticResource TextPrimary}" FontSize="12" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+                <Grid Margin="28,0,28,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="TimeCurrent" Text="00:00" Foreground="{StaticResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
+                    <Slider x:Name="SeekSlider" Grid.Column="1" Minimum="0" Maximum="100" StepFrequency="0.5" Value="0"
+                            Margin="8,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource QqGreen}"
+                            PointerPressed="SeekSlider_PointerPressed" PointerReleased="SeekSlider_PointerReleased"
+                            PointerCanceled="SeekSlider_PointerCanceled" ValueChanged="SeekSlider_ValueChanged" />
+                    <TextBlock x:Name="TimeTotal" Grid.Column="2" Text="00:00" Foreground="{StaticResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
+                </Grid>
+            </StackPanel>
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" Margin="0,0,14,0" HorizontalAlignment="Right">
+                <primitives:ToggleButton x:Name="BtnDesktopLyrics" Content="桌面歌词" Checked="BtnDesktopLyrics_Checked" Unchecked="BtnDesktopLyrics_Unchecked"
+                                         Background="Transparent" BorderBrush="#2a2a33" />
+                <primitives:ToggleButton x:Name="BtnClickThrough" Content="歌词穿透" IsEnabled="False"
+                                         Checked="BtnClickThrough_Checked" Unchecked="BtnClickThrough_Unchecked"
+                                         Background="Transparent" BorderBrush="#2a2a33" />
+                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE767;" FontSize="15" Foreground="White" VerticalAlignment="Center" />
+                <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="92" Foreground="{StaticResource QqGreen}" ValueChanged="VolumeSlider_ValueChanged" VerticalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

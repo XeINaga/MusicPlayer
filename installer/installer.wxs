@@ -1,0 +1,52 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="MusicPlayer"
+           Manufacturer="MusicPlayer"
+           Version="1.0.0.0"
+           Language="1033"
+           Codepage="65001"
+           UpgradeCode="{6F3E8C2A-1B4D-4E7A-9C5B-2D8E0F1A3B4C}"
+           Scope="perMachine"
+           InstallerVersion="500"
+           Compressed="yes">
+
+    <!-- Allow major-upgrade: newer version replaces older; block downgrades. -->
+    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 MusicPlayer，无法降级安装。" />
+
+    <!-- Embed all files into a single cabinet inside the .msi. -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Complete" Title="MusicPlayer" Description="本地音乐播放器" Level="1">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MusicPlayer" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ProgramMenuDir" Name="MusicPlayer">
+        <Component Id="StartMenuShortcut" Guid="*">
+          <Shortcut Id="StartMenuShortcut" Name="MusicPlayer"
+                    Target="[INSTALLFOLDER]MusicPlayer.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Description="MusicPlayer 本地音乐播放器" />
+          <RemoveFolder Id="ProgramMenuDir" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\MusicPlayer" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DesktopShortcut" Name="MusicPlayer"
+                  Target="[INSTALLFOLDER]MusicPlayer.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Description="MusicPlayer 本地音乐播放器" />
+        <RemoveFolder Id="RemoveDesktopDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\MusicPlayer" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+  </Package>
+</Wix>

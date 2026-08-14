@@ -1,0 +1,118 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <AssemblyName>MusicPlayer</AssemblyName>
+    <RootNamespace>MusicPlayer</RootNamespace>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <EnableDefaultItems>true</EnableDefaultItems>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260710003" />
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
+    <!-- Needed so Encoding.GetEncoding("GBK")/Shift-JIS work at runtime:
+         .NET does not ship legacy codepages unless this provider is registered. -->
+    <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.0" />
+  </ItemGroup>
+
+  <!--
+    WinUI 3 / Windows App SDK native DLLs depend on the Visual C++ runtime
+    (vcruntime140.dll, vcruntime140_1.dll, msvcp140.dll). The self-contained
+    Windows App SDK does NOT bundle these, so on machines without the matching
+    VC++ Redistributable the process fails to load and "vanishes" silently.
+    Copy the VC runtime next to the exe so the build output runs standalone.
+    The copy must run for BOTH the normal build output and the publish folder.
+  -->
+  <Target Name="CopyVCRuntime" AfterTargets="Build">
+    <ItemGroup>
+      <VcDll Include="$(SystemRoot)\System32\vcruntime140.dll" />
+      <VcDll Include="$(SystemRoot)\System32\vcruntime140_1.dll" />
+      <VcDll Include="$(SystemRoot)\System32\msvcp140.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(VcDll)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+
+  <Target Name="CopyVCRuntimePublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <VcDllP Include="$(SystemRoot)\System32\vcruntime140.dll" />
+      <VcDllP Include="$(SystemRoot)\System32\vcruntime140_1.dll" />
+      <VcDllP Include="$(SystemRoot)\System32\msvcp140.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(VcDllP)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+
+  <!--
+    WORKAROUND: WinApp SDK 1.8 self-contained (unpackaged) publish silently
+    drops the app's compiled XAML (.xbf) and resource index (MusicPlayer.pri)
+    from the output. At startup LoadComponent then fails with
+    "Cannot locate resource from 'ms-appx:///MainWindow.xaml'"
+    (microsoft-ui-xaml #10876). The normal build output ($(OutDir)) contains
+    them, so copy them into the publish folder next to the exe.
+  -->
+  <Target Name="CopyXamlResourcesPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <XamlResource Include="$(OutDir)*.xbf" />
+      <XamlResource Include="$(OutDir)MusicPlayer.pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(XamlResource)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+
+  <!--
+    Build the C++ desktop-lyrics overlay (a standalone Win32 layered window
+    that the WinUI app drives over a named pipe). Compiled with the MinGW-w64
+    g++ that ships with this machine, statically linked so the resulting exe
+    has zero runtime dependencies. The exe is dropped next to the app and
+    copied into the self-contained publish folder.
+  -->
+  <Target Name="BuildOverlay" BeforeTargets="Build;Publish">
+    <Exec Command="&quot;E:\mingw\msys2\ucrt64\bin\g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32"
+          ContinueOnError="true" />
+  </Target>
+
+  <Target Name="CopyOverlayPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <Copy SourceFiles="$(OutDir)DesktopLyricsOverlay.exe"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+
+  <!-- Copy the app icon next to the exe so the runtime window-icon call
+       (AppWindow.SetIcon) can find it; the embedded icon (ApplicationIcon)
+       already covers the taskbar. -->
+  <Target Name="CopyAppIcon" AfterTargets="Build">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Assets\AppIcon.ico"
+          DestinationFiles="$(OutDir)AppIcon.ico"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+
+  <Target Name="CopyAppIconPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Assets\AppIcon.ico"
+          DestinationFiles="$(PublishDir)AppIcon.ico"
+          SkipUnchangedFiles="true"
+          ContinueOnError="true" />
+  </Target>
+
+</Project>
