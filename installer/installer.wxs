@@ -1,4 +1,5 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="MusicPlayer"
            Manufacturer="MusicPlayer"
            Version="1.0.0.0"
@@ -15,10 +16,29 @@
     <!-- Embed all files into a single cabinet inside the .msi. -->
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- Install location: user may choose it via the InstallDir dialog.
+         WixUI_InstallDir binds to INSTALLFOLDER (see the UI element below). -->
+
+    <!-- Custom action that ensures the chosen path ends with "MusicPlayer". -->
+    <Binary Id="CaBinary" SourceFile="installer/ca/normalize.dll" />
+    <CustomAction Id="NormalizeInstallDir"
+                  BinaryRef="CaBinary"
+                  DllEntry="NormalizeInstallDir"
+                  Execute="immediate"
+                  Return="check" />
+
+    <!-- Add/Remove Programs (Programs and Features) entry polish. -->
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/XeINaga" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/XeINaga" />
+    <Property Id="ARPCOMMENTS" Value="本地音乐播放器" />
+    <Icon Id="AppIcon" SourceFile="Assets/AppIcon.ico" />
+
     <Feature Id="Complete" Title="MusicPlayer" Description="本地音乐播放器" Level="1">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="UninstallShortcut" />
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -35,6 +55,13 @@
           <RemoveFolder Id="ProgramMenuDir" On="uninstall" />
           <RegistryValue Root="HKCU" Key="Software\MusicPlayer" Name="installed" Type="integer" Value="1" KeyPath="yes" />
         </Component>
+        <Component Id="UninstallShortcut" Guid="*">
+          <Shortcut Id="UninstallShortcut" Name="卸载 MusicPlayer"
+                    Target="[System64Folder]msiexec.exe"
+                    Arguments="/x [ProductCode]" />
+          <RemoveFolder Id="RemoveProgramMenuDir2" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\MusicPlayer" Name="uninstalllink" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
       </Directory>
     </StandardDirectory>
 
@@ -48,5 +75,19 @@
         <RegistryValue Root="HKCU" Key="Software\MusicPlayer" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
+
+    <!-- Destination-folder selection dialog. -->
+    <UI>
+      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+      <!-- Normalize the path as soon as the user leaves the folder dialog,
+           so the Confirmation dialog shows the corrected target. -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="NormalizeInstallDir" Condition="1" />
+    </UI>
+
+    <!-- Also normalize before costing in the execute sequence (covers silent
+        installs and guarantees the final path ends with the software name). -->
+    <InstallExecuteSequence>
+      <Custom Action="NormalizeInstallDir" Before="CostFinalize" />
+    </InstallExecuteSequence>
   </Package>
 </Wix>
