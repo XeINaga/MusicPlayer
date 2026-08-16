@@ -85,6 +85,10 @@ public static class MetadataService
         try
         {
             var bmp = new BitmapImage();
+            // Decode downscaled: covers are commonly 1000–3000px; keeping them
+            // at full resolution for thousands of tracks wastes gigabytes.
+            // 480px covers the 164px cards and the 232px vinyl at 1.5x DPI.
+            bmp.DecodePixelWidth = 480;
             using var stream = new InMemoryRandomAccessStream();
             using var writer = new DataWriter(stream);
             writer.WriteBytes(bytes);

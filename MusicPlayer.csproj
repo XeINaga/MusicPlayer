@@ -2,8 +2,12 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- Platform 26100: matches the installed Windows Kits Platform.xml and the
+         26100 projection FFmpegInteropX was compiled against; the app still
+         runs on 19041+ via TargetPlatformMinVersion. -->
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <WindowsSdkPackageVersion>10.0.26100.87</WindowsSdkPackageVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWinUI>true</UseWinUI>
@@ -21,6 +25,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="FFmpegInteropX" Version="2.1.0.81200" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260710003" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
     <!-- Needed so Encoding.GetEncoding("GBK")/Shift-JIS work at runtime:
@@ -42,10 +47,7 @@
       <VcDll Include="$(SystemRoot)\System32\vcruntime140_1.dll" />
       <VcDll Include="$(SystemRoot)\System32\msvcp140.dll" />
     </ItemGroup>
-    <Copy SourceFiles="@(VcDll)"
-          DestinationFolder="$(OutDir)"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
+    <Copy SourceFiles="@(VcDll)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 
   <Target Name="CopyVCRuntimePublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
@@ -54,10 +56,7 @@
       <VcDllP Include="$(SystemRoot)\System32\vcruntime140_1.dll" />
       <VcDllP Include="$(SystemRoot)\System32\msvcp140.dll" />
     </ItemGroup>
-    <Copy SourceFiles="@(VcDllP)"
-          DestinationFolder="$(PublishDir)"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
+    <Copy SourceFiles="@(VcDllP)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 
   <!--
@@ -73,10 +72,7 @@
       <XamlResource Include="$(OutDir)*.xbf" />
       <XamlResource Include="$(OutDir)MusicPlayer.pri" />
     </ItemGroup>
-    <Copy SourceFiles="@(XamlResource)"
-          DestinationFolder="$(PublishDir)"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
+    <Copy SourceFiles="@(XamlResource)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 
   <!--
@@ -87,32 +83,22 @@
     copied into the self-contained publish folder.
   -->
   <Target Name="BuildOverlay" BeforeTargets="Build;Publish">
-    <Exec Command="&quot;E:\mingw\msys2\ucrt64\bin\g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32"
-          ContinueOnError="true" />
+    <Exec Command="&quot;E:\mingw\msys2\ucrt64\bin\g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32" ContinueOnError="true" />
   </Target>
 
   <Target Name="CopyOverlayPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
-    <Copy SourceFiles="$(OutDir)DesktopLyricsOverlay.exe"
-          DestinationFolder="$(PublishDir)"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
+    <Copy SourceFiles="$(OutDir)DesktopLyricsOverlay.exe" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 
   <!-- Copy the app icon next to the exe so the runtime window-icon call
        (AppWindow.SetIcon) can find it; the embedded icon (ApplicationIcon)
        already covers the taskbar. -->
   <Target Name="CopyAppIcon" AfterTargets="Build">
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\Assets\AppIcon.ico"
-          DestinationFiles="$(OutDir)AppIcon.ico"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Assets\AppIcon.ico" DestinationFiles="$(OutDir)AppIcon.ico" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 
   <Target Name="CopyAppIconPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
-    <Copy SourceFiles="$(MSBuildProjectDirectory)\Assets\AppIcon.ico"
-          DestinationFiles="$(PublishDir)AppIcon.ico"
-          SkipUnchangedFiles="true"
-          ContinueOnError="true" />
+    <Copy SourceFiles="$(MSBuildProjectDirectory)\Assets\AppIcon.ico" DestinationFiles="$(PublishDir)AppIcon.ico" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 
 </Project>

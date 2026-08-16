@@ -336,6 +336,66 @@ static void Render() {
     }
 }
 
+// ---------- position reports over a dedicated OUTBOUND pipe ----------
+// Never write on the main (inbound) pipe handle: its pipe thread sits in a
+// blocking ReadFile, and a second simultaneous operation on the same
+// byte-mode handle deadlocks both threads. The report pipe is written only
+// by the window thread and read only by the host — one direction each.
+static const wchar_t* RPT_PIPE_NAME = L"\\\\.\\pipe\\MusicPlayerDesktopLyricsRpt";
+static CRITICAL_SECTION g_pipeCs;
+static HANDLE g_rptPipe = nullptr;     // current report-pipe instance
+
+static void PipeWrite(const std::string& s) {
+    EnterCriticalSection(&g_pipeCs);
+    HANDLE h = g_rptPipe;
+    LeaveCriticalSection(&g_pipeCs);
+    if (!h || h == INVALID_HANDLE_VALUE) return;
+
+    DWORD wr = 0;
+    if (!WriteFile(h, s.c_str(), (DWORD)s.size(), &wr, nullptr) || wr == 0) {
+        // Host went away: clear so the report thread re-listens and recycles.
+        EnterCriticalSection(&g_pipeCs);
+        if (g_rptPipe == h) g_rptPipe = nullptr;
+        LeaveCriticalSection(&g_pipeCs);
+    }
+}
+
+// Report the current overlay position back to the host so it can persist it.
+static void ReportPosition() {
+    char b[96];
+    snprintf(b, sizeof b, "{\"t\":\"pos\",\"x\":%ld,\"y\":%ld}\n", (long)g_x, (long)g_y);
+    PipeWrite(b);
+}
+
+static DWORD WINAPI ReportPipeThread(LPVOID) {
+    while (true) {
+        HANDLE h = CreateNamedPipeW(RPT_PIPE_NAME,
+            PIPE_ACCESS_OUTBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            1, 4096, 4096, 0, nullptr);
+        if (h == INVALID_HANDLE_VALUE) { Sleep(500); continue; }
+
+        if (ConnectNamedPipe(h, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
+            EnterCriticalSection(&g_pipeCs);
+            g_rptPipe = h;
+            LeaveCriticalSection(&g_pipeCs);
+
+            // Park until a failed write clears g_rptPipe (host disconnected),
+            // then recycle the handle and listen for the next host session.
+            while (true) {
+                Sleep(250);
+                EnterCriticalSection(&g_pipeCs);
+                HANDLE cur = g_rptPipe;
+                LeaveCriticalSection(&g_pipeCs);
+                if (cur != h) break;
+            }
+        }
+
+        DisconnectNamedPipe(h);
+        CloseHandle(h);
+    }
+    return 0;
+}
+
 // ---------- command dispatch ----------
 static void ApplyCommand(const std::string& line) {
     JsonVal root; size_t i = 0;
@@ -379,6 +439,19 @@ static void ApplyCommand(const std::string& line) {
             SetWindowPos(g_hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
         }
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
+    } else if (type == "pos") {
+        // Host restores a persisted position (also suppresses the default
+        // bottom-center placement that would otherwise run on first render).
+        auto* px = FindMember(root, "x");
+        auto* py = FindMember(root, "y");
+        if (px && px->type == JsonVal::NUM && py && py->type == JsonVal::NUM) {
+            g_x = (int)px->num;
+            g_y = (int)py->num;
+            g_positioned = true;
+            if (g_hwnd)
+                SetWindowPos(g_hwnd, HWND_TOPMOST, g_x, g_y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
+        }
     } else if (type == "show") {
         EnterCriticalSection(&g_cs); g_state.visible = true; LeaveCriticalSection(&g_cs);
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
@@ -445,9 +518,14 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             }
             return 0;
         case WM_LBUTTONUP:
-            if (g_dragging) { g_dragging = false; ReleaseCapture(); }
+            if (g_dragging) {
+                g_dragging = false;
+                ReleaseCapture();
+                ReportPosition();   // persist the new position via the host
+            }
             return 0;
         case WM_DESTROY:
+            ReportPosition();       // last chance: where the user left it
             PostQuitMessage(0);
             return 0;
         default:
@@ -459,6 +537,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     InitializeCriticalSection(&g_cs);
+    InitializeCriticalSection(&g_pipeCs);
 
     g_dpiScale = GetDpiForSystem() / 96.0f;
 
@@ -481,6 +560,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ShowWindow(g_hwnd, SW_HIDE);
 
     CreateThread(nullptr, 0, PipeThread, nullptr, 0, nullptr);
+    CreateThread(nullptr, 0, ReportPipeThread, nullptr, 0, nullptr);
 
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {
@@ -493,6 +573,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     if (g_hdcMem) DeleteDC(g_hdcMem);
     if (g_dwriteFactory) g_dwriteFactory->Release();
     if (g_d2dFactory) g_d2dFactory->Release();
+    DeleteCriticalSection(&g_pipeCs);
     DeleteCriticalSection(&g_cs);
     CoUninitialize();
     return 0;

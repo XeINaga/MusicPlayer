@@ -27,6 +27,14 @@ public static class LyricsParser
     private static readonly Regex TimeTag =
         new(@"\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]", RegexOptions.Compiled);
 
+    // Enhanced-LRC word-level tags: <mm:ss.xx> ... stripped from the text.
+    private static readonly Regex WordTimeTag =
+        new(@"<\d{1,2}:\d{1,2}(?:[.:]\d{1,3})?>", RegexOptions.Compiled);
+
+    // [offset:±ms] metadata tag (positive = show lyrics earlier).
+    private static readonly Regex OffsetTag =
+        new(@"\[offset\s*:\s*([+-]?\d+)\s*\]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
     private static readonly string[] RomajiSuffixes = { ".romaji", ".roma", ".rom" };
 
     private static readonly string[] TranslationSuffixes =
@@ -43,8 +51,10 @@ public static class LyricsParser
     /// When <paramref name="explicitLyricPath"/> is provided (a user-assigned file),
     /// it is used as the main lyrics source, overriding auto-detection. Companion
     /// files (romaji / translation) are still merged by the audio's base name.
+    /// <paramref name="forcedEncoding"/> ("gbk"/"shift_jis"/"big5"/"utf-8"/null=auto)
+    /// overrides charset detection for every lyric file read.
     /// </summary>
-    public static LyricDocument? Parse(string audioPath, string? explicitLyricPath)
+    public static LyricDocument? Parse(string audioPath, string? explicitLyricPath, string? forcedEncoding = null)
     {
         if (string.IsNullOrWhiteSpace(audioPath))
             return null;
@@ -59,14 +69,14 @@ public static class LyricsParser
         // 1) Main lyrics file: explicit assignment wins, otherwise auto-detect.
         var mainFile = (explicitLyricPath != null && File.Exists(explicitLyricPath))
             ? explicitLyricPath
-            : FindMainLyric(basePath);
+            : FindMainLyric(basePath, forcedEncoding);
 
         if (mainFile != null)
         {
             if (mainFile.EndsWith(".srt", System.StringComparison.OrdinalIgnoreCase))
-                MergeSrt(mainFile, doc, map);
+                MergeSrt(mainFile, doc, map, forcedEncoding);
             else
-                MergeMain(mainFile, doc, map);
+                MergeMain(mainFile, doc, map, forcedEncoding);
         }
 
         // 2) Companion files (LRC only; timestamps merge by time)
@@ -74,14 +84,14 @@ public static class LyricsParser
         {
             var f = basePath + s + ".lrc";
             if (File.Exists(f))
-                MergeCompanion(f, doc, map, LyricRole.Romaji);
+                MergeCompanion(f, doc, map, LyricRole.Romaji, forcedEncoding);
         }
 
         foreach (var s in TranslationSuffixes)
         {
             var f = basePath + s + ".lrc";
             if (File.Exists(f))
-                MergeCompanion(f, doc, map, LyricRole.Translation);
+                MergeCompanion(f, doc, map, LyricRole.Translation, forcedEncoding);
         }
 
         if (doc.Lines.Count == 0)
@@ -91,7 +101,7 @@ public static class LyricsParser
         return doc;
     }
 
-    private static string? FindMainLyric(string basePath)
+    private static string? FindMainLyric(string basePath, string? enc)
     {
         var lrc = basePath + ".lrc";
         if (File.Exists(lrc))
@@ -102,7 +112,7 @@ public static class LyricsParser
             return srt;
 
         var txt = basePath + ".txt";
-        if (File.Exists(txt) && EncodingHelper.ReadText(txt).Contains('['))
+        if (File.Exists(txt) && EncodingHelper.ReadText(txt, enc).Contains('['))
             return txt;
 
         return null;
@@ -110,9 +120,17 @@ public static class LyricsParser
 
     // ---------- LRC / TXT ----------
 
-    private static void MergeMain(string path, LyricDocument doc, Dictionary<System.TimeSpan, LyricLine> map)
+    private static void MergeMain(string path, LyricDocument doc, Dictionary<System.TimeSpan, LyricLine> map, string? enc)
     {
-        var raw = ParseLrc(EncodingHelper.ReadText(path));
+        var text = EncodingHelper.ReadText(path, enc);
+
+        // Honor the file's own [offset:±ms] tag (positive = earlier).
+        var offsetMs = 0;
+        var om = OffsetTag.Match(text);
+        if (om.Success && int.TryParse(om.Groups[1].Value, out var parsedOffset))
+            offsetMs = parsedOffset;
+
+        var raw = ParseLrc(text, offsetMs);
         var grouped = raw.GroupBy(r => r.Time).OrderBy(g => g.Key);
         foreach (var g in grouped)
         {
@@ -124,9 +142,9 @@ public static class LyricsParser
         }
     }
 
-    private static void MergeCompanion(string path, LyricDocument doc, Dictionary<System.TimeSpan, LyricLine> map, LyricRole role)
+    private static void MergeCompanion(string path, LyricDocument doc, Dictionary<System.TimeSpan, LyricLine> map, LyricRole role, string? enc)
     {
-        var raw = ParseLrc(EncodingHelper.ReadText(path));
+        var raw = ParseLrc(EncodingHelper.ReadText(path, enc));
         var grouped = raw.GroupBy(r => r.Time).OrderBy(g => g.Key);
         foreach (var g in grouped)
         {
@@ -147,7 +165,7 @@ public static class LyricsParser
         }
     }
 
-    private static List<(System.TimeSpan Time, string Text)> ParseLrc(string text)
+    private static List<(System.TimeSpan Time, string Text)> ParseLrc(string text, int offsetMs = 0)
     {
         var result = new List<(System.TimeSpan, string)>();
 
@@ -158,7 +176,8 @@ public static class LyricsParser
             if (matches.Count == 0)
                 continue;
 
-            var body = TimeTag.Replace(line, string.Empty).Trim();
+            // Strip enhanced-LRC word tags so "<00:01.50>word" becomes "word".
+            var body = WordTimeTag.Replace(TimeTag.Replace(line, string.Empty), string.Empty).Trim();
 
             foreach (Match m in matches)
             {
@@ -178,7 +197,10 @@ public static class LyricsParser
                     };
                 }
 
-                result.Add((new System.TimeSpan(0, 0, minutes, seconds, milliseconds), body));
+                var time = new System.TimeSpan(0, 0, minutes, seconds, milliseconds);
+                if (offsetMs != 0)
+                    time -= System.TimeSpan.FromMilliseconds(offsetMs);
+                result.Add((time, body));
             }
         }
 
@@ -187,9 +209,9 @@ public static class LyricsParser
 
     // ---------- SRT ----------
 
-    private static void MergeSrt(string path, LyricDocument doc, Dictionary<System.TimeSpan, LyricLine> map)
+    private static void MergeSrt(string path, LyricDocument doc, Dictionary<System.TimeSpan, LyricLine> map, string? enc)
     {
-        var text = EncodingHelper.ReadText(path)
+        var text = EncodingHelper.ReadText(path, enc)
             .Replace("\r\n", "\n")
             .Replace('\r', '\n');
 

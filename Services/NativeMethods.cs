@@ -30,6 +30,11 @@ internal static class NativeMethods
 
     public const int SM_CXSCREEN = 0;
     public const int SM_CYSCREEN = 1;
+    // Virtual screen = union of ALL monitors (multi-monitor safe).
+    public const int SM_XVIRTUALSCREEN = 76;
+    public const int SM_YVIRTUALSCREEN = 77;
+    public const int SM_CXVIRTUALSCREEN = 78;
+    public const int SM_CYVIRTUALSCREEN = 79;
 
     public static readonly IntPtr HWND_TOPMOST = new(-1);
 

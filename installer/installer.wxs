@@ -2,7 +2,7 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package Name="MusicPlayer"
            Manufacturer="MusicPlayer"
-           Version="1.0.0.0"
+           Version="1.1.0.0"
            Language="1033"
            Codepage="65001"
            UpgradeCode="{6F3E8C2A-1B4D-4E7A-9C5B-2D8E0F1A3B4C}"

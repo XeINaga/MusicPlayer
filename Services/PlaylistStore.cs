@@ -17,11 +17,14 @@ namespace MusicPlayer.Services;
 /// </summary>
 public sealed class PlaylistStore
 {
+    // Properties (not static readonly fields!) so a runtime change of the data
+    // directory (settings page) is reflected immediately instead of being
+    // baked in on first access and silently writing to the OLD directory.
     private static string AppDir => DataLocation.Root;
-    private static readonly string PlaylistFile = Path.Combine(AppDir, "playlist.json");
-    private static readonly string RecentFile = Path.Combine(AppDir, "recent.json");
-    private static readonly string PlaylistsFile = Path.Combine(AppDir, "playlists.json");
-    private static readonly string ProgressFile = Path.Combine(AppDir, "progress.json");
+    private static string PlaylistFile => Path.Combine(AppDir, "playlist.json");
+    private static string RecentFile => Path.Combine(AppDir, "recent.json");
+    private static string PlaylistsFile => Path.Combine(AppDir, "playlists.json");
+    private static string ProgressFile => Path.Combine(AppDir, "progress.json");
 
     private static void EnsureDir()
     {
@@ -37,7 +40,7 @@ public sealed class PlaylistStore
         {
             EnsureDir();
             var data = new PlaylistData { Paths = new List<string>(paths) };
-            File.WriteAllText(PlaylistFile, JsonSerializer.Serialize(data), Encoding.UTF8);
+            AtomicFile.WriteAllText(PlaylistFile, JsonSerializer.Serialize(data), Encoding.UTF8);
         }
         catch { /* best-effort */ }
     }
@@ -62,7 +65,7 @@ public sealed class PlaylistStore
         {
             EnsureDir();
             var data = new RecentData { Paths = new List<string>(paths) };
-            File.WriteAllText(RecentFile, JsonSerializer.Serialize(data), Encoding.UTF8);
+            AtomicFile.WriteAllText(RecentFile, JsonSerializer.Serialize(data), Encoding.UTF8);
         }
         catch { /* best-effort */ }
     }
@@ -87,7 +90,7 @@ public sealed class PlaylistStore
         {
             EnsureDir();
             var data = new PlaylistsData { Items = new List<PlaylistDto>(lists) };
-            File.WriteAllText(PlaylistsFile, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+            AtomicFile.WriteAllText(PlaylistsFile, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
         }
         catch { /* best-effort */ }
     }
@@ -112,7 +115,7 @@ public sealed class PlaylistStore
         {
             EnsureDir();
             var data = new ProgressData { Index = index, PositionMs = (long)position.TotalMilliseconds, Path = path };
-            File.WriteAllText(ProgressFile, JsonSerializer.Serialize(data), Encoding.UTF8);
+            AtomicFile.WriteAllText(ProgressFile, JsonSerializer.Serialize(data), Encoding.UTF8);
         }
         catch { /* best-effort */ }
     }
@@ -137,7 +140,9 @@ public sealed class PlaylistStore
         sb.AppendLine("#EXTM3U");
         foreach (var t in tracks)
         {
-            sb.AppendLine($"#EXTINF:-1,{t.Artist} - {t.Title}");
+            // Write the real duration (seconds) instead of a fixed -1.
+            var secs = Math.Max(0, (int)t.Duration.TotalSeconds);
+            sb.AppendLine($"#EXTINF:{secs},{t.Artist} - {t.Title}");
             sb.AppendLine(t.Path);
         }
 

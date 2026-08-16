@@ -11,14 +11,38 @@ namespace MusicPlayer.Services;
 /// </summary>
 public static class EncodingHelper
 {
-    /// <summary>Read a text file with best-effort encoding detection.</summary>
-    public static string ReadText(string path)
+    /// <summary>
+    /// Read a text file with best-effort encoding detection. Pass a forced
+    /// encoding name ("gbk" / "shift_jis" / "big5" / "utf-8") to override
+    /// detection — useful for e.g. Shift-JIS lyric files that GBK mis-decodes.
+    /// </summary>
+    public static string ReadText(string path, string? forcedEncodingName = null)
     {
         if (!File.Exists(path))
             return string.Empty;
 
         var bytes = File.ReadAllBytes(path);
-        return Detect(bytes).GetString(bytes);
+        var forced = ResolveForced(forcedEncodingName);
+        return (forced ?? Detect(bytes)).GetString(bytes);
+    }
+
+    private static Encoding? ResolveForced(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Equals("auto", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        try
+        {
+            return name.ToLowerInvariant() switch
+            {
+                "utf-8" => new UTF8Encoding(false),
+                _ => Encoding.GetEncoding(name),
+            };
+        }
+        catch
+        {
+            return null; // unknown name / codepage provider missing -> auto
+        }
     }
 
     /// <summary>Detect the most likely encoding for the given bytes.</summary>

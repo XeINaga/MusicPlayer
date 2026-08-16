@@ -26,7 +26,7 @@ def sanitize(s: str) -> str:
 
 def main():
     publish_dir = sys.argv[1] if len(sys.argv) > 1 else \
-        r"bin\Release\net10.0-windows10.0.19041.0\win-x64\publish"
+        r"bin\Release\net10.0-windows10.0.26100.0\win-x64\publish"
     out = sys.argv[2] if len(sys.argv) > 2 else "installer/files.wxs"
     publish_dir = os.path.abspath(publish_dir)
 

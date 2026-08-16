@@ -40,10 +40,7 @@ public static class LyricBindingStore
     {
         try
         {
-            var dir = Path.GetDirectoryName(FilePath);
-            if (dir != null)
-                Directory.CreateDirectory(dir);
-            File.WriteAllText(FilePath, JsonSerializer.Serialize(_map, new JsonSerializerOptions { WriteIndented = true }));
+            AtomicFile.WriteAllText(FilePath, JsonSerializer.Serialize(_map, new JsonSerializerOptions { WriteIndented = true }), System.Text.Encoding.UTF8);
         }
         catch
         {

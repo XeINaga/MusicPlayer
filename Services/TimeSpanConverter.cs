@@ -14,6 +14,8 @@ public sealed class TimeSpanConverter : IValueConverter
         if (value is TimeSpan ts && ts.TotalSeconds > 0)
         {
             var total = (int)ts.TotalSeconds;
+            if (total >= 3600)
+                return $"{total / 3600}:{total / 60 % 60:D2}:{total % 60:D2}";
             return $"{total / 60}:{total % 60:D2}";
         }
 
