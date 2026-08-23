@@ -1,0 +1,3 @@
+LIBRARY normalize
+EXPORTS
+NormalizeInstallDir
