@@ -24,6 +24,14 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
+  <!-- The installer folder holds its OWN compilation units (installer/uninstall/
+       Uninstall.cs is built separately by build_msi.ps1 with the .NET Framework
+       csc). Exclude it from the app's default Compile glob or the app build
+       fails with CS0017 (multiple entry points). -->
+  <ItemGroup>
+    <Compile Remove="installer\**\*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="FFmpegInteropX" Version="2.1.0.81200" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260710003" />
