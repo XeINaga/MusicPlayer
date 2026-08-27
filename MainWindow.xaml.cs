@@ -43,6 +43,7 @@ public sealed partial class MainWindow : Window
 
     private LyricDocument? _lyrics;
     private readonly List<StackPanel> _lyricPanels = new();
+    private FrameworkElement? _lyricScrollTarget;
     private int _currentLineIndex = -1;
     private int _loadedIndex = -1;
 
@@ -361,6 +362,11 @@ public sealed partial class MainWindow : Window
             TrackGrid.Visibility = Visibility.Collapsed;
             TrackList.Visibility = Visibility.Collapsed;
             SettingsScroll.Visibility = Visibility.Collapsed;
+
+            // While the panel was collapsed the lyric ScrollViewer had no
+            // layout, so earlier auto-scrolls were discarded — re-center the
+            // current line once this visibility pass has been laid out.
+            _dispatcher.TryEnqueue(ScrollLyricToCurrent);
         }
         else
         {
@@ -901,6 +907,8 @@ public sealed partial class MainWindow : Window
         TrackList.SelectionMode = mode;
         TrackList.CanReorderItems = CanReorderPlaylist();
         BtnBatchAdd.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
+        BtnSelectAll.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
+        BtnSelectNone.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>In-place drag reordering of a playlist is only meaningful when
@@ -932,6 +940,23 @@ public sealed partial class MainWindow : Window
             flyout.Items.Add(item);
         }
         flyout.ShowAt(BtnBatchAdd);
+    }
+
+    private void BtnSelectAll_Click(object sender, RoutedEventArgs e)
+    {
+        // Both lists share the same Track items; SelectAll on the hidden one
+        // keeps selection consistent when the user swaps card/list view.
+        TrackGrid.SelectAll();
+        TrackList.SelectAll();
+    }
+
+    private void BtnSelectNone_Click(object sender, RoutedEventArgs e)
+    {
+        // Clear() must happen while SelectionMode still ACCEPTS selection —
+        // once it is None the collection disconnects and Clear throws
+        // COMException 0x8000FFFF (see ApplySelectionMode).
+        try { TrackGrid.SelectedItems.Clear(); } catch { }
+        try { TrackList.SelectedItems.Clear(); } catch { }
     }
 
     // ---------- Drag & drop (onto the content grid) ----------
@@ -1324,6 +1349,7 @@ public sealed partial class MainWindow : Window
         }
 
         QueueList.SelectedIndex = _playback.CurrentIndex;
+        ScrollQueueToCurrent();
     }
 
     // ---------- Transport ----------
@@ -1400,6 +1426,24 @@ public sealed partial class MainWindow : Window
 
     private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        if (ctrl && e.Key == Windows.System.VirtualKey.A)
+        {
+            if (!_selectMode
+                || _currentView is not (NavView.Local or NavView.Recent or NavView.Playlist))
+                return;
+
+            // Let the text box keep Ctrl+A for its own select-all.
+            if (FocusManager.GetFocusedElement() is TextBox)
+                return;
+
+            BtnSelectAll_Click(sender, e);
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key != Windows.System.VirtualKey.Space)
             return;
 
@@ -1424,11 +1468,44 @@ public sealed partial class MainWindow : Window
 
     // ---------- Queue panel ----------
 
-    private void BtnQueueToggle_Click(object sender, RoutedEventArgs e) =>
-        QueuePanel.Visibility = QueuePanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+    private void BtnQueueToggle_Click(object sender, RoutedEventArgs e)
+    {
+        var showing = QueuePanel.Visibility != Visibility.Visible;
+        QueuePanel.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
+        if (showing)
+        {
+            // Let the panel run one layout pass first so ScrollIntoView has
+            // realizable items to scroll to.
+            _dispatcher.TryEnqueue(ScrollQueueToCurrent);
+        }
+    }
 
     private void BtnQueueClose_Click(object sender, RoutedEventArgs e) =>
         QueuePanel.Visibility = Visibility.Collapsed;
+
+    private void BtnQueueClear_Click(object sender, RoutedEventArgs e)
+    {
+        _playback.Clear();
+        _boundQueue = null;
+        QueueList.ItemsSource = null;
+        QueueList.SelectedIndex = -1;
+        ResetNowPlaying();
+        LoadLyricsFor(-1);
+    }
+
+    /// <summary>Keep the queue popup following the currently playing track.</summary>
+    private void ScrollQueueToCurrent()
+    {
+        if (QueuePanel.Visibility != Visibility.Visible)
+            return;
+
+        var q = _playback.Queue;
+        var i = _playback.CurrentIndex;
+        if (q == null || i < 0 || i >= q.Count)
+            return;
+
+        QueueList.ScrollIntoView(q[i]);
+    }
 
     private void QueueList_ItemClick(object sender, ItemClickEventArgs e)
     {
@@ -1583,6 +1660,7 @@ public sealed partial class MainWindow : Window
         LoadLyricsFor(index);
 
         QueueList.SelectedIndex = _playback.CurrentIndex;
+        ScrollQueueToCurrent();
     }
 
     private void OnPlaybackMediaFailed(string message)
@@ -1642,6 +1720,7 @@ public sealed partial class MainWindow : Window
     {
         _loadedIndex = index;
         _currentLineIndex = -1;
+        _lyricScrollTarget = null;
         LyricStack.Children.Clear();
         _lyricPanels.Clear();
 
@@ -1682,6 +1761,10 @@ public sealed partial class MainWindow : Window
         }
 
         BuildLyricUI(_lyrics);
+
+        // Highlight + center right away (e.g. session restore while paused)
+        // instead of waiting for a position tick that may never arrive.
+        UpdateLyricHighlight(_playback.Position);
     }
 
     private void BindCurrentCover(Track track)
@@ -1810,11 +1893,34 @@ public sealed partial class MainWindow : Window
         if (idx >= 0 && idx < _lyricPanels.Count)
         {
             SetLineActive(_lyricPanels[idx], true);
-            var tb = _lyricPanels[idx];
-            LyricScroll.ChangeView(null, tb.ActualOffset.Y - LyricScroll.ActualHeight / 2 + tb.ActualHeight / 2, null);
+            _lyricScrollTarget = _lyricPanels[idx];
+            _dispatcher.TryEnqueue(ScrollLyricToCurrent);
         }
 
         PushDesktop(idx);
+    }
+
+    /// <summary>
+    /// Center the current lyric line in the lyric ScrollViewer. Runs through a
+    /// dispatcher pass so freshly-built panels have real offsets; forces a
+    /// synchronous layout first because ActualOffset is stale until measured.
+    /// </summary>
+    private void ScrollLyricToCurrent()
+    {
+        var target = _lyricScrollTarget;
+        if (target == null)
+            return;
+
+        target.UpdateLayout();
+        LyricScroll.UpdateLayout();
+
+        // No layout yet (now-playing panel still collapsed) → nothing to scroll.
+        if (LyricScroll.ActualHeight <= 0 || target.ActualHeight <= 0)
+            return;
+
+        var top = target.ActualOffset.Y - LyricScroll.ActualHeight / 2 + target.ActualHeight / 2;
+        if (top > 0)
+            LyricScroll.ChangeView(null, top, null);
     }
 
     private void PushDesktop(int idx)
