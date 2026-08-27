@@ -17,7 +17,9 @@ public sealed class Track : INotifyPropertyChanged
     private TimeSpan _duration;
     private ImageSource? _cover;
     private DateTime _lastPlayed;
-    private readonly DateTime _dateAdded = DateTime.Now;
+    private DateTime _dateAdded = DateTime.Now;
+    private int _playCount;
+    private bool _favorite;
 
     public Track(string path)
     {
@@ -77,7 +79,25 @@ public sealed class Track : INotifyPropertyChanged
     }
 
     /// <summary>When this track was added to the library (used for "添加时间" sorting).</summary>
-    public DateTime DateAdded => _dateAdded;
+    public DateTime DateAdded
+    {
+        get => _dateAdded;
+        set { _dateAdded = value; OnChanged(nameof(DateAdded)); }
+    }
+
+    /// <summary>How many times this track has been played.</summary>
+    public int PlayCount
+    {
+        get => _playCount;
+        set { _playCount = value; OnChanged(nameof(PlayCount)); }
+    }
+
+    /// <summary>Whether the user has marked this track as a favorite.</summary>
+    public bool Favorite
+    {
+        get => _favorite;
+        set { _favorite = value; OnChanged(nameof(Favorite)); }
+    }
 
     /// <summary>
     /// Manually assigned lyric file (absolute path). When set, the lyrics engine

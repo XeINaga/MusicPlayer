@@ -34,6 +34,15 @@ public partial class App : Application
         try
         {
             MainWindow = new MainWindow();
+
+            // Single-instance guard: if another instance is already running,
+            // signal it to bring its window to the foreground and exit this one.
+            if (!SingleInstance.TryAcquire(MainWindow))
+            {
+                Environment.Exit(0);
+                return;
+            }
+
             MainWindow.Activate();
         }
         catch (Exception ex)
