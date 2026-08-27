@@ -322,7 +322,11 @@
                         <primitives:ToggleButton x:Name="BtnSelectMode" Content="多选" Background="Transparent"
                                                  BorderBrush="{StaticResource BorderSoft}" CornerRadius="9"
                                                  Visibility="Collapsed" Checked="BtnSelectMode_Checked" Unchecked="BtnSelectMode_Unchecked"
-                                                 ToolTipService.ToolTip="进入多选模式，批量添加到歌单" />
+                                                 ToolTipService.ToolTip="进入多选模式，批量添加到歌单（Ctrl+A 全选）" />
+                        <Button x:Name="BtnSelectAll" Content="全选" Style="{StaticResource ActionButtonStyle}"
+                                Visibility="Collapsed" Click="BtnSelectAll_Click" ToolTipService.ToolTip="选中当前列表中的全部歌曲（Ctrl+A）" />
+                        <Button x:Name="BtnSelectNone" Content="全不选" Style="{StaticResource ActionButtonStyle}"
+                                Visibility="Collapsed" Click="BtnSelectNone_Click" />
                         <Button x:Name="BtnBatchAdd" Content="添加到歌单" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnBatchAdd_Click" />
                     </StackPanel>
                 </StackPanel>
@@ -530,10 +534,25 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
-            <Grid Grid.Row="0" Margin="18,12,18,10">
+            <Grid Grid.Row="0" Margin="18,10,10,8">
                 <TextBlock x:Name="QueueTitle" Text="播放队列" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" VerticalAlignment="Center" />
-                <Button x:Name="BtnQueueClose" Content="&#xE10A;" FontFamily="Segoe MDL2 Assets" Width="32" Height="30" HorizontalAlignment="Right"
-                        Style="{StaticResource GhostIconButtonStyle}" Padding="0" Click="BtnQueueClose_Click" />
+                <!-- FontIcon children instead of glyph-string content: a raw
+                     &#xE10A; text glyph gets vertically clipped inside the
+                     fixed-size button chrome, the FontIcon never does. -->
+                <StackPanel Orientation="Horizontal" Spacing="2" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button x:Name="BtnQueueClear" Style="{StaticResource GhostIconButtonStyle}"
+                            Width="34" Height="32" Padding="0"
+                            Click="BtnQueueClear_Click" ToolTipService.ToolTip="清空播放队列">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE74D;" FontSize="14"
+                                  Foreground="{StaticResource TextSecondary}" />
+                    </Button>
+                    <Button x:Name="BtnQueueClose" Style="{StaticResource GhostIconButtonStyle}"
+                            Width="34" Height="32" Padding="0"
+                            Click="BtnQueueClose_Click" ToolTipService.ToolTip="关闭播放队列">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE10A;" FontSize="14"
+                                  Foreground="{StaticResource TextSecondary}" />
+                    </Button>
+                </StackPanel>
             </Grid>
             <ListView x:Name="QueueList" Grid.Row="1" Background="Transparent" BorderThickness="0" Margin="10,0,10,10"
                       CanReorderItems="True" AllowDrop="True"
