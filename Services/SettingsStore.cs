@@ -39,15 +39,30 @@ public sealed class AppSettings
 
     // Player state persisted across launches.
     public double Volume { get; set; } = 0.8;          // 0..1
+    public double PlaybackRate { get; set; } = 1.0;     // 0.5–2.0
     public bool CoverSpin { get; set; } = true;        // rotate the vinyl while playing
     public string ViewMode { get; set; } = "Grid";     // "Grid" | "List"
     public string SortBy { get; set; } = "Default";    // Default|Title|Artist|Album|DateAdded|Duration
+    /// <summary>Crossfade duration in ms: 0 = off, 1000, 2000, 3000.</summary>
+    public int CrossfadeDurationMs { get; set; }
+
+    // Global hotkeys.
+    public bool UseGlobalHotkeys { get; set; }
+
+    /// <summary>Mirrors the auto-start registry state (registry is the source of truth on launch).</summary>
+    public bool AutoStart { get; set; }
 
     // Last window geometry (px). X/Y < 0 means "use centered default".
     public int WindowW { get; set; } = 1380;
     public int WindowH { get; set; } = 860;
     public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;
+
+    // Last.fm scrobbling.
+    public string LastFmApiKey { get; set; } = "";
+    public string LastFmApiSecret { get; set; } = "";
+    public string LastFmSessionKey { get; set; } = "";
+    public string LastFmUsername { get; set; } = "";
 }
 
 public sealed class SettingsStore

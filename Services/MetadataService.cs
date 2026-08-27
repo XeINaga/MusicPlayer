@@ -3,8 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Storage.Streams;
 using MusicPlayer.Models;
 using TagLib;
 
@@ -64,12 +62,10 @@ public static class MetadataService
         if (ct.IsCancellationRequested)
             return;
 
-        // --- UI thread: build the cover bitmap and apply metadata ---
+        // --- UI thread: build the cover bitmap (disk-cached) and apply metadata ---
         dispatcher.TryEnqueue(() =>
         {
-            ImageSource? cover = null;
-            if (coverBytes != null)
-                cover = CreateImage(coverBytes);
+            var cover = CoverCache.GetOrLoad(track.Path, coverBytes) as ImageSource;
 
             track.SetMetadata(
                 title ?? track.Title,
@@ -78,28 +74,5 @@ public static class MetadataService
                 duration,
                 cover);
         });
-    }
-
-    private static BitmapImage? CreateImage(byte[] bytes)
-    {
-        try
-        {
-            var bmp = new BitmapImage();
-            // Decode downscaled: covers are commonly 1000–3000px; keeping them
-            // at full resolution for thousands of tracks wastes gigabytes.
-            // 480px covers the 164px cards and the 232px vinyl at 1.5x DPI.
-            bmp.DecodePixelWidth = 480;
-            using var stream = new InMemoryRandomAccessStream();
-            using var writer = new DataWriter(stream);
-            writer.WriteBytes(bytes);
-            writer.StoreAsync().GetResults();
-            stream.Seek(0);
-            bmp.SetSource(stream);
-            return bmp;
-        }
-        catch
-        {
-            return null;
-        }
     }
 }

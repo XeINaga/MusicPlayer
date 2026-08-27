@@ -6,6 +6,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading.Tasks;
 using FFmpegInteropX;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
 using Windows.Media;
 using Windows.Media.Core;
 using Windows.Media.Playback;
@@ -46,6 +47,18 @@ public sealed class PlaybackService
     // Random mode: real "previous" needs a history of what actually played.
     private readonly Stack<int> _randomHistory = new();
 
+    // Crossfade state: fades volume out over 200ms then loads the next track
+    // and fades it in over CrossfadeDurationMs (0 = off, instant switch).
+    private int _crossfadeDurationMs;
+    private double _targetVolume = 1.0;
+    private readonly DispatcherTimer _fadeTimer = new();
+    private bool _fadingOut;
+    private double _fadeFrom;
+    private double _fadeTo;
+    private TimeSpan _fadeElapsed;
+    private static readonly TimeSpan FadeOutSpan = TimeSpan.FromMilliseconds(200);
+    private const double FadeTickMs = 16; // ~60 fps
+
     public event Action<TimeSpan>? PositionTick;
     public event Action<MediaPlaybackState>? StateChanged;
     public event Action<int>? CurrentIndexChanged;
@@ -55,6 +68,13 @@ public sealed class PlaybackService
     public event Action<string>? MediaFailed;
     /// <summary>Raised when the play mode changes (SMTC shuffle/repeat buttons).</summary>
     public event Action? ModeChanged;
+
+    /// <summary>Crossfade duration in ms. 0 = off (instant switch).</summary>
+    public int CrossfadeDurationMs
+    {
+        get => _crossfadeDurationMs;
+        set => _crossfadeDurationMs = Math.Max(0, value);
+    }
 
     private SystemMediaTransportControls? _smtc;
     private bool _smtcBound;
@@ -94,6 +114,10 @@ public sealed class PlaybackService
             _smtc.ButtonPressed += OnSmtcButtonPressed;
             _smtcBound = true;
         }
+
+        // Crossfade timer: ticks at ~60 fps, drives the volume ramp.
+        _fadeTimer.Interval = TimeSpan.FromMilliseconds(FadeTickMs);
+        _fadeTimer.Tick += OnFadeTick;
     }
 
     // Play/Pause/Next/Previous normally arrive through the CommandManager
@@ -177,7 +201,16 @@ public sealed class PlaybackService
         RememberRandomHistory();
         _index = n;
         CurrentIndexChanged?.Invoke(_index);
-        LoadCurrent(play: true);
+
+        if (_crossfadeDurationMs > 0)
+        {
+            _pendingTargetVolume = Volume;
+            StartCrossfade(n);
+        }
+        else
+        {
+            LoadCurrent(play: true);
+        }
     }
 
     public void Previous()
@@ -197,13 +230,29 @@ public sealed class PlaybackService
         {
             _index = _randomHistory.Pop();
             CurrentIndexChanged?.Invoke(_index);
-            LoadCurrent(play: true);
+            if (_crossfadeDurationMs > 0)
+            {
+                _pendingTargetVolume = Volume;
+                StartCrossfade(_index);
+            }
+            else
+            {
+                LoadCurrent(play: true);
+            }
             return;
         }
 
         _index = ComputeNext(false);
         CurrentIndexChanged?.Invoke(_index);
-        LoadCurrent(play: true);
+        if (_crossfadeDurationMs > 0)
+        {
+            _pendingTargetVolume = Volume;
+            StartCrossfade(_index);
+        }
+        else
+        {
+            LoadCurrent(play: true);
+        }
     }
 
     public void MoveTo(int index)
@@ -213,7 +262,15 @@ public sealed class PlaybackService
 
         _index = index;
         CurrentIndexChanged?.Invoke(_index);
-        LoadCurrent(play: true);
+        if (_crossfadeDurationMs > 0)
+        {
+            _pendingTargetVolume = Volume;
+            StartCrossfade(index);
+        }
+        else
+        {
+            LoadCurrent(play: true);
+        }
     }
 
     /// <summary>Adjust the internal index after a track is removed from the queue.</summary>
@@ -248,6 +305,9 @@ public sealed class PlaybackService
     public void Clear()
     {
         _loadToken++; // invalidate any in-flight async load
+        _fadeTimer.Stop();
+        _fadingOut = false;
+        _pendingCrossfadeIndex = -1;
         _player.Pause();
         _player.Source = null;
         _queue = null;
@@ -475,6 +535,21 @@ public sealed class PlaybackService
 
         UpdateSmtcTimeline(force: true);
         MediaOpened?.Invoke();
+
+        // If a crossfade was in progress (fade-out completed, new source just
+        // opened), start the fade-in now.
+        if (_pendingCrossfadeIndex >= 0)
+        {
+            _pendingCrossfadeIndex = -1;
+            _fadingOut = false;
+            _fadeElapsed = TimeSpan.Zero;
+            _fadeFrom = 0;
+            _fadeTo = _pendingTargetVolume;
+            _player.Volume = 0;
+            _player.Play();
+            if (!_fadeTimer.IsEnabled)
+                _fadeTimer.Start();
+        }
     }
 
     private void OnMediaEnded()
@@ -493,7 +568,16 @@ public sealed class PlaybackService
         RememberRandomHistory();
         _index = n;
         CurrentIndexChanged?.Invoke(_index);
-        LoadCurrent(play: true);
+
+        if (_crossfadeDurationMs > 0)
+        {
+            _pendingTargetVolume = Volume;
+            StartCrossfade(n);
+        }
+        else
+        {
+            LoadCurrent(play: true);
+        }
     }
 
     private void RememberRandomHistory()
@@ -538,6 +622,74 @@ public sealed class PlaybackService
             _player.PlaybackSession.Position = position;
     }
 
+    // ---------- Crossfade ----------
+
+    /// <summary>
+    /// Begin a crossfade transition: fade the current source out over 200 ms,
+    /// then load the next track at the new index and fade it in over
+    /// <see cref="CrossfadeDurationMs"/>. If crossfade is off (0) the caller
+    /// should switch immediately instead.
+    /// </summary>
+    private void StartCrossfade(int nextIndex)
+    {
+        if (_fadeTimer.IsEnabled)
+            _fadeTimer.Stop(); // cancel any in-progress fade
+
+        _fadingOut = true;
+        _fadeFrom = _player.Volume;
+        _fadeTo = 0;
+        _fadeElapsed = TimeSpan.Zero;
+        _pendingCrossfadeIndex = nextIndex;
+        _fadeTimer.Start();
+    }
+
+    private int _pendingCrossfadeIndex = -1;
+
+    /// <summary>Target volume the next track should fade in to (user slider).</summary>
+    private double _pendingTargetVolume = 1.0;
+
+    private void OnFadeTick(object? sender, object? e)
+    {
+        var step = TimeSpan.FromMilliseconds(FadeTickMs);
+        _fadeElapsed += step;
+
+        if (_fadingOut)
+        {
+            var span = FadeOutSpan;
+            var t = span.TotalMilliseconds > 0 ? Math.Clamp(_fadeElapsed.TotalMilliseconds / span.TotalMilliseconds, 0, 1) : 1;
+            _player.Volume = Lerp(_fadeFrom, _fadeTo, t);
+
+            if (t >= 1)
+            {
+                // Fade-out complete → load the new track.
+                _fadingOut = false;
+                _fadeElapsed = TimeSpan.Zero;
+                _fadeFrom = 0;
+                _fadeTo = _pendingTargetVolume;
+                LoadCurrent(play: true);
+                // Fade-in will be driven by the same timer (restarted below).
+                // However, LoadCurrent is async; wait for MediaOpened to start
+                // the fade-in so the player has actually decoded the first frame.
+                return;
+            }
+        }
+        else
+        {
+            // Fading in: ramp from 0 to target volume.
+            var durMs = Math.Max(1, _crossfadeDurationMs);
+            var t = Math.Clamp(_fadeElapsed.TotalMilliseconds / durMs, 0, 1);
+            _player.Volume = Lerp(_fadeFrom, _fadeTo, t);
+
+            if (t >= 1)
+            {
+                _fadeTimer.Stop();
+                _player.Volume = _pendingTargetVolume;
+            }
+        }
+    }
+
+    private static double Lerp(double a, double b, double t) => a + (b - a) * t;
+
     public TimeSpan Position => _player.PlaybackSession?.Position ?? TimeSpan.Zero;
 
     public TimeSpan Duration => _player.PlaybackSession?.NaturalDuration ?? TimeSpan.Zero;
@@ -545,7 +697,20 @@ public sealed class PlaybackService
     public double Volume
     {
         get => _player.Volume;
-        set => _player.Volume = Math.Clamp(value, 0.0, 1.0);
+        set
+        {
+            var v = Math.Clamp(value, 0.0, 1.0);
+            _player.Volume = v;
+            _targetVolume = v;
+            if (!_fadingOut && !_fadeTimer.IsEnabled)
+                _pendingTargetVolume = v; // sync target when not crossfading
+        }
+    }
+
+    public double Rate
+    {
+        get => _player.PlaybackRate;
+        set => _player.PlaybackRate = Math.Clamp(value, 0.5, 2.0);
     }
 
     public MediaPlaybackState PlaybackState =>

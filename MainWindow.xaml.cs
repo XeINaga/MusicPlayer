@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -26,7 +27,7 @@ namespace MusicPlayer;
 
 public sealed partial class MainWindow : Window
 {
-    private enum NavView { Local, Recent, Playlist, Settings, NowPlaying }
+    private enum NavView { Local, Recent, Favorites, Albums, MostPlayed, Artists, Playlist, Settings, NowPlaying }
 
     private readonly PlaybackService _playback = new();
     private readonly ObservableCollection<Track> _library = new();
@@ -49,20 +50,53 @@ public sealed partial class MainWindow : Window
 
     private DesktopLyricsOverlay? _desktopLyrics;
     private readonly PlayMode[] _modeOrder = { PlayMode.Sequential, PlayMode.LoopAll, PlayMode.LoopOne, PlayMode.Random };
+    private static readonly double[] _speedCycle = { 1.0, 1.25, 1.5, 2.0, 0.5, 0.75 };
 
     private bool _isSeeking;
     private bool _sized;
     private bool _isPlaying;
+    private bool _libraryDirty;
     private DateTime _lastProgressSave = DateTime.MinValue;
     private Track? _currentTrack;
     private Track? _contextTrack;
     private string _searchText = string.Empty;
 
+    private string _albumFilter = string.Empty;  // non-empty = show tracks from this album
+    private string _artistFilter = string.Empty;  // non-empty = show tracks from this artist
+
     private string _viewMode = "Grid";   // "Grid" | "List"
     private string _sortBy = "Default";   // Default|Title|Artist|Album|DateAdded|Duration
 
+    // Last.fm scrobbling.
+    private readonly LastFmService _lastFm;
+    private readonly List<ScrobbleEntry> _scrobbleQueue = new();
+    private bool _scrobbleTimerRunning;
+    private readonly DispatcherTimer _scrobbleTimer = new();
+    private readonly HashSet<string> _scrobbledThisSession = new(); // dedup per session
+
+    /// <summary>Lightweight DTO for the album grid (not a Track, just grouping metadata).</summary>
+    private sealed class AlbumInfo
+    {
+        public required string Name { get; init; }
+        public required string Artist { get; init; }
+        public required int TrackCount { get; init; }
+        public required IList<Track> Tracks { get; init; }
+        /// <summary>Cover image of the first track (may be null).</summary>
+        public ImageSource? Cover => Tracks.Count > 0 ? Tracks[0].Cover : null;
+    }
+
+    /// <summary>Lightweight DTO for the artist grid.</summary>
+    private sealed class ArtistInfo
+    {
+        public required string ArtistName { get; init; }
+        public required int TrackCount { get; init; }
+        public required IList<Track> Tracks { get; init; }
+        public string TrackCountText => $"{TrackCount} 首歌曲";
+    }
+
     // Close-to-tray support.
     private TrayIconService? _tray;
+    private HotkeyService? _hotkey;
     private bool _forceExit;         // real exit requested (tray menu / second close)
     private bool _trayHintShown;     // balloon only on the first hide per session
 
@@ -80,6 +114,8 @@ public sealed partial class MainWindow : Window
     private Track? _queueDragCurrent;
 
     private readonly DispatcherTimer _discTimer = new();
+    private readonly DispatcherTimer _sleepTimer = new();
+    private readonly DispatcherTimer _searchDebounceTimer = new();
     private readonly RotateTransform _discRotate = new();
     private static readonly Brush CoverPlaceholder =
         new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x15, 0x15, 0x1c));
@@ -108,10 +144,22 @@ public sealed partial class MainWindow : Window
             PlayErrorBar.IsOpen = false;
         };
 
+        _searchDebounceTimer.Interval = TimeSpan.FromMilliseconds(300);
+        _searchDebounceTimer.Tick += (_, _) =>
+        {
+            _searchDebounceTimer.Stop();
+            _searchText = SearchBox.Text.Trim();
+            RefreshDisplay();
+        };
+
         // Restore persisted volume (so it matches the last session).
         _playback.Volume = _settings.Volume;
         VolumeSlider.Value = _settings.Volume * 100.0;
         SeekSlider.Maximum = 1;
+
+        // Restore persisted playback rate.
+        _playback.Rate = _settings.PlaybackRate;
+        UpdateSpeedText();
 
         // Apply the persisted theme color before the first paint.
         ApplyAccentColor();
@@ -130,6 +178,10 @@ public sealed partial class MainWindow : Window
         // Must run before any PlaylistStore / LyricBindingStore access below.
         DataLocation.Apply(_settings.CacheDir);
 
+        // Sync auto-start: registry is the source of truth on launch.
+        _settings.AutoStart = AutoStart.IsAutoStartEnabled();
+        SettingsStore.Save(_settings);
+
         // Restore view + sort preferences.
         _viewMode = _settings.ViewMode == "List" ? "List" : "Grid";
         _sortBy = _settings.SortBy;
@@ -140,20 +192,31 @@ public sealed partial class MainWindow : Window
         _discTimer.Interval = TimeSpan.FromMilliseconds(40);
         _discTimer.Tick += (_, _) =>
         {
-            if (_isPlaying && _settings.CoverSpin)
-                _discRotate.Angle = (_discRotate.Angle + 0.9) % 360;
+            _discRotate.Angle = (_discRotate.Angle + 0.9) % 360;
         };
-        _discTimer.Start();
+
+        // Sleep timer: fires once after the chosen interval to pause playback.
+        _sleepTimer.Tick += OnSleepTimerTick;
+
+        // Last.fm scrobbling service.
+        _lastFm = new LastFmService(_settings);
+        _lastFm.StatusChanged += msg => _dispatcher.TryEnqueue(() => ShowInfoBar(msg));
+        _scrobbleTimer.Interval = TimeSpan.FromSeconds(2);
+        _scrobbleTimer.Tick += (_, _) => FlushScrobbleQueue();
 
         // Restore persisted play mode.
         if (Enum.TryParse<PlayMode>(_settings.DefaultPlayMode, out var m))
             _playback.Mode = m;
         ApplyPlayModeLabel();
 
+        // Restore crossfade duration.
+        _playback.CrossfadeDurationMs = _settings.CrossfadeDurationMs;
+
         UpdateLyricOffsetText();
         LyricRomajiToggle.IsChecked = _settings.LyricShowRomaji;
         LyricTransToggle.IsChecked = _settings.LyricShowTranslation;
         WireSeekSlider();
+        WireVolumeIcon();
 
         // Slider range set in code: this exact slider's Minimum/Maximum as XAML
         // attributes produced a corrupt XBF node ("Failed to assign to property
@@ -172,6 +235,13 @@ public sealed partial class MainWindow : Window
 
         // Modern merged title bar: XAML content extends into the caption area.
         SetupTitleBar();
+
+        // Global hotkeys: register if the user enabled them.
+        if (_settings.UseGlobalHotkeys)
+            EnableHotkeys();
+
+        // Retry any pending Last.fm scrobbles from a previous session.
+        _ = Task.Run(async () => await _lastFm.RetryFailedScrobblesAsync());
     }
 
     /// <summary>
@@ -242,6 +312,28 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // ---------- Global hotkeys ----------
+
+    private void EnableHotkeys()
+    {
+        if (_hotkey != null)
+            return;
+
+        _hotkey = new HotkeyService();
+        _hotkey.PlayPauseRequested += () => _dispatcher.TryEnqueue(() => _playback.PlayPause());
+        _hotkey.NextRequested += () => _dispatcher.TryEnqueue(() => _playback.Next());
+        _hotkey.PreviousRequested += () => _dispatcher.TryEnqueue(() => _playback.Previous());
+        _hotkey.RegistrationFailed += msg => _dispatcher.TryEnqueue(() =>
+            ShowInfoBar($"全局快捷键注册失败（可能被其他程序占用）：{msg}"));
+        _hotkey.Register();
+    }
+
+    private void DisableHotkeys()
+    {
+        _hotkey?.Dispose();
+        _hotkey = null;
+    }
+
     private void TrySetWindowIcon()
     {
         try
@@ -264,9 +356,9 @@ public sealed partial class MainWindow : Window
 
     private void RestoreSession()
     {
-        var paths = PlaylistStore.LoadAutoPlaylist();
-        if (paths.Count > 0)
-            AddItemsToLibrary(paths, persist: false);
+        var entries = PlaylistStore.LoadAutoPlaylist();
+        if (entries.Count > 0)
+            AddItemsFromStore(entries);
 
         LoadRecentFromStore();
         LoadPlaylistsFromStore();
@@ -291,6 +383,10 @@ public sealed partial class MainWindow : Window
 
     private void NavRecent_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Recent);
     private void NavLocal_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Local);
+    private void NavFavorites_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Favorites);
+    private void NavMostPlayed_Click(object sender, RoutedEventArgs e) => ShowView(NavView.MostPlayed);
+    private void NavArtists_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Artists);
+    private void NavAlbums_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Albums);
     private void NavSettings_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Settings);
 
     private void ShowView(NavView view, Playlist? playlist = null)
@@ -315,6 +411,30 @@ public sealed partial class MainWindow : Window
                 ContentTitle.Text = "最近播放";
                 _activeTracks = _recent;
                 ShowActions("recent");
+                break;
+            case NavView.Favorites:
+                ContentTitle.Text = "我的收藏";
+                _activeTracks = _library.Where(t => t.Favorite).ToList();
+                ShowActions("favorites");
+                break;
+            case NavView.MostPlayed:
+                ContentTitle.Text = "最常播放";
+                _activeTracks = _library.OrderByDescending(t => t.PlayCount).Take(50).ToList();
+                ShowActions("mostplayed");
+                break;
+            case NavView.Artists:
+                ContentTitle.Text = "歌手";
+                _artistFilter = string.Empty;
+                _activeTracks = _library;
+                ShowActions("artists");
+                BuildArtistGrid();
+                break;
+            case NavView.Albums:
+                ContentTitle.Text = "专辑";
+                _albumFilter = string.Empty;
+                _activeTracks = _library;
+                ShowActions("albums");
+                BuildAlbumGrid();
                 break;
             case NavView.Playlist:
                 ContentTitle.Text = playlist?.Name ?? "歌单";
@@ -348,10 +468,14 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void UpdateViewVisibility()
     {
-        bool library = _currentView is NavView.Local or NavView.Recent or NavView.Playlist;
+        bool library = _currentView is NavView.Local or NavView.Recent or NavView.Favorites or NavView.MostPlayed or NavView.Playlist;
+        bool albums = _currentView == NavView.Albums;
+        bool albumDrillDown = albums && !string.IsNullOrEmpty(_albumFilter);
+        bool artists = _currentView == NavView.Artists;
+        bool artistDrillDown = artists && !string.IsNullOrEmpty(_artistFilter);
         bool grid = _viewMode == "Grid";
 
-        LibraryHeader.Visibility = library ? Visibility.Visible : Visibility.Collapsed;
+        LibraryHeader.Visibility = (library || albumDrillDown || artistDrillDown) ? Visibility.Visible : Visibility.Collapsed;
 
         if (_currentView == NavView.NowPlaying)
         {
@@ -361,6 +485,9 @@ public sealed partial class MainWindow : Window
             NowPlayingPanel.Visibility = Visibility.Visible;
             TrackGrid.Visibility = Visibility.Collapsed;
             TrackList.Visibility = Visibility.Collapsed;
+            AlbumGrid.Visibility = Visibility.Collapsed;
+            AlbumFilterBar.Visibility = Visibility.Collapsed;
+            ArtistBrowsePanel.Visibility = Visibility.Collapsed;
             SettingsScroll.Visibility = Visibility.Collapsed;
 
             // While the panel was collapsed the lyric ScrollViewer had no
@@ -376,15 +503,61 @@ public sealed partial class MainWindow : Window
             NowPlayingPanel.Visibility = Visibility.Collapsed;
             SettingsScroll.Visibility = _currentView == NavView.Settings ? Visibility.Visible : Visibility.Collapsed;
 
-            if (library)
+            if (albums && !albumDrillDown)
+            {
+                // Album overview: show album grid only
+                TrackGrid.Visibility = Visibility.Collapsed;
+                TrackList.Visibility = Visibility.Collapsed;
+                AlbumGrid.Visibility = Visibility.Visible;
+                AlbumFilterBar.Visibility = Visibility.Collapsed;
+                ArtistBrowsePanel.Visibility = Visibility.Collapsed;
+            }
+            else if (albumDrillDown)
+            {
+                // Album drill-down: show filtered track list + back bar
+                AlbumGrid.Visibility = Visibility.Collapsed;
+                AlbumFilterBar.Visibility = Visibility.Visible;
+                TrackGrid.Visibility = grid ? Visibility.Visible : Visibility.Collapsed;
+                TrackList.Visibility = grid ? Visibility.Collapsed : Visibility.Visible;
+                ArtistBrowsePanel.Visibility = Visibility.Collapsed;
+            }
+            else if (artists && !artistDrillDown)
+            {
+                // Artist overview: show artist grid only
+                TrackGrid.Visibility = Visibility.Collapsed;
+                TrackList.Visibility = Visibility.Collapsed;
+                AlbumGrid.Visibility = Visibility.Collapsed;
+                AlbumFilterBar.Visibility = Visibility.Collapsed;
+                ArtistBrowsePanel.Visibility = Visibility.Visible;
+                ArtistGrid.Visibility = Visibility.Visible;
+                BtnArtistBack.Visibility = Visibility.Collapsed;
+            }
+            else if (artistDrillDown)
+            {
+                // Artist drill-down: show filtered track list + back button
+                TrackGrid.Visibility = grid ? Visibility.Visible : Visibility.Collapsed;
+                TrackList.Visibility = grid ? Visibility.Collapsed : Visibility.Visible;
+                AlbumGrid.Visibility = Visibility.Collapsed;
+                AlbumFilterBar.Visibility = Visibility.Collapsed;
+                ArtistBrowsePanel.Visibility = Visibility.Visible;
+                ArtistGrid.Visibility = Visibility.Collapsed;
+                BtnArtistBack.Visibility = Visibility.Visible;
+            }
+            else if (library)
             {
                 TrackGrid.Visibility = grid ? Visibility.Visible : Visibility.Collapsed;
                 TrackList.Visibility = grid ? Visibility.Collapsed : Visibility.Visible;
+                AlbumGrid.Visibility = Visibility.Collapsed;
+                AlbumFilterBar.Visibility = Visibility.Collapsed;
+                ArtistBrowsePanel.Visibility = Visibility.Collapsed;
             }
             else
             {
                 TrackGrid.Visibility = Visibility.Collapsed;
                 TrackList.Visibility = Visibility.Collapsed;
+                AlbumGrid.Visibility = Visibility.Collapsed;
+                AlbumFilterBar.Visibility = Visibility.Collapsed;
+                ArtistBrowsePanel.Visibility = Visibility.Collapsed;
             }
         }
     }
@@ -427,6 +600,22 @@ public sealed partial class MainWindow : Window
                 ViewCombo.Visibility = Visibility.Visible;
                 SortCombo.Visibility = Visibility.Visible;
                 break;
+            case "favorites":
+                BtnSelectMode.Visibility = Visibility.Visible;
+                ViewCombo.Visibility = Visibility.Visible;
+                SortCombo.Visibility = Visibility.Visible;
+                break;
+            case "mostplayed":
+                BtnSelectMode.Visibility = Visibility.Visible;
+                ViewCombo.Visibility = Visibility.Visible;
+                SortCombo.Visibility = Visibility.Visible;
+                break;
+            case "artists":
+                break;
+            case "artisttracks":
+                ViewCombo.Visibility = Visibility.Visible;
+                SortCombo.Visibility = Visibility.Visible;
+                break;
             case "playlist":
                 BtnPlayPlaylist.Visibility = Visibility.Visible;
                 BtnAddToPlaylist.Visibility = Visibility.Visible;
@@ -443,11 +632,19 @@ public sealed partial class MainWindow : Window
     {
         NavRecent.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         NavLocal.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        NavFavorites.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        NavMostPlayed.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        NavAlbums.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        NavArtists.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         NavSettings.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
 
         var sel = view switch
         {
             NavView.Recent => NavRecent,
+            NavView.Favorites => NavFavorites,
+            NavView.MostPlayed => NavMostPlayed,
+            NavView.Albums => NavAlbums,
+            NavView.Artists => NavArtists,
             NavView.Settings => NavSettings,
             NavView.NowPlaying => null,
             _ => NavLocal
@@ -593,14 +790,49 @@ public sealed partial class MainWindow : Window
         RefreshDisplay();
     }
 
+    /// <summary>
+    /// Restore library tracks from persisted store, preserving DateAdded,
+    /// PlayCount, and Favorite from the v2 serialization format.
+    /// </summary>
+    private void AddItemsFromStore(List<TrackEntry> entries)
+    {
+        if (entries.Count == 0)
+            return;
+
+        var added = false;
+        foreach (var e in entries)
+        {
+            if (_library.Any(t => t.Path == e.Path))
+                continue;
+            var track = new Track(e.Path)
+            {
+                DateAdded = e.DateAdded,
+                PlayCount = e.PlayCount,
+                Favorite = e.Favorite
+            };
+            track.LyricPath = LyricBindingStore.Get(e.Path);
+            _library.Add(track);
+            LoadMetadataFor(track);
+            added = true;
+        }
+
+        if (added && _playback.Queue == null && _library.Count > 0)
+        {
+            _activeTracks = _library;
+            LoadLyricsFor(0);
+        }
+
+        RefreshDisplay();
+    }
+
     private void LoadMetadataFor(Track track) =>
         _ = MetadataService.LoadAsync(track, _dispatcher);
 
     private void PersistLibrary() =>
-        PlaylistStore.SaveAutoPlaylist(_library.Select(t => t.Path).ToList());
+        PlaylistStore.SaveAutoPlaylist(_library);
 
     private void PersistRecent() =>
-        PlaylistStore.SaveRecent(_recent.Select(t => t.Path).ToList());
+        PlaylistStore.SaveRecent(_recent);
 
     private void PersistPlaylists() =>
         PlaylistStore.SavePlaylists(_playlists.Select(p => new PlaylistDto
@@ -645,11 +877,18 @@ public sealed partial class MainWindow : Window
 
     private void LoadRecentFromStore()
     {
-        foreach (var p in PlaylistStore.LoadRecent())
+        foreach (var entry in PlaylistStore.LoadRecent())
         {
-            var t = ResolveTrack(p);
+            var t = ResolveTrack(entry.Path);
             if (t != null)
-                _recent.Add(t);
+            {
+                // Apply persisted DateAdded/PlayCount/Favorite from store.
+                t.DateAdded = entry.DateAdded;
+                t.PlayCount = entry.PlayCount;
+                t.Favorite = entry.Favorite;
+                if (!_recent.Contains(t))
+                    _recent.Add(t);
+            }
         }
     }
 
@@ -907,6 +1146,8 @@ public sealed partial class MainWindow : Window
         TrackList.SelectionMode = mode;
         TrackList.CanReorderItems = CanReorderPlaylist();
         BtnBatchAdd.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
+        BtnBatchRemove.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
+        BtnBatchExport.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
         BtnSelectAll.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
         BtnSelectNone.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -940,6 +1181,55 @@ public sealed partial class MainWindow : Window
             flyout.Items.Add(item);
         }
         flyout.ShowAt(BtnBatchAdd);
+    }
+
+    private void BtnBatchRemove_Click(object sender, RoutedEventArgs e)
+    {
+        var sel = (_viewMode == "Grid" ? TrackGrid.SelectedItems : TrackList.SelectedItems)
+            .Cast<Track>().ToList();
+        if (sel.Count == 0)
+            return;
+
+        if (_currentView == NavView.Playlist && _currentPlaylist != null)
+        {
+            foreach (var t in sel)
+                _currentPlaylist.Tracks.Remove(t);
+            PersistPlaylists();
+        }
+        else
+        {
+            foreach (var t in sel)
+                _library.Remove(t);
+            PersistLibrary();
+        }
+
+        // Also clear from recent if the tracks were removed from the library.
+        if (_currentView != NavView.Playlist)
+        {
+            foreach (var t in sel)
+                _recent.Remove(t);
+            PersistRecent();
+        }
+
+        BtnSelectMode.IsChecked = false;
+        RefreshDisplay();
+    }
+
+    private async void BtnBatchExport_Click(object sender, RoutedEventArgs e)
+    {
+        var sel = (_viewMode == "Grid" ? TrackGrid.SelectedItems : TrackList.SelectedItems)
+            .Cast<Track>().ToList();
+        if (sel.Count == 0)
+            return;
+
+        var picker = new FileSavePicker();
+        InitPicker(picker);
+        picker.SuggestedStartLocation = PickerLocationId.MusicLibrary;
+        picker.FileTypeChoices.Add("播放列表", new[] { ".m3u" });
+        picker.SuggestedFileName = "选中歌曲";
+        var file = await picker.PickSaveFileAsync();
+        if (file != null)
+            PlaylistStore.ExportM3U(file.Path, sel);
     }
 
     private void BtnSelectAll_Click(object sender, RoutedEventArgs e)
@@ -1149,7 +1439,7 @@ public sealed partial class MainWindow : Window
             mf.Items.Insert(insert++, rm);
         }
 
-        if (_currentView is NavView.Local or NavView.Recent && _playlists.Count > 0)
+        if ((_currentView is NavView.Local or NavView.Recent or NavView.Favorites or NavView.MostPlayed or NavView.Artists) && _playlists.Count > 0)
         {
             var sub = new MenuFlyoutSubItem { Text = "添加到歌单", Tag = "dyn" };
             foreach (var pl in _playlists.ToList())
@@ -1211,6 +1501,51 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// Toggle the Favorite flag on a track and persist immediately.
+    /// If currently viewing Favorites, refresh so un-favorited tracks disappear.
+    /// </summary>
+    private void FavoriteToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || fe.DataContext is not Track t)
+            return;
+
+        t.Favorite = !t.Favorite;
+        _libraryDirty = true;
+        PersistLibrary();
+
+        // Update the icon on the clicked button immediately.
+        if (fe is Button btn && btn.Content is FontIcon icon)
+            UpdateFavIcon(icon, t.Favorite);
+
+        // If we're in the Favorites view, re-filter so the toggled track
+        // appears/disappears immediately.
+        if (_currentView == NavView.Favorites)
+        {
+            _activeTracks = _library.Where(tr => tr.Favorite).ToList();
+            RefreshDisplay();
+        }
+    }
+
+    /// <summary>
+    /// Set the favorite icon glyph and color when a FontIcon is loaded
+    /// inside a track DataTemplate.
+    /// </summary>
+    private void FavIcon_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FontIcon icon && icon.DataContext is Track t)
+            UpdateFavIcon(icon, t.Favorite);
+    }
+
+    private void UpdateFavIcon(FrameworkElement el, bool favorite)
+    {
+        if (el is not FontIcon icon) return;
+        icon.Glyph = favorite ? "\uE735" : "\uE734";
+        icon.Foreground = favorite
+            ? (Microsoft.UI.Xaml.Media.Brush)RootGrid.Resources["QqGreen"]
+            : (Microsoft.UI.Xaml.Media.Brush)RootGrid.Resources["TextSecondary"];
+    }
+
+    /// <summary>
     /// Insert <paramref name="t"/> right after the current track. The queue is
     /// snapshotted into a dedicated ObservableCollection first so the library /
     /// the source playlist are never mutated (and a later duplicate of the
@@ -1256,7 +1591,8 @@ public sealed partial class MainWindow : Window
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         _searchText = SearchBox.Text.Trim();
-        RefreshDisplay();
+        _searchDebounceTimer.Stop();
+        _searchDebounceTimer.Start();
     }
 
     private void RefreshDisplay()
@@ -1264,8 +1600,16 @@ public sealed partial class MainWindow : Window
         if (_activeTracks == null)
             return;
 
+        // When an album filter is active (album drill-down), restrict to that album.
+        var source = _activeTracks;
+        if (_currentView == NavView.Albums && !string.IsNullOrEmpty(_albumFilter))
+        {
+            source = _activeTracks.Where(t =>
+                string.Equals(t.Album, _albumFilter, StringComparison.OrdinalIgnoreCase)).ToList();
+        }
+
         var q = _searchText;
-        var filtered = _activeTracks.Where(t =>
+        var filtered = source.Where(t =>
             string.IsNullOrWhiteSpace(q)
             || (t.Title != null && t.Title.Contains(q, StringComparison.OrdinalIgnoreCase))
             || (t.Artist != null && t.Artist.Contains(q, StringComparison.OrdinalIgnoreCase))
@@ -1315,6 +1659,20 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (_currentView == NavView.Albums && string.IsNullOrEmpty(_albumFilter))
+        {
+            // Album overview: hide the track-level empty hint (album grid has its own state).
+            EmptyHint.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_currentView == NavView.Artists && string.IsNullOrEmpty(_artistFilter))
+        {
+            // Artist overview: hide the track-level empty hint (artist grid has its own state).
+            EmptyHint.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         if (_activeTracks.Count == 0)
         {
             EmptyHint.Text = "这里还没有歌曲，点击上方「添加文件」或「递归文件夹」开始吧";
@@ -1328,6 +1686,108 @@ public sealed partial class MainWindow : Window
         else
         {
             EmptyHint.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    // ---------- Album grid ----------
+
+    /// <summary>
+    /// Build the album grid: group library tracks by Album name, create one
+    /// <see cref="AlbumInfo"/> per group, and bind to <see cref="AlbumGrid"/>.
+    /// </summary>
+    private void BuildAlbumGrid()
+    {
+        var albums = _library
+            .Where(t => !string.IsNullOrWhiteSpace(t.Album))
+            .GroupBy(t => t.Album!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new AlbumInfo
+            {
+                Name = g.Key,
+                Artist = g.Select(t => t.Artist ?? "未知歌手").Distinct(StringComparer.OrdinalIgnoreCase).FirstOrDefault() ?? "未知歌手",
+                TrackCount = g.Count(),
+                Tracks = g.ToList()
+            })
+            .OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        AlbumGrid.ItemsSource = albums;
+    }
+
+    /// <summary>
+    /// Build the artist grid: group library tracks by Artist name, create one
+    /// <see cref="ArtistInfo"/> per group, and bind to <see cref="ArtistGrid"/>.
+    /// </summary>
+    private void BuildArtistGrid()
+    {
+        var artists = _library
+            .Where(t => !string.IsNullOrWhiteSpace(t.Artist))
+            .GroupBy(t => t.Artist!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ArtistInfo
+            {
+                ArtistName = g.Key,
+                TrackCount = g.Count(),
+                Tracks = g.ToList()
+            })
+            .OrderBy(a => a.ArtistName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        ArtistGrid.ItemsSource = artists;
+    }
+
+    private void AlbumCard_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: AlbumInfo album })
+        {
+            _albumFilter = album.Name;
+            AlbumFilterLabel.Text = $"{album.Name}  ·  {album.TrackCount} 首";
+            RefreshDisplay();
+            UpdateViewVisibility();
+            SearchBox.Text = string.Empty;
+            _searchText = string.Empty;
+        }
+    }
+
+    private void BtnAlbumBack_Click(object sender, RoutedEventArgs e)
+    {
+        _albumFilter = string.Empty;
+        AlbumGrid.ItemsSource = null; // rebuild on next Albums view
+        RefreshDisplay();
+        UpdateViewVisibility();
+    }
+
+    private void AlbumCard_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe)
+            fe.Opacity = 0.88;
+    }
+
+    private void AlbumCard_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe)
+            fe.Opacity = 1.0;
+    }
+
+    private void BtnArtistBack_Click(object sender, RoutedEventArgs e)
+    {
+        _artistFilter = string.Empty;
+        _activeTracks = _library;
+        BuildArtistGrid();
+        RefreshDisplay();
+        UpdateViewVisibility();
+    }
+
+    private void ArtistGrid_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is ArtistInfo artist)
+        {
+            _artistFilter = artist.ArtistName;
+            _activeTracks = artist.Tracks;
+            ContentTitle.Text = artist.ArtistName;
+            ShowActions("artisttracks");
+            RefreshDisplay();
+            UpdateViewVisibility();
+            SearchBox.Text = string.Empty;
+            _searchText = string.Empty;
         }
     }
 
@@ -1395,6 +1855,22 @@ public sealed partial class MainWindow : Window
 
     private void SeekPointer_Canceled(object sender, PointerRoutedEventArgs e) => _isSeeking = false;
 
+    // Volume icon scroll-to-adjust: same AddHandler pattern as WireSeekSlider
+    // so the event fires even if the icon marks it handled.
+    private void WireVolumeIcon()
+    {
+        VolumeIconArea.AddHandler(UIElement.PointerWheelChangedEvent,
+            new PointerEventHandler(VolumeIcon_PointerWheelChanged), true);
+    }
+
+    private void VolumeIcon_PointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        var delta = e.GetCurrentPoint(VolumeIconArea).Properties.MouseWheelDelta;
+        var step = delta > 0 ? 5.0 : -5.0;
+        VolumeSlider.Value = Math.Clamp(VolumeSlider.Value + step, 0, 100);
+        e.Handled = true;
+    }
+
     private void SeekSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
         if (_isSeeking)
@@ -1424,6 +1900,23 @@ public sealed partial class MainWindow : Window
         ToolTipService.SetToolTip(BtnPlayMode, tip);
     }
 
+    private void BtnSpeed_Click(object sender, RoutedEventArgs e)
+    {
+        var cur = _playback.Rate;
+        // Find next in cycle; if current not in array, start from 0.
+        var idx = Array.FindIndex(_speedCycle, s => Math.Abs(s - cur) < 0.01f);
+        _playback.Rate = _speedCycle[(idx + 1) % _speedCycle.Length];
+        _settings.PlaybackRate = _playback.Rate;
+        SettingsStore.Save(_settings);
+        UpdateSpeedText();
+    }
+
+    private void UpdateSpeedText()
+    {
+        if (SpeedText != null)
+            SpeedText.Text = $"{_playback.Rate:0.##}x";
+    }
+
     private void MainWindow_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         var ctrl = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
@@ -1432,7 +1925,7 @@ public sealed partial class MainWindow : Window
         if (ctrl && e.Key == Windows.System.VirtualKey.A)
         {
             if (!_selectMode
-                || _currentView is not (NavView.Local or NavView.Recent or NavView.Playlist))
+                || _currentView is not (NavView.Local or NavView.Recent or NavView.Favorites or NavView.MostPlayed or NavView.Playlist))
                 return;
 
             // Let the text box keep Ctrl+A for its own select-all.
@@ -1614,27 +2107,64 @@ public sealed partial class MainWindow : Window
 
     // ---------- Playback events ----------
 
+    /// <summary>
+    /// Starts or stops the disc rotation timer based on the current playback
+    /// state and the CoverSpin setting. Only spins while Playing AND spin enabled.
+    /// </summary>
+    private void UpdateDiscTimer()
+    {
+        if (_isPlaying && _settings.CoverSpin)
+        {
+            if (!_discTimer.IsEnabled)
+                _discTimer.Start();
+        }
+        else
+        {
+            if (_discTimer.IsEnabled)
+            {
+                _discTimer.Stop();
+                _discRotate.Angle = 0;
+            }
+        }
+    }
+
     private void OnStateChanged(MediaPlaybackState state)
     {
         _isPlaying = state == MediaPlaybackState.Playing;
         BtnPlay.Content = new FontIcon { Glyph = _isPlaying ? "\uE103" : "\uE102", FontSize = 18 };
+        UpdateDiscTimer();
 
         if (state == MediaPlaybackState.Playing)
         {
             _consecutiveFailures = 0;
 
-            // Playback actually started for the current index — only now does
-            // it qualify for "recently played" (covers the restored session).
             var idx = _playback.CurrentIndex;
             var q = _playback.Queue;
-            if (q != null && idx >= 0 && idx < q.Count && idx != _lastRecentIndex)
+            if (q != null && idx >= 0 && idx < q.Count)
             {
-                _lastRecentIndex = idx;
                 var t = q[idx];
-                t.LastPlayed = DateTime.Now;
-                PushRecent(t);
+
+                // Recent-play bookkeeping (skip suppressed during session restore).
+                if (idx != _lastRecentIndex && !_suppressNextRecent)
+                {
+                    _lastRecentIndex = idx;
+                    t.LastPlayed = DateTime.Now;
+                    t.PlayCount++;
+                    _libraryDirty = true;
+                    PushRecent(t);
+                }
+                _suppressNextRecent = false;
+
+                // Last.fm scrobble: only when the track has been played past the halfway point.
+                var dur = _playback.Duration;
+                if (dur.TotalSeconds > 30 && _playback.Position.TotalSeconds >= dur.TotalSeconds / 2.0)
+                {
+                    EnqueueScrobble(t);
+                }
             }
         }
+
+        _suppressNextRecent = false;
     }
 
     private void OnCurrentIndexChanged(int index)
@@ -1699,10 +2229,27 @@ public sealed partial class MainWindow : Window
 
         UpdateLyricHighlight(pos);
 
+        // Scrobble: if the track crosses the halfway point during playback,
+        // scrobble it (covers seeks past the half-point too).
+        if (_isPlaying && dur.TotalSeconds > 30 && pos.TotalSeconds >= dur.TotalSeconds / 2.0)
+        {
+            var q = _playback.Queue;
+            var idx = _playback.CurrentIndex;
+            if (q != null && idx >= 0 && idx < q.Count)
+                EnqueueScrobble(q[idx]);
+        }
+
         if ((DateTime.Now - _lastProgressSave).TotalSeconds >= 3)
         {
             _lastProgressSave = DateTime.Now;
             PlaylistStore.SaveProgress(_playback.CurrentIndex, pos, CurrentPath());
+
+            // Persist PlayCount / Favorite changes at the same cadence.
+            if (_libraryDirty)
+            {
+                PersistLibrary();
+                _libraryDirty = false;
+            }
         }
     }
 
@@ -1712,6 +2259,54 @@ public sealed partial class MainWindow : Window
         if (q != null && _playback.CurrentIndex >= 0 && _playback.CurrentIndex < q.Count)
             return q[_playback.CurrentIndex]?.Path;
         return null;
+    }
+
+    // ---------- Last.fm scrobbling ----------
+
+    private void EnqueueScrobble(Track track)
+    {
+        if (!_lastFm.IsConnected)
+            return;
+
+        // Dedup: only scrobble each track once per session.
+        var key = $"{track.Artist}\0{track.Title}\0{track.Path}";
+        if (!_scrobbledThisSession.Add(key))
+            return;
+
+        var entry = new ScrobbleEntry
+        {
+            Artist = track.Artist,
+            Track = track.Title,
+            Album = track.Album,
+            TimestampUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Duration = (int)_playback.Duration.TotalSeconds
+        };
+        _scrobbleQueue.Add(entry);
+
+        // Debounce: flush after 2 seconds of no new scrobbles.
+        if (!_scrobbleTimerRunning)
+        {
+            _scrobbleTimerRunning = true;
+            _scrobbleTimer.Start();
+        }
+        else
+        {
+            _scrobbleTimer.Stop();
+            _scrobbleTimer.Start();
+        }
+    }
+
+    private void FlushScrobbleQueue()
+    {
+        _scrobbleTimer.Stop();
+        _scrobbleTimerRunning = false;
+
+        if (_scrobbleQueue.Count == 0)
+            return;
+
+        var batch = new List<ScrobbleEntry>(_scrobbleQueue);
+        _scrobbleQueue.Clear();
+        _ = Task.Run(async () => await _lastFm.ScrobbleBatchAsync(batch));
     }
 
     // ---------- Lyrics ----------
@@ -2057,8 +2652,9 @@ public sealed partial class MainWindow : Window
     /// Search by "artist title" and download lyrics.
     /// NetEase first — it serves original + translation + romaji from ONE
     /// source, so companion-file timestamps line up exactly. QQ Music is the
-    /// fallback (original lyric only: its web API stopped serving
-    /// translations without login).
+    /// second fallback (original lyric only: its web API stopped serving
+    /// translations without login). LRCLIB is the third fallback (synced LRC
+    /// with time tags, original only).
     /// </summary>
     private async Task<bool> TryAutoDownloadAsync(Track track)
     {
@@ -2085,58 +2681,112 @@ public sealed partial class MainWindow : Window
         }
 
         // 2) QQ Music fallback (original only).
-        var results = await QQLyricService.SearchAsync(keyword, 20);
-        if (results.Count == 0)
-            return false;
-
-        var primaryArtist = Norm(track.Artist == "未知歌手" ? "" : track.Artist);
-
-        QQSong? best = null;
-        var bestScore = int.MinValue;
-
-        foreach (var r in results)
+        var qqResults = await QQLyricService.SearchAsync(keyword, 20);
+        if (qqResults.Count > 0)
         {
-            var rt = Norm(r.Title);
-            if (rt.Length == 0)
-                continue;
+            var primaryArtist = Norm(track.Artist == "未知歌手" ? "" : track.Artist);
 
-            int score;
-            if (rt == localTitle)
-                score = 10;
-            else if (rt.Contains(localTitle, StringComparison.Ordinal) ||
-                     localTitle.Contains(rt, StringComparison.Ordinal))
-                score = 6;
-            else
-                continue; // title must match at least loosely
+            QQSong? best = null;
+            var bestScore = int.MinValue;
 
-            if (primaryArtist.Length > 0 && Norm(r.Artist).Contains(primaryArtist, StringComparison.Ordinal))
-                score += 5;
-
-            if (durationSec is > 0 && r.DurationSec > 0)
+            foreach (var r in qqResults)
             {
-                var delta = Math.Abs(durationSec.Value - r.DurationSec);
-                if (delta <= 3) score += 8;
-                else if (delta <= 8) score += 3;
-                else score -= 2;
+                var rt = Norm(r.Title);
+                if (rt.Length == 0)
+                    continue;
+
+                int score;
+                if (rt == localTitle)
+                    score = 10;
+                else if (rt.Contains(localTitle, StringComparison.Ordinal) ||
+                         localTitle.Contains(rt, StringComparison.Ordinal))
+                    score = 6;
+                else
+                    continue; // title must match at least loosely
+
+                if (primaryArtist.Length > 0 && Norm(r.Artist).Contains(primaryArtist, StringComparison.Ordinal))
+                    score += 5;
+
+                if (durationSec is > 0 && r.DurationSec > 0)
+                {
+                    var delta = Math.Abs(durationSec.Value - r.DurationSec);
+                    if (delta <= 3) score += 8;
+                    else if (delta <= 8) score += 3;
+                    else score -= 2;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = r;
+                }
             }
 
-            if (score > bestScore)
+            // Require a real title match (>=10) to avoid saving wrong lyrics.
+            if (best != null && bestScore >= 10)
             {
-                bestScore = score;
-                best = r;
+                var lyric = await QQLyricService.FetchLyricAsync(best.SongMid);
+                if (!string.IsNullOrEmpty(lyric?.Lyric))
+                {
+                    SaveLyricFiles(track, lyric.Value.Lyric!, lyric.Value.Trans, lyric.Value.Roma);
+                    return true;
+                }
             }
         }
 
-        // Require a real title match (>=10) to avoid saving wrong lyrics.
-        if (best == null || bestScore < 10)
-            return false;
+        // 3) LRCLIB fallback (synced LRC with time tags, original only).
+        var lrResults = await LrclibService.SearchAsync(keyword, 20);
+        if (lrResults.Count > 0)
+        {
+            QQSong? best = null;
+            var bestScore = int.MinValue;
 
-        var lyric = await QQLyricService.FetchLyricAsync(best.SongMid);
-        if (string.IsNullOrEmpty(lyric?.Lyric))
-            return false;
+            foreach (var r in lrResults)
+            {
+                var rt = Norm(r.Title);
+                if (rt.Length == 0)
+                    continue;
 
-        SaveLyricFiles(track, lyric.Value.Lyric!, lyric.Value.Trans, lyric.Value.Roma);
-        return true;
+                int score;
+                if (rt == localTitle)
+                    score = 10;
+                else if (rt.Contains(localTitle, StringComparison.Ordinal) ||
+                         localTitle.Contains(rt, StringComparison.Ordinal))
+                    score = 6;
+                else
+                    continue;
+
+                var primaryArtist = Norm(track.Artist == "未知歌手" ? "" : track.Artist);
+                if (primaryArtist.Length > 0 && Norm(r.Artist).Contains(primaryArtist, StringComparison.Ordinal))
+                    score += 5;
+
+                if (durationSec is > 0 && r.DurationSec > 0)
+                {
+                    var delta = Math.Abs(durationSec.Value - r.DurationSec);
+                    if (delta <= 3) score += 8;
+                    else if (delta <= 8) score += 3;
+                    else score -= 2;
+                }
+
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = r;
+                }
+            }
+
+            if (best != null && bestScore >= 10)
+            {
+                var lyric = await LrclibService.FetchLyricAsync(best.SongMid);
+                if (!string.IsNullOrEmpty(lyric?.Lyric))
+                {
+                    SaveLyricFiles(track, lyric.Value.Lyric!, lyric.Value.Trans, lyric.Value.Roma);
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Pick the best NetEase match: loose title match + closest duration.</summary>
@@ -2706,6 +3356,11 @@ public sealed partial class MainWindow : Window
         };
         CoverSpinToggle.IsOn = _settings.CoverSpin;
         CloseActionCombo.SelectedIndex = _settings.CloseAction == "Tray" ? 1 : 0;
+
+        // Sync auto-start from registry (source of truth).
+        _settings.AutoStart = AutoStart.IsAutoStartEnabled();
+        AutoStartToggle.IsOn = _settings.AutoStart;
+
         AccentColorPicker.Color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#31c27c" : _settings.AccentColor);
 
         // Data/cache location.
@@ -2714,6 +3369,27 @@ public sealed partial class MainWindow : Window
             ? "当前为自定义位置（默认：%LOCALAPPDATA%\\MusicPlayer）。"
             : "当前使用默认位置：%LOCALAPPDATA%\\MusicPlayer。";
         CacheDirStatus.Foreground = (Microsoft.UI.Xaml.Media.Brush)RootGrid.Resources["TextSecondary"];
+
+        // Last.fm connection state.
+        LastFmApiKeyBox.Text = _settings.LastFmApiKey;
+        LastFmApiSecretBox.Text = _settings.LastFmApiSecret;
+        UpdateLastFmUi();
+    }
+
+    private void UpdateLastFmUi()
+    {
+        if (_lastFm.IsConnected)
+        {
+            LastFmConnectPanel.Visibility = Visibility.Collapsed;
+            LastFmDisconnectPanel.Visibility = Visibility.Visible;
+            LastFmUsernameText.Text = $"已连接：{_lastFm.Username}";
+        }
+        else
+        {
+            LastFmConnectPanel.Visibility = Visibility.Visible;
+            LastFmDisconnectPanel.Visibility = Visibility.Collapsed;
+            LastFmStatus.Text = string.IsNullOrEmpty(_settings.LastFmApiKey) ? "" : "未连接";
+        }
     }
 
     private void LyricEncodingCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2949,6 +3625,150 @@ public sealed partial class MainWindow : Window
         SettingsStore.Save(_settings);
         if (!_settings.CoverSpin)
             _discRotate.Angle = 0;
+        UpdateDiscTimer();
+    }
+
+    private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        _settings.AutoStart = ((ToggleSwitch)sender).IsOn;
+        AutoStart.SetAutoStart(_settings.AutoStart);
+        SettingsStore.Save(_settings);
+    }
+
+    private void GlobalHotkeysToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        _settings.UseGlobalHotkeys = ((ToggleSwitch)sender).IsOn;
+        SettingsStore.Save(_settings);
+        if (_settings.UseGlobalHotkeys)
+            EnableHotkeys();
+        else
+            DisableHotkeys();
+    }
+
+    private void SleepTimerCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _sleepTimer.Stop();
+
+        // Index 0 = off, 1 = 15 min, 2 = 30 min, 3 = 60 min, 4 = 90 min.
+        var minutes = SleepTimerCombo.SelectedIndex switch
+        {
+            1 => 15,
+            2 => 30,
+            3 => 60,
+            4 => 90,
+            _ => 0
+        };
+
+        if (minutes > 0)
+        {
+            _sleepTimer.Interval = TimeSpan.FromMinutes(minutes);
+            _sleepTimer.Start();
+            ShowInfoBar($"定时停止播放：{minutes} 分钟后暂停");
+        }
+    }
+
+    private void OnSleepTimerTick(object? sender, object? e)
+    {
+        _sleepTimer.Stop();
+        _playback.Pause();
+        ShowInfoBar("定时停止播放：已暂停");
+        // Reset combo to "关" without re-triggering the handler.
+        SleepTimerCombo.SelectionChanged -= SleepTimerCombo_SelectionChanged;
+        SleepTimerCombo.SelectedIndex = 0;
+        SleepTimerCombo.SelectionChanged += SleepTimerCombo_SelectionChanged;
+    }
+
+    // ---------- Last.fm ----------
+
+    private async void LastFmConnectBtn_Click(object sender, RoutedEventArgs e)
+    {
+        // Save any entered API key/secret first.
+        _settings.LastFmApiKey = (LastFmApiKeyBox.Text ?? "").Trim();
+        _settings.LastFmApiSecret = (LastFmApiSecretBox.Text ?? "").Trim();
+        SettingsStore.Save(_settings);
+
+        if (string.IsNullOrEmpty(_settings.LastFmApiKey) || string.IsNullOrEmpty(_settings.LastFmApiSecret))
+        {
+            ShowInfoBar("请先填写 Last.fm API Key 和 Secret");
+            return;
+        }
+
+        LastFmConnectBtn.IsEnabled = false;
+        LastFmStatus.Text = "获取授权令牌…";
+
+        try
+        {
+            var token = await _lastFm.GetTokenAsync();
+            if (token == null)
+            {
+                ShowInfoBar("获取 Last.fm 令牌失败，请检查 API Key");
+                LastFmStatus.Text = "连接失败";
+                LastFmConnectBtn.IsEnabled = true;
+                return;
+            }
+
+            // Open the browser for user authorization.
+            var authUrl = _lastFm.GetAuthUrl(token);
+            Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
+
+            LastFmStatus.Text = "请在浏览器中授权，完成后点击下方按钮…";
+
+            // Show a dialog asking the user to confirm authorization.
+            var dialog = new ContentDialog
+            {
+                XamlRoot = this.Content.XamlRoot,
+                Title = "Last.fm 授权",
+                Content = "请在浏览器中完成授权，然后点击「已授权」继续。",
+                PrimaryButtonText = "已授权",
+                CloseButtonText = "取消",
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                var session = await _lastFm.GetSessionAsync(token);
+                if (session != null)
+                {
+                    ShowInfoBar($"Last.fm 已连接：{session.Value.Username}");
+                    // Retry any pending scrobbles.
+                    _ = Task.Run(async () => await _lastFm.RetryFailedScrobblesAsync());
+                }
+                else
+                {
+                    ShowInfoBar("Last.fm 会话获取失败，请重试");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowInfoBar($"Last.fm 连接失败：{ex.Message}");
+        }
+        finally
+        {
+            LastFmConnectBtn.IsEnabled = true;
+            UpdateLastFmUi();
+        }
+    }
+
+    private void LastFmDisconnectBtn_Click(object sender, RoutedEventArgs e)
+    {
+        _lastFm.Disconnect();
+        UpdateLastFmUi();
+    }
+
+    private void CrossfadeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Index 0 = off, 1 = 1s, 2 = 2s, 3 = 3s.
+        var ms = CrossfadeCombo.SelectedIndex switch
+        {
+            1 => 1000,
+            2 => 2000,
+            3 => 3000,
+            _ => 0
+        };
+        _settings.CrossfadeDurationMs = ms;
+        _playback.CrossfadeDurationMs = ms;
+        SettingsStore.Save(_settings);
     }
 
     private void ApplyStyleLive()
@@ -3002,6 +3822,8 @@ public sealed partial class MainWindow : Window
         _tray?.Dispose();
         _tray = null;
 
+        DisableHotkeys();
+
         // The desktop-lyrics overlay is a separate window — close it too,
         // otherwise it keeps the process alive after the main window closes.
         try
@@ -3026,6 +3848,7 @@ public sealed partial class MainWindow : Window
             _settings.WindowY = r.Top;
         }
         _settings.Volume = _playback.Volume;
+        _settings.PlaybackRate = _playback.Rate;
         SettingsStore.Save(_settings);
     }
 

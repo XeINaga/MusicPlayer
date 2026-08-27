@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using MusicPlayer.Models;
@@ -34,52 +35,121 @@ public sealed class PlaylistStore
 
     // ---------- Local library (auto playlist) ----------
 
-    public static void SaveAutoPlaylist(IEnumerable<string> paths)
+    public static void SaveAutoPlaylist(IEnumerable<Track> tracks)
     {
         try
         {
             EnsureDir();
-            var data = new PlaylistData { Paths = new List<string>(paths) };
+            var items = tracks.Select(t => new TrackEntry
+            {
+                Path = t.Path,
+                DateAdded = t.DateAdded,
+                PlayCount = t.PlayCount,
+                Favorite = t.Favorite
+            }).ToList();
+            var data = new PlaylistData { Items = items };
             AtomicFile.WriteAllText(PlaylistFile, JsonSerializer.Serialize(data), Encoding.UTF8);
         }
         catch { /* best-effort */ }
     }
 
-    public static List<string> LoadAutoPlaylist()
+    public static List<TrackEntry> LoadAutoPlaylist()
     {
         try
         {
             if (!File.Exists(PlaylistFile))
-                return new List<string>();
-            var data = JsonSerializer.Deserialize<PlaylistData>(File.ReadAllText(PlaylistFile, Encoding.UTF8));
-            return data?.Paths ?? new List<string>();
+                return new List<TrackEntry>();
+            var raw = File.ReadAllText(PlaylistFile, Encoding.UTF8);
+            var data = JsonSerializer.Deserialize<PlaylistData>(raw);
+            if (data == null)
+                return new List<TrackEntry>();
+
+            // v2 format: Items list present
+            if (data.Items != null && data.Items.Count > 0)
+                return data.Items;
+
+            // v1 backward compat: only Paths string array
+            if (data.Paths != null && data.Paths.Count > 0)
+            {
+                var migrated = data.Paths.Select(p => new TrackEntry
+                {
+                    Path = p,
+                    DateAdded = DateTime.Now
+                }).ToList();
+
+                // Persist the migrated v2 format so we only migrate once.
+                try
+                {
+                    var v2 = new PlaylistData { Items = migrated };
+                    AtomicFile.WriteAllText(PlaylistFile, JsonSerializer.Serialize(v2), Encoding.UTF8);
+                }
+                catch { /* best-effort */ }
+
+                return migrated;
+            }
+
+            return new List<TrackEntry>();
         }
-        catch { return new List<string>(); }
+        catch { return new List<TrackEntry>(); }
     }
 
     // ---------- Recently played ----------
 
-    public static void SaveRecent(IEnumerable<string> paths)
+    public static void SaveRecent(IEnumerable<Track> tracks)
     {
         try
         {
             EnsureDir();
-            var data = new RecentData { Paths = new List<string>(paths) };
+            var items = tracks.Select(t => new TrackEntry
+            {
+                Path = t.Path,
+                DateAdded = t.DateAdded,
+                PlayCount = t.PlayCount,
+                Favorite = t.Favorite
+            }).ToList();
+            var data = new RecentData { Items = items };
             AtomicFile.WriteAllText(RecentFile, JsonSerializer.Serialize(data), Encoding.UTF8);
         }
         catch { /* best-effort */ }
     }
 
-    public static List<string> LoadRecent()
+    public static List<TrackEntry> LoadRecent()
     {
         try
         {
             if (!File.Exists(RecentFile))
-                return new List<string>();
-            var data = JsonSerializer.Deserialize<RecentData>(File.ReadAllText(RecentFile, Encoding.UTF8));
-            return data?.Paths ?? new List<string>();
+                return new List<TrackEntry>();
+            var raw = File.ReadAllText(RecentFile, Encoding.UTF8);
+            var data = JsonSerializer.Deserialize<RecentData>(raw);
+            if (data == null)
+                return new List<TrackEntry>();
+
+            // v2 format: Items list present
+            if (data.Items != null && data.Items.Count > 0)
+                return data.Items;
+
+            // v1 backward compat: only Paths string array
+            if (data.Paths != null && data.Paths.Count > 0)
+            {
+                var migrated = data.Paths.Select(p => new TrackEntry
+                {
+                    Path = p,
+                    DateAdded = DateTime.Now
+                }).ToList();
+
+                try
+                {
+                    var v2 = new RecentData { Items = migrated };
+                    AtomicFile.WriteAllText(RecentFile, JsonSerializer.Serialize(v2), Encoding.UTF8);
+                }
+                catch { /* best-effort */ }
+
+                return migrated;
+            }
+
+            return new List<TrackEntry>();
         }
-        catch { return new List<string>(); }
+        catch { return new List<TrackEntry>(); }
     }
 
     // ---------- User playlists ----------
@@ -168,14 +238,24 @@ public sealed class PlaylistStore
     }
 }
 
+public sealed class TrackEntry
+{
+    public string Path { get; set; } = "";
+    public DateTime DateAdded { get; set; } = DateTime.Now;
+    public int PlayCount { get; set; }
+    public bool Favorite { get; set; }
+}
+
 public sealed class PlaylistData
 {
-    public List<string>? Paths { get; set; }
+    public List<string>? Paths { get; set; }   // v1 backward compat
+    public List<TrackEntry>? Items { get; set; } // v2
 }
 
 public sealed class RecentData
 {
-    public List<string>? Paths { get; set; }
+    public List<string>? Paths { get; set; }   // v1 backward compat
+    public List<TrackEntry>? Items { get; set; } // v2
 }
 
 public sealed class PlaylistDto
