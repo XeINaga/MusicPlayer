@@ -8,17 +8,25 @@ using System.Threading.Tasks;
 namespace MusicPlayer.Services;
 
 /// <summary>A single QQ Music search result.</summary>
-public sealed record QQSong(string Title, string Artist, string Album, string SongMid, int DurationSec);
+/// <param name="SongMid">QQ's string id, used by the plain LRC endpoint.</param>
+/// <param name="SongId">
+/// QQ's numeric id, required by the encrypted QRC endpoint. Sending the string
+/// songmid there makes the service reply with musicid="0" and return no lyrics.
+/// </param>
+public sealed record QQSong(
+    string Title, string Artist, string Album, string SongMid, int DurationSec,
+    string SongId = "");
 
 /// <summary>
 /// Lyrics search / download against QQ Music's public web endpoints
 /// (verified against the live service):
 ///  - search: c.y.qq.com/soso/fcgi-bin/client_search_cp  (requires Referer y.qq.com)
-///  - lyrics: c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg (requires
-///    Referer music.qq.com; returns plain LRC via nobase64=1)
-/// Translation ("trans") is returned when QQ provides it without login —
-/// usually only empty for non-Chinese songs these days; romaji is not served
-/// by these endpoints (kept null).
+///  - plain LRC: c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg (requires
+///    Referer music.qq.com; returns plain LRC via nobase64=1; includes a
+///    Chinese translation "trans" when available)
+///  - QRC (romaji + translation): c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg
+///    returns hex-encoded, 3DES+zlib encrypted blobs decoded by QqQrcDecrypter.
+/// NetEase is the primary romaji source; QQ provides romaji only via QRC.
 /// </summary>
 public static class QQLyricService
 {
@@ -92,7 +100,10 @@ public static class QQLyricService
             if (s.TryGetProperty("interval", out var iv) && iv.ValueKind == JsonValueKind.Number)
                 duration = iv.GetInt32();
 
-            results.Add(new QQSong(title, artist, album, mid, duration));
+            // songid is a JSON number; the QRC endpoint needs this numeric id.
+            var songId = GetNumber(s, "songid") ?? "";
+
+            results.Add(new QQSong(title, artist, album, mid, duration, songId));
         }
 
         return results;
@@ -100,27 +111,67 @@ public static class QQLyricService
 
     /// <summary>
     /// Fetch lyrics (original / translation / romaji) for one song. Any of the
-    /// three may be null/empty when QQ Music has no such version available
-    /// without login.
+    /// three may be null/empty when QQ Music has no such version available.
+    /// Original + translation come from the plain LRC endpoint (reliable);
+    /// romaji (and an alternate translation) come from the encrypted QRC endpoint.
     /// </summary>
-    public static async Task<(string? Lyric, string? Trans, string? Roma)?> FetchLyricAsync(string songMid)
+    /// <param name="songMid">QQ string id (plain LRC endpoint).</param>
+    /// <param name="songId">
+    /// QQ numeric id for the QRC endpoint. When omitted, the QRC lookup is
+    /// skipped because the service cannot resolve a string songmid.
+    /// </param>
+    public static async Task<(string? Lyric, string? Trans, string? Roma)?> FetchLyricAsync(
+        string songMid, string? songId = null)
     {
-        var url = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg" +
-                  $"?songmid={Uri.EscapeDataString(songMid)}&g_tk=5381&format=json&nobase64=1" +
-                  "&inCharset=utf8&outCharset=utf-8";
+        string? lyric = null, trans = null, roma = null;
 
-        var json = await GetAsync(url, "https://music.qq.com/");
-        if (json == null)
+        // 1) Plain LRC endpoint — reliable original lyric + Chinese translation.
+        var plainUrl = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg" +
+                       $"?songmid={Uri.EscapeDataString(songMid)}&g_tk=5381&format=json&nobase64=1" +
+                       "&inCharset=utf8&outCharset=utf-8";
+
+        var json = await GetAsync(plainUrl, "https://music.qq.com/");
+        if (json != null)
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!(root.TryGetProperty("retcode", out var rc) && rc.ValueKind == JsonValueKind.Number && rc.GetInt32() != 0))
+            {
+                lyric = NullIfEmpty(GetString(root, "lyric"));
+                trans = NullIfEmpty(GetString(root, "trans"));
+            }
+        }
+
+        // 2) QRC endpoint — encrypted; provides romaji (+ translation where available).
+        //    This endpoint only accepts the NUMERIC songid.
+        if (!string.IsNullOrWhiteSpace(songId))
+        {
+            try
+            {
+                var qrcUrl = "https://c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg" +
+                             $"?version=15&miniversion=82&lrctype=4&musicid={Uri.EscapeDataString(songId)}";
+                var qrc = await GetAsync(qrcUrl, "https://c.y.qq.com/");
+                if (qrc != null)
+                {
+                    var (qLyric, qTrans, qRoma) = QqQrcDecrypter.ParseQrc(qrc);
+
+                    // First source wins for every field. The plain endpoint runs
+                    // first and is the more reliable of the two, so QRC only ever
+                    // fills gaps rather than overwriting a good translation.
+                    if (qLyric != null) lyric ??= qLyric;
+                    if (qTrans != null) trans ??= qTrans;
+                    if (qRoma != null) roma ??= qRoma;
+                }
+            }
+            catch
+            {
+                // offline / blocked / unsupported — fall back to plain LRC above
+            }
+        }
+
+        if (lyric == null && trans == null && roma == null)
             return null;
-
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-        if (root.TryGetProperty("retcode", out var rc) && rc.ValueKind == JsonValueKind.Number && rc.GetInt32() != 0)
-            return null;
-
-        var lyric = GetString(root, "lyric");
-        var trans = GetString(root, "trans");
-        return (NullIfEmpty(lyric), NullIfEmpty(trans), null);
+        return (lyric, trans, roma);
     }
 
     // ---------- helpers ----------
@@ -131,5 +182,11 @@ public static class QQLyricService
     private static string? GetString(JsonElement el, string property) =>
         el.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString()
+            : null;
+
+    /// <summary>Read a JSON number as its raw text (songid is numeric).</summary>
+    private static string? GetNumber(JsonElement el, string property) =>
+        el.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.GetRawText()
             : null;
 }

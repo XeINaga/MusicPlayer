@@ -27,6 +27,43 @@
             <SolidColorBrush x:Key="NavSelected" Color="#1f2a27" />
             <SolidColorBrush x:Key="BorderSoft" Color="#20202b" />
 
+            <!-- Interaction feedback.
+                 WinUI's Button template reads these theme brushes, so defining
+                 them once here gives every button in the app consistent hover /
+                 pressed states without restyling each one. Without them the UI
+                 feels dead: nothing responds to the pointer. -->
+            <SolidColorBrush x:Key="ButtonBackground" Color="#17171f" />
+            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#23232f" />
+            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#101018" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#262633" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#3a3a52" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#2c2c3e" />
+            <SolidColorBrush x:Key="ButtonForeground" Color="#f2f2f5" />
+            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#ffffff" />
+            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#d8d8e0" />
+
+            <!-- Accent (primary) buttons keep the gradient and get their own
+                 hover/pressed steps, so they stay clearly the primary action
+                 instead of flattening to the neutral grey on hover. -->
+            <LinearGradientBrush x:Key="AccentButtonBackground" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#31c27c" Offset="0" />
+                <GradientStop Color="#1f9e9e" Offset="1" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="AccentButtonBackgroundPointerOver" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#3ad88a" Offset="0" />
+                <GradientStop Color="#26b0b0" Offset="1" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="AccentButtonBackgroundPressed" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#28a86a" Offset="0" />
+                <GradientStop Color="#1a8a8a" Offset="1" />
+            </LinearGradientBrush>
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="White" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="White" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#e8f5f0" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="Transparent" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="Transparent" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="Transparent" />
+
             <LinearGradientBrush x:Key="CardPlaceholder" StartPoint="0,0" EndPoint="1,1">
                 <GradientStop Color="#2c2c3a" Offset="0" />
                 <GradientStop Color="#191922" Offset="1" />
@@ -68,7 +105,31 @@
                 <Setter Property="CornerRadius" Value="9" />
             </Style>
 
-            <Style x:Key="CirclePlayStyle" TargetType="Button">
+            <!-- Same visual weight as ActionButtonStyle, for the grouped
+                 drop-down / split buttons in the content toolbar. -->
+            <Style x:Key="ActionMenuButtonStyle" TargetType="controls:DropDownButton">
+                <Setter Property="Background" Value="#17171f" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="14,7" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="CornerRadius" Value="9" />
+            </Style>
+            <Style x:Key="ActionSplitButtonStyle" TargetType="controls:SplitButton">
+                <Setter Property="Background" Value="#17171f" />
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}" />
+                <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="14,7" />
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="CornerRadius" Value="9" />
+            </Style>
+
+            <!-- Primary play button. Based on AccentButtonStyle so it reads the
+                 AccentButton* brushes above and keeps its gradient on hover,
+                 instead of flattening to the neutral button grey. -->
+            <Style x:Key="CirclePlayStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
                 <Setter Property="Background" Value="{StaticResource AccentGlow}" />
                 <Setter Property="Foreground" Value="White" />
                 <Setter Property="BorderThickness" Value="0" />
@@ -127,7 +188,12 @@
                             <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                         </Border>
 
-                        <Border x:Name="Dim" Width="164" Height="164" CornerRadius="16" Background="#000000" Opacity="0" />
+                        <Border x:Name="Dim" Width="164" Height="164" CornerRadius="16" Background="#000000" Opacity="0">
+                            <!-- Ease the hover dim instead of snapping to it. -->
+                            <Border.OpacityTransition>
+                                <ScalarTransition Duration="0:0:0.18" />
+                            </Border.OpacityTransition>
+                        </Border>
 
                         <Button x:Name="CardFavBtn" Style="{StaticResource GhostIconButtonStyle}"
                                 HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,8,0,0"
@@ -139,6 +205,10 @@
                         <Button x:Name="PlayBtn" Style="{StaticResource CirclePlayStyle}"
                                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,12"
                                 Opacity="0" Click="CardPlay_Click">
+                            <!-- Fade in on hover rather than popping in. -->
+                            <Button.OpacityTransition>
+                                <ScalarTransition Duration="0:0:0.18" />
+                            </Button.OpacityTransition>
                             <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE102;" FontSize="17" />
                         </Button>
                     </Grid>
@@ -187,6 +257,9 @@
                     <Button x:Name="RowPlayNextBtn" Grid.Column="4" Style="{StaticResource GhostIconButtonStyle}"
                             Width="34" Height="34" VerticalAlignment="Center" Opacity="0"
                             Click="TrackPlayNext_Click" ToolTipService.ToolTip="下一首播放">
+                        <Button.OpacityTransition>
+                            <ScalarTransition Duration="0:0:0.15" />
+                        </Button.OpacityTransition>
                         <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE101;" FontSize="14"
                                   Foreground="{StaticResource TextPrimary}" />
                     </Button>
@@ -368,29 +441,95 @@
                         </StackPanel>
                     </Grid>
                     <StackPanel x:Name="ContentActions" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Left">
-                        <Button x:Name="BtnAddFile" Content="添加文件" Style="{StaticResource ActionButtonStyle}" Click="BtnAddFile_Click" ToolTipService.ToolTip="选择一个或多个音频文件加入本地音乐" />
-                        <Button x:Name="BtnAddFolderRecursive" Content="添加文件夹" Style="{StaticResource ActionButtonStyle}" Click="BtnAddFolderRecursive_Click" ToolTipService.ToolTip="添加文件夹及其所有子文件夹中的音频" />
-                        <Button x:Name="BtnAddFolderFlat" Content="仅当前文件夹" Style="{StaticResource ActionButtonStyle}" Click="BtnAddFolderFlat_Click" ToolTipService.ToolTip="只添加该文件夹顶层的音频，不含子文件夹" />
-                        <Button x:Name="BtnOpenList" Content="导入列表" Style="{StaticResource ActionButtonStyle}" Click="BtnOpenList_Click" ToolTipService.ToolTip="从 M3U 播放列表文件导入歌曲" />
-                        <Button x:Name="BtnSaveList" Content="导出列表" Style="{StaticResource ActionButtonStyle}" Click="BtnSaveList_Click" ToolTipService.ToolTip="将当前列表导出为 M3U 文件" />
-                        <Button x:Name="BtnClear" Content="清空列表" Style="{StaticResource ActionButtonStyle}" Click="BtnClear_Click" ToolTipService.ToolTip="移除列表中的所有歌曲（不会删除音频文件）" />
-                        <Button x:Name="BtnBatchLyrics" Content="补全歌词" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnBatchLyrics_Click" ToolTipService.ToolTip="为缺少主歌词的歌曲在线下载歌词（优先网易云音乐，含翻译和罗马音）；并为已有歌词的歌曲补齐缺失的翻译或罗马音。补全过程记录到安装目录的 log 文件夹" />
-                        <Button x:Name="BtnClearRecent" Content="清空播放记录" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnClearRecent_Click" />
-                        <Button x:Name="BtnPlayPlaylist" Content="播放歌单" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnPlayPlaylist_Click" />
-                        <Button x:Name="BtnAddToPlaylist" Content="添加歌曲" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnAddToPlaylist_Click" ToolTipService.ToolTip="从文件选择器挑选歌曲加入此歌单" />
-                        <Button x:Name="BtnDeletePlaylist" Content="删除歌单" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnDeletePlaylist_Click" ToolTipService.ToolTip="删除此歌单（不会删除歌曲文件）" />
-                        <Button x:Name="BtnRenamePlaylist" Content="重命名" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnRenamePlaylist_Click" />
+                        <!-- 添加 / 导入：所有入口都保留，只是收进一个下拉 -->
+                        <controls:DropDownButton x:Name="BtnAddMenu" Content="添加" Style="{StaticResource ActionMenuButtonStyle}"
+                                                 Visibility="Collapsed" ToolTipService.ToolTip="添加本地音频，或从 M3U 播放列表导入">
+                            <controls:DropDownButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem x:Name="BtnAddFile" Text="添加文件" Click="BtnAddFile_Click" />
+                                    <MenuFlyoutItem x:Name="BtnAddFolderRecursive" Text="添加文件夹（含子文件夹）" Click="BtnAddFolderRecursive_Click" />
+                                    <MenuFlyoutItem x:Name="BtnAddFolderFlat" Text="仅当前文件夹" Click="BtnAddFolderFlat_Click" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Name="BtnOpenList" Text="从 M3U 导入列表" Click="BtnOpenList_Click" />
+                                </MenuFlyout>
+                            </controls:DropDownButton.Flyout>
+                        </controls:DropDownButton>
+
+                        <!-- 列表维护 -->
+                        <controls:DropDownButton x:Name="BtnListMenu" Content="列表" Style="{StaticResource ActionMenuButtonStyle}"
+                                                 Visibility="Collapsed" ToolTipService.ToolTip="导出 M3U、清空列表或清空播放记录">
+                            <controls:DropDownButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem x:Name="BtnSaveList" Text="导出为 M3U" Click="BtnSaveList_Click" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Name="BtnClear" Text="清空列表" Click="BtnClear_Click" />
+                                    <MenuFlyoutItem x:Name="BtnClearRecent" Text="清空播放记录" Click="BtnClearRecent_Click" />
+                                </MenuFlyout>
+                            </controls:DropDownButton.Flyout>
+                        </controls:DropDownButton>
+
+                        <!-- 一键补全歌词：左半边立即执行，右半边箭头里是选项 -->
+                        <controls:SplitButton x:Name="BtnBatchLyrics" Content="补全歌词" Style="{StaticResource ActionSplitButtonStyle}"
+                                              Visibility="Collapsed" Click="BtnBatchLyrics_Click"
+                                              ToolTipService.ToolTip="为缺少歌词的歌曲在线下载歌词，并为已有歌词补齐翻译/罗马音；点右侧箭头可设置歌词来源与补全内容">
+                            <controls:SplitButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutSubItem Text="歌词来源">
+                                        <controls:RadioMenuFlyoutItem x:Name="LyricSrcAuto" Text="自动（网易云 → QQ → LRCLIB）"
+                                                                      GroupName="LyricSource" Click="LyricSourceOption_Click" />
+                                        <controls:RadioMenuFlyoutItem x:Name="LyricSrcNetEase" Text="网易云音乐"
+                                                                      GroupName="LyricSource" Click="LyricSourceOption_Click" />
+                                        <controls:RadioMenuFlyoutItem x:Name="LyricSrcQq" Text="QQ 音乐"
+                                                                      GroupName="LyricSource" Click="LyricSourceOption_Click" />
+                                        <controls:RadioMenuFlyoutItem x:Name="LyricSrcLrclib" Text="LRCLIB"
+                                                                      GroupName="LyricSource" Click="LyricSourceOption_Click" />
+                                    </MenuFlyoutSubItem>
+                                    <MenuFlyoutSubItem Text="补全内容">
+                                        <controls:RadioMenuFlyoutItem x:Name="LyricFillAll" Text="全部（原文 + 翻译 + 罗马音）"
+                                                                      GroupName="LyricFillMode" Click="LyricFillOption_Click" />
+                                        <controls:RadioMenuFlyoutItem x:Name="LyricFillMain" Text="仅原文歌词"
+                                                                      GroupName="LyricFillMode" Click="LyricFillOption_Click" />
+                                        <controls:RadioMenuFlyoutItem x:Name="LyricFillExtras" Text="仅补充翻译 / 罗马音"
+                                                                      GroupName="LyricFillMode" Click="LyricFillOption_Click" />
+                                    </MenuFlyoutSubItem>
+                                </MenuFlyout>
+                            </controls:SplitButton.Flyout>
+                        </controls:SplitButton>
+
+                        <!-- 歌单操作 -->
+                        <controls:DropDownButton x:Name="BtnPlaylistMenu" Content="歌单" Style="{StaticResource ActionMenuButtonStyle}"
+                                                 Visibility="Collapsed" ToolTipService.ToolTip="播放、添加歌曲、重命名或删除此歌单">
+                            <controls:DropDownButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem x:Name="BtnPlayPlaylist" Text="播放歌单" Click="BtnPlayPlaylist_Click" />
+                                    <MenuFlyoutItem x:Name="BtnAddToPlaylist" Text="添加歌曲" Click="BtnAddToPlaylist_Click" />
+                                    <MenuFlyoutItem x:Name="BtnRenamePlaylist" Text="重命名" Click="BtnRenamePlaylist_Click" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Name="BtnDeletePlaylist" Text="删除歌单" Click="BtnDeletePlaylist_Click" />
+                                </MenuFlyout>
+                            </controls:DropDownButton.Flyout>
+                        </controls:DropDownButton>
+
                         <primitives:ToggleButton x:Name="BtnSelectMode" Content="多选" Background="Transparent"
-                                                 BorderBrush="{StaticResource BorderSoft}" CornerRadius="9"
+                                                 BorderBrush="{StaticResource BorderSoft}" CornerRadius="9" Padding="14,7" FontSize="12"
                                                  Visibility="Collapsed" Checked="BtnSelectMode_Checked" Unchecked="BtnSelectMode_Unchecked"
                                                  ToolTipService.ToolTip="进入多选模式，批量添加到歌单（Ctrl+A 全选）" />
-                        <Button x:Name="BtnSelectAll" Content="全选" Style="{StaticResource ActionButtonStyle}"
-                                Visibility="Collapsed" Click="BtnSelectAll_Click" ToolTipService.ToolTip="选中当前列表中的全部歌曲（Ctrl+A）" />
-                        <Button x:Name="BtnSelectNone" Content="全不选" Style="{StaticResource ActionButtonStyle}"
-                                Visibility="Collapsed" Click="BtnSelectNone_Click" />
-                        <Button x:Name="BtnBatchAdd" Content="添加到歌单" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnBatchAdd_Click" />
-                        <Button x:Name="BtnBatchRemove" Content="移除" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnBatchRemove_Click" ToolTipService.ToolTip="移除选中的歌曲" />
-                        <Button x:Name="BtnBatchExport" Content="导出选中" Style="{StaticResource ActionButtonStyle}" Visibility="Collapsed" Click="BtnBatchExport_Click" ToolTipService.ToolTip="将选中歌曲导出为 M3U 文件" />
+
+                        <!-- 批量操作 -->
+                        <controls:DropDownButton x:Name="BtnSelectMenu" Content="批量操作" Style="{StaticResource ActionMenuButtonStyle}"
+                                                 Visibility="Collapsed" ToolTipService.ToolTip="对已选中的歌曲执行批量操作">
+                            <controls:DropDownButton.Flyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem x:Name="BtnSelectAll" Text="全选" Click="BtnSelectAll_Click" />
+                                    <MenuFlyoutItem x:Name="BtnSelectNone" Text="全不选" Click="BtnSelectNone_Click" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Name="BtnBatchAdd" Text="添加到歌单" Click="BtnBatchAdd_Click" />
+                                    <MenuFlyoutItem x:Name="BtnBatchExport" Text="导出选中" Click="BtnBatchExport_Click" />
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Name="BtnBatchRemove" Text="从列表中移除" Click="BtnBatchRemove_Click" />
+                                </MenuFlyout>
+                            </controls:DropDownButton.Flyout>
+                        </controls:DropDownButton>
                     </StackPanel>
                 </StackPanel>
 
@@ -511,6 +650,23 @@
                                         <ComboBoxItem Content="Shift-JIS" />
                                         <ComboBoxItem Content="Big5" />
                                         <ComboBoxItem Content="UTF-8" />
+                                    </ComboBox>
+                                    <TextBlock Text="歌词下载源（自动 = 网易云 → QQ → LRCLIB 依次尝试；指定某一源时不回退）"
+                                               Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
+                                    <ComboBox x:Name="LyricSourceCombo" Width="220"
+                                              SelectionChanged="LyricSourceCombo_SelectionChanged">
+                                        <ComboBoxItem Content="自动" />
+                                        <ComboBoxItem Content="网易云音乐" />
+                                        <ComboBoxItem Content="QQ 音乐" />
+                                        <ComboBoxItem Content="LRCLIB" />
+                                    </ComboBox>
+                                    <TextBlock Text="一键补全歌词写入的内容"
+                                               Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
+                                    <ComboBox x:Name="LyricFillModeCombo" Width="220"
+                                              SelectionChanged="LyricFillModeCombo_SelectionChanged">
+                                        <ComboBoxItem Content="全部（原文 + 翻译 + 罗马音）" />
+                                        <ComboBoxItem Content="仅原文歌词" />
+                                        <ComboBoxItem Content="仅补充翻译 / 罗马音" />
                                     </ComboBox>
                                     <TextBlock Text="背景不透明度（0 = 完全透明）" Style="{StaticResource SettingsHint}" />
                                     <Slider x:Name="LyricOpacitySlider" Minimum="0" Maximum="100" Value="0" Width="340" HorizontalAlignment="Left"
@@ -714,7 +870,13 @@
               VerticalAlignment="Bottom" Height="340" Margin="10,0,10,0"
               Background="{StaticResource QueueAcrylic}" BorderBrush="{StaticResource BorderSoft}"
               BorderThickness="1" CornerRadius="14,14,0,0"
+              Translation="0,0,24"
               Visibility="Collapsed">
+            <!-- Lifted off the content behind it so the panel reads as a
+                 floating layer rather than another docked strip. -->
+            <Grid.Shadow>
+                <ThemeShadow />
+            </Grid.Shadow>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
