@@ -3567,9 +3567,11 @@ public sealed partial class MainWindow : Window
 
     private void LyricSourceOption_Click(object sender, RoutedEventArgs e)
     {
-        var kind = sender == LyricSrcNetEase ? LyricSourceKind.NetEase
-            : sender == LyricSrcQq ? LyricSourceKind.QQ
-            : sender == LyricSrcLrclib ? LyricSourceKind.LRCLIB
+        // ReferenceEquals: we are deliberately identifying which menu item was
+        // clicked, so this really is an identity comparison (not value equality).
+        var kind = ReferenceEquals(sender, LyricSrcNetEase) ? LyricSourceKind.NetEase
+            : ReferenceEquals(sender, LyricSrcQq) ? LyricSourceKind.QQ
+            : ReferenceEquals(sender, LyricSrcLrclib) ? LyricSourceKind.LRCLIB
             : LyricSourceKind.Auto;
         _settings.LyricSource = LyricPreferences.ToSetting(kind);
         SettingsStore.Save(_settings);
@@ -3578,8 +3580,8 @@ public sealed partial class MainWindow : Window
 
     private void LyricFillOption_Click(object sender, RoutedEventArgs e)
     {
-        var kind = sender == LyricFillMain ? LyricFillModeKind.MainOnly
-            : sender == LyricFillExtras ? LyricFillModeKind.ExtrasOnly
+        var kind = ReferenceEquals(sender, LyricFillMain) ? LyricFillModeKind.MainOnly
+            : ReferenceEquals(sender, LyricFillExtras) ? LyricFillModeKind.ExtrasOnly
             : LyricFillModeKind.All;
         _settings.LyricFillMode = LyricPreferences.ToSetting(kind);
         SettingsStore.Save(_settings);
