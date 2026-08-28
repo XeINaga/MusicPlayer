@@ -626,6 +626,30 @@ public sealed partial class MainWindow : Window
                 SortCombo.Visibility = Visibility.Visible;
                 break;
         }
+
+        // Grouped drop-downs only appear when at least one entry inside them is
+        // available for the current view, so a group never shows up empty.
+        SyncGroupVisibility(BtnAddMenu, BtnAddFile, BtnAddFolderRecursive, BtnAddFolderFlat, BtnOpenList);
+        SyncGroupVisibility(BtnListMenu, BtnSaveList, BtnClear, BtnClearRecent);
+        SyncGroupVisibility(BtnPlaylistMenu, BtnPlayPlaylist, BtnAddToPlaylist, BtnRenamePlaylist, BtnDeletePlaylist);
+    }
+
+    /// <summary>
+    /// Show a grouped drop-down only when at least one of its menu entries is
+    /// visible, so a group never shows up empty.
+    /// </summary>
+    private static void SyncGroupVisibility(UIElement group, params MenuFlyoutItem[] items)
+    {
+        bool anyVisible = false;
+        foreach (var item in items)
+        {
+            if (item.Visibility == Visibility.Visible)
+            {
+                anyVisible = true;
+                break;
+            }
+        }
+        group.Visibility = anyVisible ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SetNavSelected(NavView view)
@@ -702,7 +726,10 @@ public sealed partial class MainWindow : Window
 
     // ---------- Adding music (lives in 本地音乐) ----------
 
-    private async void BtnAddFile_Click(object sender, RoutedEventArgs e)
+    private void BtnAddFile_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnAddFileAsync, "添加文件");
+
+    private async Task BtnAddFileAsync()
     {
         var picker = new FileOpenPicker();
         InitPicker(picker);
@@ -719,7 +746,10 @@ public sealed partial class MainWindow : Window
             AddItemsToLibrary(paths);
     }
 
-    private async void BtnAddFolderRecursive_Click(object sender, RoutedEventArgs e)
+    private void BtnAddFolderRecursive_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnAddFolderRecursiveAsync, "添加文件夹");
+
+    private async Task BtnAddFolderRecursiveAsync()
     {
         var folder = await PickFolderAsync();
         if (folder == null)
@@ -727,7 +757,10 @@ public sealed partial class MainWindow : Window
         AddItemsToLibrary(FolderScanner.Scan(folder.Path, recursive: true));
     }
 
-    private async void BtnAddFolderFlat_Click(object sender, RoutedEventArgs e)
+    private void BtnAddFolderFlat_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnAddFolderFlatAsync, "添加文件夹");
+
+    private async Task BtnAddFolderFlatAsync()
     {
         var folder = await PickFolderAsync();
         if (folder == null)
@@ -735,7 +768,10 @@ public sealed partial class MainWindow : Window
         AddItemsToLibrary(FolderScanner.Scan(folder.Path, recursive: false));
     }
 
-    private async void BtnOpenList_Click(object sender, RoutedEventArgs e)
+    private void BtnOpenList_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnOpenListAsync, "导入列表");
+
+    private async Task BtnOpenListAsync()
     {
         var picker = new FileOpenPicker();
         InitPicker(picker);
@@ -747,7 +783,10 @@ public sealed partial class MainWindow : Window
         AddItemsToLibrary(PlaylistStore.ImportM3U(file.Path));
     }
 
-    private async void BtnSaveList_Click(object sender, RoutedEventArgs e)
+    private void BtnSaveList_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnSaveListAsync, "导出列表");
+
+    private async Task BtnSaveListAsync()
     {
         if (_library.Count == 0)
             return;
@@ -921,7 +960,10 @@ public sealed partial class MainWindow : Window
 
     // ---------- Playlists UI ----------
 
-    private async void BtnNewPlaylist_Click(object sender, RoutedEventArgs e)
+    private void BtnNewPlaylist_Click(object sender, RoutedEventArgs e)
+        => SafeRun(() => BtnNewPlaylistAsync(sender), "新建歌单");
+
+    private async Task BtnNewPlaylistAsync(object sender)
     {
         var nameBox = new TextBox { PlaceholderText = "请输入歌单名称", Width = 280 };
         var hint = new TextBlock { Text = " ", Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray), FontSize = 12 };
@@ -977,7 +1019,10 @@ public sealed partial class MainWindow : Window
         StartPlay(_currentPlaylist.Tracks, 0);
     }
 
-    private async void BtnAddToPlaylist_Click(object sender, RoutedEventArgs e)
+    private void BtnAddToPlaylist_Click(object sender, RoutedEventArgs e)
+        => SafeRun(() => BtnAddToPlaylistAsync(sender), "添加歌曲");
+
+    private async Task BtnAddToPlaylistAsync(object sender)
     {
         if (_currentPlaylist == null)
             return;
@@ -1004,14 +1049,20 @@ public sealed partial class MainWindow : Window
         RefreshDisplay();
     }
 
-    private async void BtnDeletePlaylist_Click(object sender, RoutedEventArgs e)
+    private void BtnDeletePlaylist_Click(object sender, RoutedEventArgs e)
+        => SafeRun(() => BtnDeletePlaylistAsync(sender), "删除歌单");
+
+    private async Task BtnDeletePlaylistAsync(object sender)
     {
         if (_currentPlaylist == null)
             return;
         await DeletePlaylistConfirmed(_currentPlaylist);
     }
 
-    private async void BtnRenamePlaylist_Click(object sender, RoutedEventArgs e)
+    private void BtnRenamePlaylist_Click(object sender, RoutedEventArgs e)
+        => SafeRun(() => BtnRenamePlaylistAsync(sender), "重命名歌单");
+
+    private async Task BtnRenamePlaylistAsync(object sender)
     {
         if (_currentPlaylist == null)
             return;
@@ -1150,6 +1201,8 @@ public sealed partial class MainWindow : Window
         BtnBatchExport.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
         BtnSelectAll.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
         BtnSelectNone.Visibility = _selectMode ? Visibility.Visible : Visibility.Collapsed;
+
+        SyncGroupVisibility(BtnSelectMenu, BtnSelectAll, BtnSelectNone, BtnBatchAdd, BtnBatchRemove, BtnBatchExport);
     }
 
     /// <summary>In-place drag reordering of a playlist is only meaningful when
@@ -1215,7 +1268,10 @@ public sealed partial class MainWindow : Window
         RefreshDisplay();
     }
 
-    private async void BtnBatchExport_Click(object sender, RoutedEventArgs e)
+    private void BtnBatchExport_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnBatchExportAsync, "导出选中");
+
+    private async Task BtnBatchExportAsync()
     {
         var sel = (_viewMode == "Grid" ? TrackGrid.SelectedItems : TrackList.SelectedItems)
             .Cast<Track>().ToList();
@@ -1258,7 +1314,10 @@ public sealed partial class MainWindow : Window
             e.DragUIOverride.Caption = "添加文件或文件夹";
     }
 
-    private async void TrackGrid_Drop(object sender, DragEventArgs e)
+    private void TrackGrid_Drop(object sender, DragEventArgs e)
+        => SafeRun(() => TrackGridDropAsync(sender, e), "添加拖放的文件");
+
+    private async Task TrackGridDropAsync(object sender, DragEventArgs e)
     {
         var items = await e.DataView.GetStorageItemsAsync();
         var paths = new List<string>();
@@ -1455,7 +1514,10 @@ public sealed partial class MainWindow : Window
 
     // ---------- Manual lyric assignment ----------
 
-    private async void AssignLyric_Click(object sender, RoutedEventArgs e)
+    private void AssignLyric_Click(object sender, RoutedEventArgs e)
+        => SafeRun(() => AssignLyricAsync(sender), "指定歌词");
+
+    private async Task AssignLyricAsync(object sender)
     {
         var track = _contextTrack ?? (sender as FrameworkElement)?.DataContext as Track;
         if (track == null)
@@ -2612,18 +2674,36 @@ public sealed partial class MainWindow : Window
     /// .zh.lrc (translation) / .romaji.lrc — the exact names LyricsParser
     /// auto-detects and merges by timestamp.
     /// </summary>
-    private static void SaveLyricFiles(Track track, string lyric, string? trans, string? roma)
+    /// <summary>
+    /// Persist a lyric download next to the audio file, honouring the user's
+    /// fill-mode preference:
+    ///   All        – main lyric + translation + romaji
+    ///   MainOnly   – only the main lyric; translation/romaji left untouched
+    ///   ExtrasOnly – only translation/romaji; the main lyric is never overwritten
+    /// Returns true when at least one file was written.
+    /// </summary>
+    private static bool SaveLyricFiles(
+        Track track, string? lyric, string? trans, string? roma, LyricFillModeKind fillMode)
     {
+        bool writeMain = fillMode is LyricFillModeKind.All or LyricFillModeKind.MainOnly;
+        bool writeExtras = fillMode is LyricFillModeKind.All or LyricFillModeKind.ExtrasOnly;
+
+        var main = writeMain && !string.IsNullOrWhiteSpace(lyric) ? lyric : null;
+        var zh = writeExtras && !string.IsNullOrWhiteSpace(trans) ? trans : null;
+        var ro = writeExtras && !string.IsNullOrWhiteSpace(roma) ? roma : null;
+
+        if (main == null && zh == null && ro == null)
+            return false;
+
         var basePath = Path.Combine(
             Path.GetDirectoryName(track.Path) ?? "",
             Path.GetFileNameWithoutExtension(track.Path));
         var utf8 = new System.Text.UTF8Encoding(false);
 
-        AtomicFile.WriteAllText(basePath + ".lrc", lyric, utf8);
-        if (!string.IsNullOrWhiteSpace(trans))
-            AtomicFile.WriteAllText(basePath + ".zh.lrc", trans, utf8);
-        if (!string.IsNullOrWhiteSpace(roma))
-            AtomicFile.WriteAllText(basePath + ".romaji.lrc", roma, utf8);
+        if (main != null) AtomicFile.WriteAllText(basePath + ".lrc", main, utf8);
+        if (zh != null) AtomicFile.WriteAllText(basePath + ".zh.lrc", zh, utf8);
+        if (ro != null) AtomicFile.WriteAllText(basePath + ".romaji.lrc", ro, utf8);
+        return true;
     }
 
     private async Task AutoDownloadLyricForTrackAsync(Track track)
@@ -2650,11 +2730,13 @@ public sealed partial class MainWindow : Window
 
     /// <summary>
     /// Search by "artist title" and download lyrics.
-    /// NetEase first — it serves original + translation + romaji from ONE
-    /// source, so companion-file timestamps line up exactly. QQ Music is the
-    /// second fallback (original lyric only: its web API stopped serving
-    /// translations without login). LRCLIB is the third fallback (synced LRC
-    /// with time tags, original only).
+    /// Order is NetEase → QQ → LRCLIB, but the user's LyricSource preference
+    /// can restrict this to a single source (see LyricSourceKind) — a specific
+    /// choice is used exclusively rather than silently falling back.
+    /// NetEase serves original + translation + romaji from ONE source, so
+    /// companion-file timestamps line up exactly. QQ Music is second and now
+    /// also yields translation + romaji via the encrypted QRC endpoint.
+    /// LRCLIB is third (synced LRC with time tags, original only).
     /// </summary>
     private async Task<bool> TryAutoDownloadAsync(Track track)
     {
@@ -2668,20 +2750,26 @@ public sealed partial class MainWindow : Window
 
         int? durationSec = track.Duration > TimeSpan.Zero ? (int)track.Duration.TotalSeconds : null;
 
+        // Honour the user's lyric-source preference. "Auto" tries every source in
+        // order; a specific source is used exclusively (no silent fallback).
+        var sourceKind = LyricPreferences.ParseSource(_settings.LyricSource);
+        bool tryNetEase = sourceKind is LyricSourceKind.Auto or LyricSourceKind.NetEase;
+        bool tryQq = sourceKind is LyricSourceKind.Auto or LyricSourceKind.QQ;
+        bool tryLrclib = sourceKind is LyricSourceKind.Auto or LyricSourceKind.LRCLIB;
+        var fillMode = LyricPreferences.ParseFillMode(_settings.LyricFillMode);
+
         // 1) NetEase (full three-line set).
-        var neSong = await MatchNetEaseAsync(keyword, track.Title, durationSec);
+        var neSong = tryNetEase ? await MatchNetEaseAsync(keyword, track.Title, durationSec) : null;
         if (neSong != null)
         {
             var ne = await NetEaseLyricService.FetchLyricAsync(neSong.SongMid);
-            if (!string.IsNullOrEmpty(ne?.Lyric))
-            {
-                SaveLyricFiles(track, ne.Value.Lyric!, ne.Value.Trans, ne.Value.Roma);
+            if (ne != null &&
+                SaveLyricFiles(track, ne.Value.Lyric, ne.Value.Trans, ne.Value.Roma, fillMode))
                 return true;
-            }
         }
 
-        // 2) QQ Music fallback (original only).
-        var qqResults = await QQLyricService.SearchAsync(keyword, 20);
+        // 2) QQ Music fallback (original + translation + romaji via QRC).
+        var qqResults = tryQq ? await QQLyricService.SearchAsync(keyword, 20) : new List<QQSong>();
         if (qqResults.Count > 0)
         {
             var primaryArtist = Norm(track.Artist == "未知歌手" ? "" : track.Artist);
@@ -2725,17 +2813,15 @@ public sealed partial class MainWindow : Window
             // Require a real title match (>=10) to avoid saving wrong lyrics.
             if (best != null && bestScore >= 10)
             {
-                var lyric = await QQLyricService.FetchLyricAsync(best.SongMid);
-                if (!string.IsNullOrEmpty(lyric?.Lyric))
-                {
-                    SaveLyricFiles(track, lyric.Value.Lyric!, lyric.Value.Trans, lyric.Value.Roma);
+                var lyric = await QQLyricService.FetchLyricAsync(best.SongMid, best.SongId);
+                if (lyric != null &&
+                    SaveLyricFiles(track, lyric.Value.Lyric, lyric.Value.Trans, lyric.Value.Roma, fillMode))
                     return true;
-                }
             }
         }
 
         // 3) LRCLIB fallback (synced LRC with time tags, original only).
-        var lrResults = await LrclibService.SearchAsync(keyword, 20);
+        var lrResults = tryLrclib ? await LrclibService.SearchAsync(keyword, 20) : new List<QQSong>();
         if (lrResults.Count > 0)
         {
             QQSong? best = null;
@@ -2778,11 +2864,9 @@ public sealed partial class MainWindow : Window
             if (best != null && bestScore >= 10)
             {
                 var lyric = await LrclibService.FetchLyricAsync(best.SongMid);
-                if (!string.IsNullOrEmpty(lyric?.Lyric))
-                {
-                    SaveLyricFiles(track, lyric.Value.Lyric!, lyric.Value.Trans, lyric.Value.Roma);
+                if (lyric != null &&
+                    SaveLyricFiles(track, lyric.Value.Lyric, lyric.Value.Trans, lyric.Value.Roma, fillMode))
                     return true;
-                }
             }
         }
 
@@ -2914,7 +2998,10 @@ public sealed partial class MainWindow : Window
         return new TimeSpan(0, 0, minutes, seconds, ms);
     }
 
-    private async void ShowOnlineLyricDialog(Track track)
+    private void ShowOnlineLyricDialog(Track track)
+        => SafeRun(() => ShowOnlineLyricDialogAsync(track), "下载歌词");
+
+    private async Task ShowOnlineLyricDialogAsync(Track track)
     {
         var keywordBox = new TextBox { Text = BuildSearchKeyword(track), Width = 290 };
         var status = new TextBlock
@@ -3013,7 +3100,7 @@ public sealed partial class MainWindow : Window
             return;
 
         ShowInfoBar($"正在下载歌词：{selected.Title} - {selected.Artist}");
-        var lyric = await QQLyricService.FetchLyricAsync(selected.SongMid);
+        var lyric = await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId);
         if (string.IsNullOrEmpty(lyric?.Lyric))
         {
             ShowInfoBar("该歌曲没有可用歌词。");
@@ -3024,11 +3111,13 @@ public sealed partial class MainWindow : Window
         string? extraNote = null;
         try
         {
-            SaveLyricFiles(track, lyric.Value.Lyric!, lyric.Value.Trans, lyric.Value.Roma);
+            var fillMode = LyricPreferences.ParseFillMode(_settings.LyricFillMode);
+            SaveLyricFiles(track, lyric.Value.Lyric, lyric.Value.Trans, lyric.Value.Roma, fillMode);
 
-            // QQ's web API no longer serves translations — top up translation /
-            // romaji from NetEase, snapping their timestamps onto the saved
-            // main lyric so the three lines merge correctly.
+            // QQ's QRC feed covers translation + romaji for many tracks, but not
+            // all. When something is still missing, top it up from NetEase,
+            // snapping those timestamps onto the saved main lyric so the three
+            // lines merge correctly.
             var master = ParseLyricTimes(lyric.Value.Lyric!);
             var neSong = await MatchNetEaseAsync(
                 $"{selected.Title} {selected.Artist}".Trim(),
@@ -3067,6 +3156,9 @@ public sealed partial class MainWindow : Window
     // ---------- Batch lyric download + translation/romaji completion ----------
 
     private bool _batchLyricRunning;
+
+    /// <summary>Guards SyncLyricOptionChecks against re-entrant SelectionChanged events.</summary>
+    private bool _syncingLyricOptions;
 
     /// <summary>
     /// Inspect the track's existing lyrics; if a translation and/or a romaji
@@ -3194,7 +3286,12 @@ public sealed partial class MainWindow : Window
         return (toppedTrans, toppedRoma);
     }
 
-    private async void BtnBatchLyrics_Click(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Runs the one-click lyric fill. Wired to the SplitButton's primary click,
+    /// so it takes SplitButtonClickEventArgs; the drop-down half only carries
+    /// options (lyric source / what to fill).
+    /// </summary>
+    private async void BtnBatchLyrics_Click(object sender, SplitButtonClickEventArgs e)
     {
         if (_batchLyricRunning)
             return;
@@ -3238,6 +3335,8 @@ public sealed partial class MainWindow : Window
         }
 
         _batchLyricRunning = true;
+        try
+        {
         var total = noLyric.Count + incomplete.Count;
         var header = $"补全歌词开始 — 共 {total} 首" +
                      $"（缺主歌词 {noLyric.Count}，缺翻译/罗马音 {incomplete.Count}）";
@@ -3304,13 +3403,24 @@ public sealed partial class MainWindow : Window
             await Task.Delay(400);
         }
 
-        _batchLyricRunning = false;
-        if (refreshCurrent)
-            LoadLyricsFor(_loadedIndex);
+            if (refreshCurrent)
+                LoadLyricsFor(_loadedIndex);
 
-        var summary = $"补全歌词完成：新下载 {downloaded}，补全翻译/罗马音 {topped}，失败 {failed} / {total}";
-        AppLog.WriteLyricCompletionSection(summary);
-        ShowInfoBar(summary + $"。日志：{AppLog.LyricCompletionLogPath}");
+            var summary = $"补全歌词完成：新下载 {downloaded}，补全翻译/罗马音 {topped}，失败 {failed} / {total}";
+            AppLog.WriteLyricCompletionSection(summary);
+            ShowInfoBar(summary + $"。日志：{AppLog.LyricCompletionLogPath}");
+        }
+        catch (Exception ex)
+        {
+            ShowInfoBar($"补全歌词失败：{ex.Message}");
+        }
+        finally
+        {
+            // Must run even on failure: an `async void` handler has no caller to
+            // catch the exception, and leaving the guard set would permanently
+            // lock the action out until the app is restarted.
+            _batchLyricRunning = false;
+        }
     }
 
     private void ShowInfoBar(string message)
@@ -3321,6 +3431,25 @@ public sealed partial class MainWindow : Window
         PlayErrorBar.IsOpen = true;
         _errorBarTimer.Stop();
         _errorBarTimer.Start();
+    }
+
+    /// <summary>
+    /// Run an async UI action and surface any failure to the user instead of
+    /// letting it escape. Exceptions thrown inside an `async void` handler have
+    /// no caller that can catch them and will tear down the process, so every
+    /// async entry point (file pickers, network calls, drag-and-drop) routes
+    /// through here.
+    /// </summary>
+    private async void SafeRun(Func<Task> action, string what)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            ShowInfoBar($"{what}失败：{ex.Message}");
+        }
     }
 
     private static void SetLineActive(StackPanel panel, bool active)
@@ -3354,6 +3483,8 @@ public sealed partial class MainWindow : Window
             "utf-8" => 4,
             _ => 0
         };
+        // Restores both the settings combo boxes and the toolbar's radio menus.
+        SyncLyricOptionChecks();
         CoverSpinToggle.IsOn = _settings.CoverSpin;
         CloseActionCombo.SelectedIndex = _settings.CloseAction == "Tray" ? 1 : 0;
 
@@ -3409,13 +3540,112 @@ public sealed partial class MainWindow : Window
             LoadLyricsFor(_loadedIndex);
     }
 
+    private void LyricSourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _settings.LyricSource = LyricPreferences.ToSetting(LyricSourceCombo.SelectedIndex switch
+        {
+            1 => LyricSourceKind.NetEase,
+            2 => LyricSourceKind.QQ,
+            3 => LyricSourceKind.LRCLIB,
+            _ => LyricSourceKind.Auto
+        });
+        SettingsStore.Save(_settings);
+        SyncLyricOptionChecks();
+    }
+
+    private void LyricFillModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _settings.LyricFillMode = LyricPreferences.ToSetting(LyricFillModeCombo.SelectedIndex switch
+        {
+            1 => LyricFillModeKind.MainOnly,
+            2 => LyricFillModeKind.ExtrasOnly,
+            _ => LyricFillModeKind.All
+        });
+        SettingsStore.Save(_settings);
+        SyncLyricOptionChecks();
+    }
+
+    private void LyricSourceOption_Click(object sender, RoutedEventArgs e)
+    {
+        var kind = sender == LyricSrcNetEase ? LyricSourceKind.NetEase
+            : sender == LyricSrcQq ? LyricSourceKind.QQ
+            : sender == LyricSrcLrclib ? LyricSourceKind.LRCLIB
+            : LyricSourceKind.Auto;
+        _settings.LyricSource = LyricPreferences.ToSetting(kind);
+        SettingsStore.Save(_settings);
+        SyncLyricOptionChecks();
+    }
+
+    private void LyricFillOption_Click(object sender, RoutedEventArgs e)
+    {
+        var kind = sender == LyricFillMain ? LyricFillModeKind.MainOnly
+            : sender == LyricFillExtras ? LyricFillModeKind.ExtrasOnly
+            : LyricFillModeKind.All;
+        _settings.LyricFillMode = LyricPreferences.ToSetting(kind);
+        SettingsStore.Save(_settings);
+        SyncLyricOptionChecks();
+    }
+
+    /// <summary>
+    /// Reflect the persisted lyric preferences onto the toolbar's radio menus
+    /// AND the settings combo boxes, so the two UIs never disagree.
+    /// </summary>
+    private void SyncLyricOptionChecks()
+    {
+        // Assigning ComboBox.SelectedIndex raises SelectionChanged, whose handler
+        // calls back into this method. Bail out on re-entry so one user action
+        // cannot cascade into repeated settings writes.
+        if (_syncingLyricOptions)
+            return;
+        _syncingLyricOptions = true;
+        try
+        {
+            SyncLyricOptionChecksCore();
+        }
+        finally
+        {
+            _syncingLyricOptions = false;
+        }
+    }
+
+    private void SyncLyricOptionChecksCore()
+    {
+        var src = LyricPreferences.ParseSource(_settings.LyricSource);
+        LyricSrcAuto.IsChecked = src == LyricSourceKind.Auto;
+        LyricSrcNetEase.IsChecked = src == LyricSourceKind.NetEase;
+        LyricSrcQq.IsChecked = src == LyricSourceKind.QQ;
+        LyricSrcLrclib.IsChecked = src == LyricSourceKind.LRCLIB;
+
+        var fill = LyricPreferences.ParseFillMode(_settings.LyricFillMode);
+        LyricFillAll.IsChecked = fill == LyricFillModeKind.All;
+        LyricFillMain.IsChecked = fill == LyricFillModeKind.MainOnly;
+        LyricFillExtras.IsChecked = fill == LyricFillModeKind.ExtrasOnly;
+
+        LyricSourceCombo.SelectedIndex = src switch
+        {
+            LyricSourceKind.NetEase => 1,
+            LyricSourceKind.QQ => 2,
+            LyricSourceKind.LRCLIB => 3,
+            _ => 0
+        };
+        LyricFillModeCombo.SelectedIndex = fill switch
+        {
+            LyricFillModeKind.MainOnly => 1,
+            LyricFillModeKind.ExtrasOnly => 2,
+            _ => 0
+        };
+    }
+
     private void CloseActionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         _settings.CloseAction = CloseActionCombo.SelectedIndex == 1 ? "Tray" : "Exit";
         SettingsStore.Save(_settings);
     }
 
-    private async void CacheDirBrowse_Click(object sender, RoutedEventArgs e)
+    private void CacheDirBrowse_Click(object sender, RoutedEventArgs e)
+        => SafeRun(() => CacheDirBrowseAsync(sender), "选择缓存目录");
+
+    private async Task CacheDirBrowseAsync(object sender)
     {
         try
         {
@@ -3680,7 +3910,10 @@ public sealed partial class MainWindow : Window
 
     // ---------- Last.fm ----------
 
-    private async void LastFmConnectBtn_Click(object sender, RoutedEventArgs e)
+    private void LastFmConnectBtn_Click(object sender, RoutedEventArgs e)
+        => SafeRun(() => LastFmConnectAsync(sender), "连接 Last.fm");
+
+    private async Task LastFmConnectAsync(object sender)
     {
         // Save any entered API key/secret first.
         _settings.LastFmApiKey = (LastFmApiKeyBox.Text ?? "").Trim();

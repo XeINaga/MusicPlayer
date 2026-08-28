@@ -29,6 +29,23 @@ public sealed class AppSettings
     /// <summary>Show romaji / translation lines in the lyrics panel AND the desktop overlay.</summary>
     public bool LyricShowRomaji { get; set; } = true;
     public bool LyricShowTranslation { get; set; } = true;
+
+    /// <summary>
+    /// Preferred lyric source when downloading lyrics.
+    /// "Auto" (try NetEase → QQ → LRCLIB, first hit wins)
+    /// | "NetEase" | "QQ" | "LRCLIB".
+    /// When a specific source is chosen it is used exclusively (no fallback),
+    /// so the user stays in control of where lyrics come from.
+    /// </summary>
+    public string LyricSource { get; set; } = "Auto";
+
+    /// <summary>
+    /// What the one-click "补全歌词" action fills in:
+    /// "All" (main lyric + translation + romaji, whichever the source has)
+    /// | "MainOnly" (original lyric only)
+    /// | "ExtrasOnly" (only add translation/romaji; never overwrite the main lyric).
+    /// </summary>
+    public string LyricFillMode { get; set; } = "All";
     /// <summary>Desktop-lyrics overlay window position; -1,-1 = default (bottom center).</summary>
     public int LyricPosX { get; set; } = -1;
     public int LyricPosY { get; set; } = -1;
@@ -63,6 +80,61 @@ public sealed class AppSettings
     public string LastFmApiSecret { get; set; } = "";
     public string LastFmSessionKey { get; set; } = "";
     public string LastFmUsername { get; set; } = "";
+}
+
+/// <summary>Lyric sources the user can choose from.</summary>
+public enum LyricSourceKind
+{
+    /// <summary>NetEase → QQ → LRCLIB, first hit wins.</summary>
+    Auto,
+    NetEase,
+    QQ,
+    LRCLIB,
+}
+
+/// <summary>What the one-click "补全歌词" action is allowed to write.</summary>
+public enum LyricFillModeKind
+{
+    /// <summary>Original + translation + romaji, whichever the source provides.</summary>
+    All,
+    /// <summary>Only the original lyric; leave translation/romaji untouched.</summary>
+    MainOnly,
+    /// <summary>Only add translation/romaji; never overwrite an existing main lyric.</summary>
+    ExtrasOnly,
+}
+
+/// <summary>Helpers mapping the persisted string settings to their enums.</summary>
+public static class LyricPreferences
+{
+    public static LyricSourceKind ParseSource(string? raw) => raw?.Trim().ToLowerInvariant() switch
+    {
+        "netease" => LyricSourceKind.NetEase,
+        "qq" => LyricSourceKind.QQ,
+        "lrclib" => LyricSourceKind.LRCLIB,
+        _ => LyricSourceKind.Auto,
+    };
+
+    public static LyricFillModeKind ParseFillMode(string? raw) => raw?.Trim().ToLowerInvariant() switch
+    {
+        "mainonly" => LyricFillModeKind.MainOnly,
+        "extrasonly" => LyricFillModeKind.ExtrasOnly,
+        _ => LyricFillModeKind.All,
+    };
+
+    public static string ToSetting(LyricSourceKind kind) => kind switch
+    {
+        LyricSourceKind.NetEase => "NetEase",
+        LyricSourceKind.QQ => "QQ",
+        LyricSourceKind.LRCLIB => "LRCLIB",
+        _ => "Auto",
+    };
+
+    public static string ToSetting(LyricFillModeKind kind) => kind switch
+    {
+        LyricFillModeKind.MainOnly => "MainOnly",
+        LyricFillModeKind.ExtrasOnly => "ExtrasOnly",
+        _ => "All",
+    };
 }
 
 public sealed class SettingsStore
