@@ -46,6 +46,13 @@ public sealed class PlaybackService
     private readonly Random _rnd = new();
     // Random mode: real "previous" needs a history of what actually played.
     private readonly Stack<int> _randomHistory = new();
+    // Random mode: indices not yet played in the current round. Drawing from
+    // this until it empties plays every track once before any repeat.
+    // It holds *indices*, so it is only meaningful for the exact queue it was
+    // built from — _bagQueueCount detects add/remove, and structural edits
+    // (reorder, queue swap) clear it explicitly.
+    private readonly List<int> _randomBag = new();
+    private int _bagQueueCount = -1;
 
     // Crossfade state: fades volume out over 200ms then loads the next track
     // and fades it in over CrossfadeDurationMs (0 = off, instant switch).
@@ -144,6 +151,10 @@ public sealed class PlaybackService
             if (_mode == value)
                 return;
             _mode = value;
+            // Switching into random starts a clean round instead of resuming a
+            // pool left over from an earlier queue.
+            if (_mode == PlayMode.Random)
+                ResetRandomBag();
             ModeChanged?.Invoke();
         }
     }
@@ -162,6 +173,7 @@ public sealed class PlaybackService
             return;
 
         _randomHistory.Clear();
+        ResetRandomBag();
         _queue = tracks;
 
         // A negative index means "just adopt the queue, load nothing" — clamping
@@ -228,7 +240,12 @@ public sealed class PlaybackService
         // Random mode: go back through what actually played before.
         if (_mode == PlayMode.Random && _randomHistory.Count > 0)
         {
-            _index = _randomHistory.Pop();
+            // Tracks deleted since they played leave stale indices behind.
+            var prev = PopValidRandomHistory();
+            if (prev < 0)
+                return; // nothing remembered still exists in the queue
+
+            _index = prev;
             CurrentIndexChanged?.Invoke(_index);
             if (_crossfadeDurationMs > 0)
             {
@@ -261,6 +278,10 @@ public sealed class PlaybackService
             return;
 
         _index = index;
+        // Hand-picked track: count it as played this round so the bag will not
+        // hand it back until the next one.
+        if (_mode == PlayMode.Random)
+            _randomBag.Remove(index);
         CurrentIndexChanged?.Invoke(_index);
         if (_crossfadeDurationMs > 0)
         {
@@ -285,6 +306,10 @@ public sealed class PlaybackService
         if (_queue == null || index < 0 || index >= _queue.Count)
             return;
         _index = index;
+        // Drag-reordering moves tracks between indices without changing the
+        // count, so the length guard cannot catch it — every stored index now
+        // points at a different track.
+        ResetRandomBag();
     }
 
     /// <summary>
@@ -298,6 +323,7 @@ public sealed class PlaybackService
         if (tracks == null || tracks.Count == 0)
             return;
         _randomHistory.Clear();
+        ResetRandomBag();
         _queue = tracks;
         _index = Math.Clamp(currentIndex, 0, tracks.Count - 1);
     }
@@ -313,6 +339,8 @@ public sealed class PlaybackService
         _queue = null;
         _index = -1;
         _hookedSession = null;
+        _randomHistory.Clear();
+        ResetRandomBag();
 
         _ffmpegSource?.Dispose();
         _ffmpegSource = null;
@@ -586,6 +614,80 @@ public sealed class PlaybackService
             _randomHistory.Push(_index);
     }
 
+    /// <summary>
+    /// Pop the most recent history entry whose index still points into the
+    /// queue, discarding any left stale by tracks removed since it played.
+    /// Returns -1 when nothing usable is left.
+    /// </summary>
+    private int PopValidRandomHistory()
+    {
+        var n = _queue?.Count ?? 0;
+        while (_randomHistory.Count > 0)
+        {
+            var i = _randomHistory.Pop();
+            if (i >= 0 && i < n)
+                return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// Random mode: draw the next track from the current round's pool, so every
+    /// queued track plays once before any of them comes up again.
+    /// </summary>
+    private int ComputeNextRandom(int n)
+    {
+        if (n == 1)
+            return 0;
+
+        // Indices only line up with the queue the bag was built from; a length
+        // change means tracks were added or removed, so start a fresh round.
+        if (_bagQueueCount != n)
+            RefillRandomBag(n);
+
+        if (_randomBag.Count == 0)
+            RefillRandomBag(n);
+
+        // Draw from the tail: O(1) and leaves the remaining order untouched.
+        var pick = _randomBag.Count - 1;
+        var r = _randomBag[pick];
+
+        // A fresh round puts every track back, including the one playing now.
+        // Drawing it immediately would replay the same track twice in a row —
+        // it reads as a broken skip, so take a different one and leave it in
+        // the bag for later in the round.
+        if (r == _index && _randomBag.Count > 1)
+        {
+            pick = _rnd.Next(_randomBag.Count - 1);
+            r = _randomBag[pick];
+        }
+
+        _randomBag.RemoveAt(pick);
+        return r;
+    }
+
+    /// <summary>Refill the round with every index, shuffled (Fisher-Yates).</summary>
+    private void RefillRandomBag(int n)
+    {
+        _randomBag.Clear();
+        for (var i = 0; i < n; i++)
+            _randomBag.Add(i);
+
+        for (var i = _randomBag.Count - 1; i > 0; i--)
+        {
+            var j = _rnd.Next(i + 1);
+            (_randomBag[i], _randomBag[j]) = (_randomBag[j], _randomBag[i]);
+        }
+        _bagQueueCount = n;
+    }
+
+    /// <summary>Drop the current round; the next draw builds a fresh one.</summary>
+    private void ResetRandomBag()
+    {
+        _randomBag.Clear();
+        _bagQueueCount = -1;
+    }
+
     private int ComputeNext(bool forward)
     {
         if (_queue == null || _queue.Count == 0)
@@ -594,13 +696,7 @@ public sealed class PlaybackService
         var n = _queue.Count;
 
         if (_mode == PlayMode.Random)
-        {
-            if (n == 1)
-                return 0;
-            int r;
-            do { r = _rnd.Next(n); } while (r == _index);
-            return r;
-        }
+            return ComputeNextRandom(n);
 
         if (forward)
         {
