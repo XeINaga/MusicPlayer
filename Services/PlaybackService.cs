@@ -216,7 +216,7 @@ public sealed class PlaybackService
 
         if (_crossfadeDurationMs > 0)
         {
-            _pendingTargetVolume = Volume;
+            _pendingTargetVolume = _targetVolume;
             StartCrossfade(n);
         }
         else
@@ -249,7 +249,7 @@ public sealed class PlaybackService
             CurrentIndexChanged?.Invoke(_index);
             if (_crossfadeDurationMs > 0)
             {
-                _pendingTargetVolume = Volume;
+                _pendingTargetVolume = _targetVolume;
                 StartCrossfade(_index);
             }
             else
@@ -263,7 +263,7 @@ public sealed class PlaybackService
         CurrentIndexChanged?.Invoke(_index);
         if (_crossfadeDurationMs > 0)
         {
-            _pendingTargetVolume = Volume;
+            _pendingTargetVolume = _targetVolume;
             StartCrossfade(_index);
         }
         else
@@ -285,7 +285,7 @@ public sealed class PlaybackService
         CurrentIndexChanged?.Invoke(_index);
         if (_crossfadeDurationMs > 0)
         {
-            _pendingTargetVolume = Volume;
+            _pendingTargetVolume = _targetVolume;
             StartCrossfade(index);
         }
         else
@@ -338,7 +338,14 @@ public sealed class PlaybackService
         _player.Source = null;
         _queue = null;
         _index = -1;
-        _hookedSession = null;
+        // Unhook before dropping the reference. The session holds the handler,
+        // so nulling the field alone leaks the session and keeps delivering
+        // position ticks for a player that is no longer in use.
+        if (_hookedSession != null)
+        {
+            _hookedSession.PositionChanged -= OnPositionChanged;
+            _hookedSession = null;
+        }
         _randomHistory.Clear();
         ResetRandomBag();
 
@@ -580,15 +587,30 @@ public sealed class PlaybackService
         // opened), start the fade-in now.
         if (_pendingCrossfadeIndex >= 0)
         {
+            var pending = _pendingCrossfadeIndex;
+            // Clear the flag before anything can bail out. The fade-out can
+            // finish into a queue that no longer holds this index (cleared, or
+            // the track was filtered out), in which case LoadCurrent returns
+            // early and MediaOpened never fires — leaving the flag set. A stale
+            // one then zeroes the volume on some later, unrelated media open,
+            // even after crossfade has been switched off entirely.
             _pendingCrossfadeIndex = -1;
-            _fadingOut = false;
-            _fadeElapsed = TimeSpan.Zero;
-            _fadeFrom = 0;
-            _fadeTo = _pendingTargetVolume;
-            _player.Volume = 0;
-            _player.Play();
-            if (!_fadeTimer.IsEnabled)
-                _fadeTimer.Start();
+
+            if (_crossfadeDurationMs > 0
+                && _queue != null
+                && pending >= 0
+                && pending < _queue.Count
+                && pending == _index)
+            {
+                _fadingOut = false;
+                _fadeElapsed = TimeSpan.Zero;
+                _fadeFrom = 0;
+                _fadeTo = _pendingTargetVolume;
+                _player.Volume = 0;
+                _player.Play();
+                if (!_fadeTimer.IsEnabled)
+                    _fadeTimer.Start();
+            }
         }
     }
 
@@ -611,7 +633,7 @@ public sealed class PlaybackService
 
         if (_crossfadeDurationMs > 0)
         {
-            _pendingTargetVolume = Volume;
+            _pendingTargetVolume = _targetVolume;
             StartCrossfade(n);
         }
         else

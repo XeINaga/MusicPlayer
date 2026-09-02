@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage.Streams;
 
@@ -20,8 +21,8 @@ internal static class CoverCache
     /// <summary>
     /// Return a decoded cover bitmap.  If the disk cache already holds
     /// an entry for <paramref name="audioPath"/> it is loaded directly;
-    /// otherwise <paramref name="rawBytes"/> (from TagLib) is decoded,
-    /// written to disk, and then returned.
+    /// otherwise <paramref name="rawBytes"/> (from TagLib) is persisted and
+    /// then loaded back from disk.
     /// </summary>
     /// <param name="audioPath">Full path of the audio file (used to derive cache key).</param>
     /// <param name="rawBytes">Raw image bytes extracted from the audio tag (may be null).</param>
@@ -29,7 +30,12 @@ internal static class CoverCache
     /// A <see cref="BitmapImage"/> with <see cref="BitmapImage.DecodePixelWidth"/>
     /// set to 480, or <c>null</c> when no cover art is available.
     /// </returns>
-    public static BitmapImage? GetOrLoad(string audioPath, byte[]? rawBytes)
+    /// <remarks>
+    /// Must be called on the UI thread — BitmapImage is a DependencyObject. The
+    /// awaits inside release the thread rather than blocking it; the decode
+    /// itself stays asynchronous.
+    /// </remarks>
+    public static async Task<BitmapImage?> GetOrLoadAsync(string audioPath, byte[]? rawBytes)
     {
         if (rawBytes == null || rawBytes.Length == 0)
             return null;
@@ -40,21 +46,20 @@ internal static class CoverCache
 
             var cacheFile = Path.Combine(CacheDir, HashPath(audioPath) + ".png");
 
-            // Fast path: load from disk cache
-            if (File.Exists(cacheFile))
-            {
-                return CreateFromDisk(cacheFile);
-            }
+            // Slow path: writing the extracted art is a synchronous write of up
+            // to a couple of megabytes. On the UI thread that stalls scrolling,
+            // so push it to the thread pool. Reading it back via UriSource is
+            // already asynchronous, and is how the fast path works too.
+            if (!File.Exists(cacheFile))
+                await Task.Run(() => File.WriteAllBytes(cacheFile, rawBytes));
 
-            // Slow path: decode, persist, then return
-            File.WriteAllBytes(cacheFile, rawBytes);
             return CreateFromDisk(cacheFile);
         }
         catch
         {
-            // On any I/O or codec failure fall back to an in-memory bitmap
-            // so the UI still shows *something*.
-            return CreateInMemory(rawBytes);
+            // On any I/O or codec failure fall back to an in-memory bitmap so
+            // the UI still shows *something*.
+            return await CreateInMemoryAsync(rawBytes!);
         }
     }
 
@@ -81,7 +86,7 @@ internal static class CoverCache
         return bmp;
     }
 
-    private static BitmapImage CreateInMemory(byte[] bytes)
+    private static async Task<BitmapImage?> CreateInMemoryAsync(byte[] bytes)
     {
         try
         {
@@ -90,9 +95,11 @@ internal static class CoverCache
             using var stream = new InMemoryRandomAccessStream();
             using var writer = new DataWriter(stream);
             writer.WriteBytes(bytes);
-            writer.StoreAsync().GetResults();
+            await writer.StoreAsync();
             stream.Seek(0);
-            bmp.SetSource(stream);
+            // SetSourceAsync decodes without blocking the calling thread;
+            // SetSource decodes inline and would freeze a scrolling list.
+            await bmp.SetSourceAsync(stream);
             return bmp;
         }
         catch

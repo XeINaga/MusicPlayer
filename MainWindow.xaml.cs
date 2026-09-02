@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Text;
@@ -35,7 +36,7 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<Playlist> _playlists = new();
     private readonly AppSettings _settings = SettingsStore.Load();
     private readonly DispatcherQueue _dispatcher;
-    private readonly ObservableCollection<Track> _displayTracks = new();
+    private readonly BulkObservableCollection<Track> _displayTracks = new();
 
     private IList<Track> _activeTracks = new ObservableCollection<Track>();
     private NavView _currentView = NavView.Local;
@@ -879,8 +880,28 @@ public sealed partial class MainWindow : Window
         RefreshDisplay();
     }
 
-    private void LoadMetadataFor(Track track) =>
-        _ = MetadataService.LoadAsync(track, _dispatcher);
+    // Caps how many tag reads run at once. Restoring a large library used to
+    // start one per track immediately — 5k tracks meant 5k queued Task.Runs
+    // followed by 5k separate UI callbacks, which pinned the UI for as long as
+    // it took to drain.
+    private readonly SemaphoreSlim _metadataGate = new(8);
+
+    private async void LoadMetadataFor(Track track)
+    {
+        await _metadataGate.WaitAsync();
+        try
+        {
+            await MetadataService.LoadAsync(track, _dispatcher);
+        }
+        catch
+        {
+            // best-effort: a failed tag read must not tear down the app
+        }
+        finally
+        {
+            _metadataGate.Release();
+        }
+    }
 
     private void PersistLibrary() =>
         PlaylistStore.SaveAutoPlaylist(_library);
@@ -1785,9 +1806,10 @@ public sealed partial class MainWindow : Window
             _ => filtered
         };
 
-        _displayTracks.Clear();
-        foreach (var t in filtered)
-            _displayTracks.Add(t);
+        // One Reset instead of a Clear() followed by N Inserts — see
+        // BulkObservableCollection. Search and sort rebuild this on every
+        // keystroke, so the difference is noticeable on a large library.
+        _displayTracks.ReplaceAll(filtered);
 
         TrackList.CanReorderItems = CanReorderPlaylist();
 
@@ -3406,20 +3428,15 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Runs the one-click lyric fill. Wired to the SplitButton's primary click,
-    /// so it takes SplitButtonClickEventArgs; the drop-down half only carries
-    /// options (lyric source / what to fill).
+    /// Classify every track in the current list into one of three buckets:
+    ///   - no lyric   : no main lyric file at all            → download fresh
+    ///   - incomplete : main lyric present but lacks translation and/or romaji
+    ///                                                       → top up missing parts
+    ///   - complete   : all three parts present              → skipped entirely
+    /// Touches the disk once per track, so call it via Task.Run.
     /// </summary>
-    private async void BtnBatchLyrics_Click(object sender, SplitButtonClickEventArgs e)
+    private (List<Track> NoLyric, List<Track> Incomplete) ClassifyLyricTracks()
     {
-        if (_batchLyricRunning)
-            return;
-
-        // Classify every track in the current list into one of three buckets:
-        //   - noLyric     : no main lyric file at all            → download fresh
-        //   - incomplete  : has a main lyric but lacks translation and/or romaji
-        //                                                              → top up missing parts
-        //   - complete    : main lyric + translation + romaji all present → skip
         var noLyric = new List<Track>();
         var incomplete = new List<Track>();
         var forcedEnc = _settings.LyricEncoding == "auto" ? null : _settings.LyricEncoding;
@@ -3446,6 +3463,24 @@ public sealed partial class MainWindow : Window
             if (!hasTrans || !hasRoma)
                 incomplete.Add(t);
         }
+
+        return (noLyric, incomplete);
+    }
+
+    /// <summary>
+    /// Runs the one-click lyric fill. Wired to the SplitButton's primary click,
+    /// so it takes SplitButtonClickEventArgs; the drop-down half only carries
+    /// options (lyric source / what to fill).
+    /// </summary>
+    private async void BtnBatchLyrics_Click(object sender, SplitButtonClickEventArgs e)
+    {
+        if (_batchLyricRunning)
+            return;
+
+        // Classification stats every track on disk (File.Exists checks plus a
+        // full parse of each lyric file), which is seconds of blocking I/O on a
+        // large list — run it off the UI thread so the window stays responsive.
+        var (noLyric, incomplete) = await Task.Run(ClassifyLyricTracks);
 
         if (noLyric.Count == 0 && incomplete.Count == 0)
         {
