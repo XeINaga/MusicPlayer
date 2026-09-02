@@ -754,7 +754,11 @@ public sealed partial class MainWindow : Window
         var folder = await PickFolderAsync();
         if (folder == null)
             return;
-        AddItemsToLibrary(FolderScanner.Scan(folder.Path, recursive: true));
+        // Recursive enumeration walks up to 5000 files and 8 levels deep. That
+        // is seconds of blocking I/O on a spinning disk or a USB drive, which
+        // would freeze the window if it ran on the UI thread.
+        var paths = await Task.Run(() => FolderScanner.Scan(folder.Path, recursive: true));
+        AddItemsToLibrary(paths);
     }
 
     private void BtnAddFolderFlat_Click(object sender, RoutedEventArgs e)
@@ -765,7 +769,10 @@ public sealed partial class MainWindow : Window
         var folder = await PickFolderAsync();
         if (folder == null)
             return;
-        AddItemsToLibrary(FolderScanner.Scan(folder.Path, recursive: false));
+        // Same reasoning as the recursive variant: keep the disk walk off the
+        // UI thread.
+        var paths = await Task.Run(() => FolderScanner.Scan(folder.Path, recursive: false));
+        AddItemsToLibrary(paths);
     }
 
     private void BtnOpenList_Click(object sender, RoutedEventArgs e)
@@ -806,9 +813,14 @@ public sealed partial class MainWindow : Window
             return;
 
         var added = false;
+        // Scanning the library once per path is O(n^2): importing a folder into
+        // a 5k-track library costs ~12M string comparisons. Windows paths are
+        // case-insensitive, so Ordinal also catches casing variants of a file
+        // that is already there.
+        var seen = new HashSet<string>(_library.Select(t => t.Path), StringComparer.OrdinalIgnoreCase);
         foreach (var p in paths)
         {
-            if (_library.Any(t => t.Path == p))
+            if (!seen.Add(p))
                 continue;
             var track = new Track(p);
             track.LyricPath = LyricBindingStore.Get(p);
@@ -839,9 +851,12 @@ public sealed partial class MainWindow : Window
             return;
 
         var added = false;
+        // Same O(n^2) trap as AddItemsToLibrary, but on the restore path — it
+        // runs on every startup against the full persisted library.
+        var seen = new HashSet<string>(_library.Select(t => t.Path), StringComparer.OrdinalIgnoreCase);
         foreach (var e in entries)
         {
-            if (_library.Any(t => t.Path == e.Path))
+            if (!seen.Add(e.Path))
                 continue;
             var track = new Track(e.Path)
             {
@@ -869,6 +884,35 @@ public sealed partial class MainWindow : Window
 
     private void PersistLibrary() =>
         PlaylistStore.SaveAutoPlaylist(_library);
+
+    // Chains background library saves; see PersistLibraryBackground.
+    private Task _librarySaveTask = Task.CompletedTask;
+
+    /// <summary>
+    /// Persist the library without blocking the UI. A few thousand tracks turn
+    /// into a few hundred KB of JSON plus three file operations, which is enough
+    /// to stutter playback when it runs on the position tick. Use this for
+    /// periodic saves; callers that must not lose the write (app exit) should
+    /// keep using <see cref="PersistLibrary"/>.
+    /// </summary>
+    private void PersistLibraryBackground()
+    {
+        // Snapshot on the UI thread — the collection is only touched here.
+        var snapshot = _library.ToList();
+        // Chained, so a slow save cannot land after a newer one and let a stale
+        // snapshot overwrite fresh data.
+        _librarySaveTask = _librarySaveTask.ContinueWith(_ =>
+        {
+            try
+            {
+                PlaylistStore.SaveAutoPlaylist(snapshot);
+            }
+            catch
+            {
+                // best-effort: a failed background save must not take down the app
+            }
+        }, TaskScheduler.Default);
+    }
 
     private void PersistRecent() =>
         PlaylistStore.SaveRecent(_recent);
@@ -933,6 +977,13 @@ public sealed partial class MainWindow : Window
 
     private void LoadPlaylistsFromStore()
     {
+        // ResolveTrack() scans the library linearly, and this loop calls it once
+        // per path per playlist: O(playlists x tracks x library). Build the
+        // lookup once and keep it in sync with the tracks we add.
+        var byPath = new Dictionary<string, Track>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in _library)
+            byPath[t.Path] = t;
+
         foreach (var dto in PlaylistStore.LoadPlaylists())
         {
             var pl = new Playlist { Name = dto.Name };
@@ -940,9 +991,15 @@ public sealed partial class MainWindow : Window
             {
                 foreach (var p in dto.Paths)
                 {
-                    var t = ResolveTrack(p);
-                    if (t != null)
-                        pl.Tracks.Add(t);
+                    if (!byPath.TryGetValue(p, out var t))
+                    {
+                        t = new Track(p);
+                        t.LyricPath = LyricBindingStore.Get(p);
+                        _library.Add(t);
+                        byPath[p] = t;
+                        LoadMetadataFor(t);
+                    }
+                    pl.Tracks.Add(t);
                 }
             }
             _playlists.Add(pl);
@@ -1251,9 +1308,44 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            foreach (var t in sel)
-                _library.Remove(t);
+            // Playing from 本地音乐 hands _library itself to SetQueue, so the
+            // playback queue *is* this collection: removing a track shifts every
+            // later index, and the player would silently keep its old index and
+            // point at a different track. Collect indices first and drop them
+            // from the end downwards so the pending ones stay valid.
+            var queueIsLibrary = ReferenceEquals(_playback.Queue, _library);
+            var current = _playback.CurrentIndex;
+            var indices = sel.Select(t => _library.IndexOf(t))
+                             .Where(i => i >= 0)
+                             .OrderByDescending(i => i)
+                             .ToList();
+
+            foreach (var i in indices)
+                _library.RemoveAt(i);
             PersistLibrary();
+
+            if (queueIsLibrary && indices.Count > 0)
+            {
+                if (indices.Contains(current))
+                {
+                    // The playing track itself went away: take whatever slid
+                    // into its slot, or stop if nothing is left.
+                    if (_library.Count > 0)
+                        _playback.MoveTo(Math.Min(current, _library.Count - 1));
+                    else
+                    {
+                        _playback.Clear();
+                        ResetNowPlaying();
+                    }
+                }
+                else
+                {
+                    // Keep pointing at the same track.
+                    var shift = indices.Count(i => i < current);
+                    if (shift > 0)
+                        _playback.ShiftIndex(-shift);
+                }
+            }
         }
 
         // Also clear from recent if the tracks were removed from the library.
@@ -1330,7 +1422,11 @@ public sealed partial class MainWindow : Window
             }
             else if (item is StorageFolder folder)
             {
-                paths.AddRange(FolderScanner.Scan(folder.Path, recursive: true));
+                // Dropping a folder walks the whole tree; keep it off the UI
+                // thread like the pick-a-folder paths do. The captured path is
+                // all we need afterwards, so awaiting here is safe.
+                var scanned = await Task.Run(() => FolderScanner.Scan(folder.Path, recursive: true));
+                paths.AddRange(scanned);
             }
         }
 
@@ -2306,10 +2402,11 @@ public sealed partial class MainWindow : Window
             _lastProgressSave = DateTime.Now;
             PlaylistStore.SaveProgress(_playback.CurrentIndex, pos, CurrentPath());
 
-            // Persist PlayCount / Favorite changes at the same cadence.
+            // Persist PlayCount / Favorite changes at the same cadence. Off the
+            // UI thread: serializing the whole library mid-playback stutters.
             if (_libraryDirty)
             {
-                PersistLibrary();
+                PersistLibraryBackground();
                 _libraryDirty = false;
             }
         }
@@ -2580,6 +2677,14 @@ public sealed partial class MainWindow : Window
             LyricScroll.ChangeView(null, top, null);
     }
 
+    // Last payload handed to the overlay. The position tick fires several times
+    // a second, but the text only changes when the line does — without this the
+    // overlay is serialized and pushed over the pipe on every single tick.
+    private Track? _pushedTrack;
+    private string? _pushedOriginal;
+    private string? _pushedRoma;
+    private string? _pushedTrans;
+
     private void PushDesktop(int idx)
     {
         if (_desktopLyrics == null || idx < 0 || _lyrics == null)
@@ -2587,7 +2692,21 @@ public sealed partial class MainWindow : Window
         var line = _lyrics.Lines[idx];
         var roma = _settings.LyricShowRomaji ? line.Romaji : null;
         var trans = _settings.LyricShowTranslation ? line.Translation : null;
-        _desktopLyrics.UpdateLyric(_currentTrack, line.Original ?? string.Empty, roma, trans);
+        var original = line.Original ?? string.Empty;
+
+        // The track is part of the comparison too: switching songs must push
+        // even when the first line happens to be identical.
+        if (ReferenceEquals(_currentTrack, _pushedTrack)
+            && string.Equals(original, _pushedOriginal, StringComparison.Ordinal)
+            && string.Equals(roma, _pushedRoma, StringComparison.Ordinal)
+            && string.Equals(trans, _pushedTrans, StringComparison.Ordinal))
+            return;
+
+        _pushedTrack = _currentTrack;
+        _pushedOriginal = original;
+        _pushedRoma = roma;
+        _pushedTrans = trans;
+        _desktopLyrics.UpdateLyric(_currentTrack, original, roma, trans);
     }
 
     // ---------- Romaji / translation toggles (in-app + desktop overlay) ----------
@@ -3944,7 +4063,9 @@ public sealed partial class MainWindow : Window
 
             // Open the browser for user authorization.
             var authUrl = _lastFm.GetAuthUrl(token);
-            Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true });
+            // Start returns a Process that owns a handle; nothing here needs it
+            // back, and disposing it does not affect the browser that launched.
+            Process.Start(new ProcessStartInfo(authUrl) { UseShellExecute = true })?.Dispose();
 
             LastFmStatus.Text = "请在浏览器中授权，完成后点击下方按钮…";
 
@@ -4073,6 +4194,11 @@ public sealed partial class MainWindow : Window
 
         PlaylistStore.SaveProgress(_playback.CurrentIndex, _playback.Position, CurrentPath());
 
+        // Synchronous, unlike the periodic saves which run in the background: a
+        // pending background save may not have finished by now, and PlayCount /
+        // Favorite changes would be lost with it.
+        PersistLibrary();
+
         // Persist window geometry + volume.
         var hwnd = WindowNative.GetWindowHandle(this);
         if (NativeMethods.GetWindowRect(hwnd, out var r))
@@ -4082,7 +4208,10 @@ public sealed partial class MainWindow : Window
             _settings.WindowX = r.Left;
             _settings.WindowY = r.Top;
         }
-        _settings.Volume = _playback.Volume;
+        // Persist the level the user chose, not the live one: closing the window
+        // mid-crossfade (200 ms fade-out, or a multi-second fade-in) would store
+        // a value near zero and come back muted on the next launch.
+        _settings.Volume = _playback.TargetVolume;
         _settings.PlaybackRate = _playback.Rate;
         SettingsStore.Save(_settings);
     }

@@ -344,6 +344,8 @@ public sealed class PlaybackService
 
         _ffmpegSource?.Dispose();
         _ffmpegSource = null;
+        _nativeSource?.Dispose();
+        _nativeSource = null;
 
         if (_smtcBound && _smtc != null)
         {
@@ -368,6 +370,11 @@ public sealed class PlaybackService
 
     private int _loadToken;
     private FFmpegMediaSource? _ffmpegSource;
+    // The plain (non-FFmpeg) path produces a MediaSource that owns a handle to
+    // the audio file. It has to be released on the next swap, otherwise the
+    // file stays locked (can't be renamed or deleted) and the underlying COM
+    // objects pile up for the lifetime of the process.
+    private MediaSource? _nativeSource;
 
     /// <summary>
     /// Load the track at the current index. Native-MF formats go through
@@ -415,9 +422,14 @@ public sealed class PlaybackService
 
             // Swap sources, then release the previous FFmpeg wrapper.
             var oldFfmpeg = _ffmpegSource;
+            var oldNative = _nativeSource;
             _ffmpegSource = ffmpegSource;
+            _nativeSource = nativeSource;
             _player.Source = source;
+            // Only after the player has taken the new source: disposing the old
+            // one while it is still current would cut playback.
             oldFfmpeg?.Dispose();
+            oldNative?.Dispose();
 
             HookSession();
             UpdateSmtcDisplay();
@@ -802,6 +814,13 @@ public sealed class PlaybackService
                 _pendingTargetVolume = v; // sync target when not crossfading
         }
     }
+
+    /// <summary>
+    /// The level the user picked. Unlike <see cref="Volume"/> this is untouched
+    /// by an in-flight crossfade, so it is the value to persist — saving the
+    /// live one during a fade would store something near zero and start muted.
+    /// </summary>
+    public double TargetVolume => _targetVolume;
 
     public double Rate
     {

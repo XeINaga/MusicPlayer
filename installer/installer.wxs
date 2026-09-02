@@ -17,6 +17,21 @@
     <!-- Embed all files into a single cabinet inside the .msi. -->
     <MediaTemplate EmbedCab="yes" />
 
+    <!-- Default the install folder to wherever it was installed last time.
+         Declaring a Property with the same Id as a Directory overrides that
+         directory's location, and the search runs during AppSearch — before
+         costing and before any dialog is shown. On a first install the key is
+         missing, so the Directory definition further down wins.
+         No Win64 attribute: WiX v4 dropped it, and -arch x64 (build_msi.ps1)
+         already puts both this search and InstallPathReg in the 64-bit view. -->
+    <Property Id="INSTALLFOLDER">
+      <RegistrySearch Id="FindInstallDir"
+                      Root="HKLM"
+                      Key="SOFTWARE\MusicPlayer"
+                      Name="InstallPath"
+                      Type="raw" />
+    </Property>
+
     <!-- Install location: user may choose it via the InstallDir dialog.
          WixUI_InstallDir binds to INSTALLFOLDER (see the UI element below). -->
 
@@ -52,6 +67,7 @@
       <ComponentRef Id="DesktopShortcut" />
       <ComponentRef Id="UninstallShortcut" />
       <ComponentRef Id="UninstallShortcutInDir" />
+      <ComponentRef Id="InstallPathReg" />
     </Feature>
 
     <StandardDirectory Id="ProgramFiles64Folder">
@@ -69,6 +85,17 @@
                     WorkingDirectory="System64Folder"
                     Description="卸载 MusicPlayer" />
           <RegistryValue Root="HKLM" Key="SOFTWARE\MusicPlayer" Name="uninstallindir" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+        <!-- Records the resolved install path so a reinstall or upgrade picks
+             it up again (see the INSTALLFOLDER registry search above) instead
+             of reverting to C:\Program Files\MusicPlayer. Fixed GUID rather
+             than "*" so the value stays tracked across builds.
+             No Win64 attribute here either — WiX v4 rejects it on
+             RegistryValue (error WIX0004); -arch x64 covers both this value
+             and the search above. -->
+        <Component Id="InstallPathReg" Guid="{D057465E-D468-4EEC-A571-1D4F578783DC}">
+          <RegistryValue Root="HKLM" Key="SOFTWARE\MusicPlayer" Name="InstallPath"
+                         Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         </Component>
         <!-- Runtime log folder. Program Files is admin-only by default, so
              grant Everyone write access to JUST this folder; the app falls

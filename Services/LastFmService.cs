@@ -140,12 +140,28 @@ public sealed class LastFmService
         if (pending.Count == 0)
             return;
 
-        var ok = await PostScrobbleChunkAsync(pending);
-        if (ok)
+        // The backlog accumulates across failures, so it can hold far more than
+        // the 50 entries Last.fm accepts per request. Posting it whole always
+        // fails, which means ClearFailedScrobbles() never runs and every startup
+        // re-posts the entire pile forever. Walk it in chunks and keep only what
+        // is still outstanding.
+        var done = 0;
+        for (var i = 0; i < pending.Count; i += 50)
         {
-            ClearFailedScrobbles();
-            StatusChanged?.Invoke($"Last.fm 重试 scrobble 成功：{pending.Count} 首");
+            var chunk = pending.Skip(i).Take(50).ToList();
+            if (!await PostScrobbleChunkAsync(chunk))
+            {
+                // This chunk and everything after it stay queued.
+                WriteFailedScrobbles(pending.Skip(i).ToList());
+                if (done > 0)
+                    StatusChanged?.Invoke($"Last.fm 重试 scrobble 部分成功：{done} 首");
+                return;
+            }
+            done += chunk.Count;
         }
+
+        ClearFailedScrobbles();
+        StatusChanged?.Invoke($"Last.fm 重试 scrobble 成功：{done} 首");
     }
 
     private async Task<bool> PostScrobbleChunkAsync(IList<ScrobbleEntry> entries)
@@ -212,16 +228,26 @@ public sealed class LastFmService
 
     private void SaveFailedScrobbles(IList<ScrobbleEntry> entries)
     {
+        var existing = LoadFailedScrobbles();
+        existing.AddRange(entries);
+        // Cap at 500 to prevent unbounded growth
+        if (existing.Count > 500)
+            existing = existing.TakeLast(500).ToList();
+        WriteFailedScrobbles(existing);
+    }
+
+    /// <summary>
+    /// Overwrite the pending list outright, as opposed to
+    /// <see cref="SaveFailedScrobbles"/> which appends to whatever is there.
+    /// Needed by the retry path so successfully scrobbled entries drop out.
+    /// </summary>
+    private static void WriteFailedScrobbles(IList<ScrobbleEntry> entries)
+    {
         try
         {
-            var existing = LoadFailedScrobbles();
-            existing.AddRange(entries);
-            // Cap at 500 to prevent unbounded growth
-            if (existing.Count > 500)
-                existing = existing.TakeLast(500).ToList();
             Directory.CreateDirectory(Path.GetDirectoryName(FailedScrobblePath)!);
             File.WriteAllText(FailedScrobblePath,
-                JsonSerializer.Serialize(existing, new JsonSerializerOptions { WriteIndented = true }));
+                JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch
         {
