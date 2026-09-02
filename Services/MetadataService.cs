@@ -65,14 +65,38 @@ public static class MetadataService
         // --- UI thread: build the cover bitmap (disk-cached) and apply metadata ---
         dispatcher.TryEnqueue(() =>
         {
-            var cover = CoverCache.GetOrLoad(track.Path, coverBytes) as ImageSource;
-
-            track.SetMetadata(
-                title ?? track.Title,
-                artist ?? track.Artist,
-                album ?? string.Empty,
-                duration,
-                cover);
+            // TryEnqueue only takes a void handler, so the async work has to be
+            // kicked off from here. ApplyMetadataAsync contains its own
+            // exceptions — an unobserved one from an async void would crash.
+            _ = ApplyMetadataAsync(track, title, artist, album, duration, coverBytes);
         });
+    }
+
+    /// <summary>
+    /// Decode the cover off the UI thread where possible, then push everything
+    /// onto the track. Stays on the UI thread so the change notifications from
+    /// <see cref="Track.SetMetadata"/> are raised there.
+    /// </summary>
+    private static async Task ApplyMetadataAsync(
+        Track track, string? title, string? artist, string? album,
+        TimeSpan duration, byte[]? coverBytes)
+    {
+        ImageSource? cover;
+        try
+        {
+            cover = await CoverCache.GetOrLoadAsync(track.Path, coverBytes);
+        }
+        catch
+        {
+            // Cover art is cosmetic — never let it fail the metadata update.
+            cover = null;
+        }
+
+        track.SetMetadata(
+            title ?? track.Title,
+            artist ?? track.Artist,
+            album ?? string.Empty,
+            duration,
+            cover);
     }
 }
