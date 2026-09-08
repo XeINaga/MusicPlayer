@@ -28,7 +28,7 @@ namespace MusicPlayer;
 
 public sealed partial class MainWindow : Window
 {
-    private enum NavView { Local, Recent, Favorites, Albums, MostPlayed, Artists, Playlist, Settings, NowPlaying }
+    private enum NavView { Local, Recent, Favorites, Albums, MostPlayed, Artists, Playlist, Settings, LyricFill, NowPlaying }
 
     private readonly PlaybackService _playback = new();
     private readonly ObservableCollection<Track> _library = new();
@@ -398,6 +398,7 @@ public sealed partial class MainWindow : Window
     private void NavArtists_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Artists);
     private void NavAlbums_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Albums);
     private void NavSettings_Click(object sender, RoutedEventArgs e) => ShowView(NavView.Settings);
+    private void NavLyricFill_Click(object sender, RoutedEventArgs e) => ShowView(NavView.LyricFill);
 
     private void ShowView(NavView view, Playlist? playlist = null)
     {
@@ -456,6 +457,10 @@ public sealed partial class MainWindow : Window
                 ShowActions("settings");
                 ShowSettings();
                 break;
+            case NavView.LyricFill:
+                ContentTitle.Text = "歌词补全";
+                ShowActions("lyricfill");
+                break;
             case NavView.NowPlaying:
                 ContentTitle.Text = "正在播放";
                 break;
@@ -499,6 +504,7 @@ public sealed partial class MainWindow : Window
             AlbumFilterBar.Visibility = Visibility.Collapsed;
             ArtistBrowsePanel.Visibility = Visibility.Collapsed;
             SettingsScroll.Visibility = Visibility.Collapsed;
+            LyricCompletionPanel.Visibility = Visibility.Collapsed;
 
             // While the panel was collapsed the lyric ScrollViewer had no
             // layout, so earlier auto-scrolls were discarded — re-center the
@@ -512,6 +518,7 @@ public sealed partial class MainWindow : Window
             CenterGrid.Visibility = Visibility.Visible;
             NowPlayingPanel.Visibility = Visibility.Collapsed;
             SettingsScroll.Visibility = _currentView == NavView.Settings ? Visibility.Visible : Visibility.Collapsed;
+            LyricCompletionPanel.Visibility = _currentView == NavView.LyricFill ? Visibility.Visible : Visibility.Collapsed;
 
             if (albums && !albumDrillDown)
             {
@@ -622,6 +629,10 @@ public sealed partial class MainWindow : Window
                 break;
             case "artists":
                 break;
+            case "lyricfill":
+                // The completion page carries its own buttons; none of the
+                // library toolbar actions apply here.
+                break;
             case "artisttracks":
                 ViewCombo.Visibility = Visibility.Visible;
                 SortCombo.Visibility = Visibility.Visible;
@@ -680,6 +691,7 @@ public sealed partial class MainWindow : Window
             NavView.Albums => NavAlbums,
             NavView.Artists => NavArtists,
             NavView.Settings => NavSettings,
+            NavView.LyricFill => NavLyricFill,
             NavView.NowPlaying => null,
             _ => NavLocal
         };
@@ -3306,6 +3318,11 @@ public sealed partial class MainWindow : Window
 
     private bool _batchLyricRunning;
 
+    // ---- Lyric completion queue (download-manager style panel) ----
+    private readonly ObservableCollection<LyricTaskItem> _lyricTasks = new();
+    private CancellationTokenSource? _lyricBatchCts;
+    private string _lyricFilter = "All";
+
     /// <summary>Guards SyncLyricOptionChecks against re-entrant SelectionChanged events.</summary>
     private bool _syncingLyricOptions;
 
@@ -3478,98 +3495,189 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// Runs the one-click lyric fill. Wired to the SplitButton's primary click,
     /// so it takes SplitButtonClickEventArgs; the drop-down half only carries
-    /// options (lyric source / what to fill).
+    /// options (lyric source / what to fill). The actual work now runs through
+    /// the completion page's queue so progress is visible.
     /// </summary>
     private async void BtnBatchLyrics_Click(object sender, SplitButtonClickEventArgs e)
     {
-        if (_batchLyricRunning)
-            return;
+        // Jump to the completion page so the run is visible as it happens.
+        ShowView(NavView.LyricFill);
+        await StartLyricCompletionAsync();
+    }
+
+    private async void BtnLyricStart_Click(object sender, RoutedEventArgs e)
+        => await StartLyricCompletionAsync();
+
+    private void BtnLyricStop_Click(object sender, RoutedEventArgs e)
+    {
+        _lyricBatchCts?.Cancel();
+        BtnLyricStop.IsEnabled = false;
+    }
+
+    private async void BtnLyricRetry_Click(object sender, RoutedEventArgs e)
+    {
+        // Only the rows that didn't make it — successes are left alone.
+        var retry = _lyricTasks
+            .Where(t => t.Status is LyricTaskStatus.Failed or LyricTaskStatus.Cancelled)
+            .ToList();
+        if (retry.Count == 0) return;
+
+        foreach (var item in retry) SetLyricTaskState(item, LyricTaskStatus.Pending, "等待中");
+        await RunLyricQueueAsync(retry);
+    }
+
+    private void LyricFilterCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        _lyricFilter = LyricFilterCombo.SelectedIndex switch
+        {
+            1 => "Failed",
+            2 => "Success",
+            _ => "All",
+        };
+        ApplyLyricFilter();
+    }
+
+    /// <summary>Binds the queue (filtered) to the list. The rows are the same
+    /// LyricTaskItem instances, so live status updates keep flowing through.</summary>
+    private void ApplyLyricFilter()
+    {
+        IEnumerable<LyricTaskItem> src = _lyricFilter switch
+        {
+            "Failed" => _lyricTasks.Where(t => t.Status == LyricTaskStatus.Failed),
+            "Success" => _lyricTasks.Where(t => t.Status == LyricTaskStatus.Success),
+            _ => _lyricTasks,
+        };
+        LyricTaskList.ItemsSource = new ObservableCollection<LyricTaskItem>(src);
+    }
+
+    /// <summary>Scans the library, builds the queue and runs it.</summary>
+    private async Task StartLyricCompletionAsync()
+    {
+        if (_batchLyricRunning) return;
 
         // Classification stats every track on disk (File.Exists checks plus a
         // full parse of each lyric file), which is seconds of blocking I/O on a
         // large list — run it off the UI thread so the window stays responsive.
+        LyricStatusText.Text = "正在扫描曲库…";
         var (noLyric, incomplete) = await Task.Run(ClassifyLyricTracks);
 
         if (noLyric.Count == 0 && incomplete.Count == 0)
         {
+            LyricStatusText.Text = "所有歌曲的歌词（含翻译和罗马音）均已齐全。";
             ShowInfoBar("所有歌曲的歌词（含翻译和罗马音）均已齐全。");
             return;
         }
 
+        _lyricTasks.Clear();
+        foreach (var t in noLyric)
+            _lyricTasks.Add(new LyricTaskItem(t) { NeedsMainLyric = true, Detail = "等待下载" });
+        foreach (var t in incomplete)
+            _lyricTasks.Add(new LyricTaskItem(t) { NeedsMainLyric = false, Detail = "等待补全" });
+        foreach (var item in _lyricTasks) StampLyricTaskBrush(item);
+        ApplyLyricFilter();
+        UpdateLyricSummary();
+
+        AppLog.WriteLyricCompletionSection(
+            $"补全歌词开始 — 共 {_lyricTasks.Count} 首" +
+            $"（缺主歌词 {noLyric.Count}，缺翻译/罗马音 {incomplete.Count}）");
+
+        await RunLyricQueueAsync(_lyricTasks.ToList());
+    }
+
+    /// <summary>
+    /// Walks the queue, updating each row as it goes. Cancellable: stopping
+    /// leaves finished tracks alone and marks the remainder as cancelled.
+    /// </summary>
+    private async Task RunLyricQueueAsync(IReadOnlyList<LyricTaskItem> queue)
+    {
         _batchLyricRunning = true;
-        try
-        {
-        var total = noLyric.Count + incomplete.Count;
-        var header = $"补全歌词开始 — 共 {total} 首" +
-                     $"（缺主歌词 {noLyric.Count}，缺翻译/罗马音 {incomplete.Count}）";
-        AppLog.WriteLyricCompletionSection(header);
-        ShowInfoBar($"开始补全歌词：{total} 首（缺主歌词 {noLyric.Count}，缺翻译/罗马音 {incomplete.Count}）…");
+        _lyricBatchCts = new CancellationTokenSource();
+        var ct = _lyricBatchCts.Token;
+        // Filtering mid-run would make rows jump around, so lock it while busy.
+        LyricFilterCombo.IsEnabled = false;
+        BtnLyricStart.IsEnabled = false;
+        BtnLyricStop.IsEnabled = true;
+        BtnLyricRetry.IsEnabled = false;
 
         int downloaded = 0, topped = 0, failed = 0;
         var refreshCurrent = false;
         var i = 0;
 
-        // Phase 1 — download fresh lyrics for tracks that have none.
-        foreach (var t in noLyric)
+        try
         {
-            i++;
-            AppLog.WriteLyricCompletion($"[{i}/{total}] 缺主歌词：{t.Title} - {t.Artist}");
-            AppLog.WriteLyricCompletion($"  音频：{t.Path}");
-            try
+            foreach (var item in queue)
             {
-                if (await TryAutoDownloadAsync(t))
+                if (ct.IsCancellationRequested)
                 {
-                    downloaded++;
-                    if (_currentTrack == t)
-                        refreshCurrent = true;
-                    AppLog.WriteLyricCompletion("  主歌词下载成功，检查翻译/罗马音…");
-                    var (tt, tr) = await TryCompleteTranslationAndRomajiAsync(t);
-                    if (tt || tr) topped++;
+                    SetLyricTaskState(item, LyricTaskStatus.Cancelled, "已停止");
+                    continue;
                 }
-                else
+
+                i++;
+                var t = item.Track;
+                SetLyricTaskState(item, LyricTaskStatus.Running, "处理中…");
+                LyricStatusText.Text = $"[{i}/{queue.Count}] {t.Title} — {t.Artist}";
+                AppLog.WriteLyricCompletion($"[{i}/{queue.Count}] {(item.NeedsMainLyric ? "缺主歌词" : "检查翻译/罗马音")}：{t.Title} - {t.Artist}");
+                AppLog.WriteLyricCompletion($"  音频：{t.Path}");
+
+                try
+                {
+                    if (item.NeedsMainLyric)
+                    {
+                        if (await TryAutoDownloadAsync(t))
+                        {
+                            downloaded++;
+                            if (_currentTrack == t) refreshCurrent = true;
+                            AppLog.WriteLyricCompletion("  主歌词下载成功，检查翻译/罗马音…");
+                            var (tt, tr) = await TryCompleteTranslationAndRomajiAsync(t);
+                            if (tt || tr) topped++;
+                            SetLyricTaskState(item, LyricTaskStatus.Success,
+                                tt || tr ? "已下载 + 补翻译/罗马音" : "已下载歌词");
+                        }
+                        else
+                        {
+                            failed++;
+                            AppLog.WriteLyricCompletion("  结果：未找到匹配的歌词");
+                            SetLyricTaskState(item, LyricTaskStatus.Failed, "未找到匹配的歌词");
+                        }
+                    }
+                    else
+                    {
+                        var (tt, tr) = await TryCompleteTranslationAndRomajiAsync(t);
+                        if (tt || tr)
+                        {
+                            topped++;
+                            if (_currentTrack == t) refreshCurrent = true;
+                            SetLyricTaskState(item, LyricTaskStatus.Success, "已补翻译/罗马音");
+                        }
+                        else
+                        {
+                            failed++;
+                            SetLyricTaskState(item, LyricTaskStatus.Failed, "无可用翻译/罗马音");
+                        }
+                    }
+                }
+                catch (Exception ex)
                 {
                     failed++;
-                    AppLog.WriteLyricCompletion("  结果：未找到匹配的歌词");
+                    AppLog.WriteLyricCompletion($"  异常：{ex.Message}");
+                    SetLyricTaskState(item, LyricTaskStatus.Failed, ex.Message);
                 }
-            }
-            catch (Exception ex)
-            {
-                failed++;
-                AppLog.WriteLyricCompletion($"  异常：{ex.Message}");
-            }
-            await Task.Delay(400); // be polite to the API
-        }
 
-        // Phase 2 — top up missing translation / romaji for tracks that already
-        // have a main lyric.
-        foreach (var t in incomplete)
-        {
-            i++;
-            AppLog.WriteLyricCompletion($"[{i}/{total}] 检查翻译/罗马音：{t.Title} - {t.Artist}");
-            AppLog.WriteLyricCompletion($"  音频：{t.Path}");
-            try
-            {
-                var (tt, tr) = await TryCompleteTranslationAndRomajiAsync(t);
-                if (tt || tr)
-                {
-                    topped++;
-                    if (_currentTrack == t)
-                        refreshCurrent = true;
-                }
+                // Be polite to the API — but bail out immediately on cancel.
+                try { await Task.Delay(400, ct); }
+                catch (OperationCanceledException) { }
             }
-            catch (Exception ex)
-            {
-                failed++;
-                AppLog.WriteLyricCompletion($"  异常：{ex.Message}");
-            }
-            await Task.Delay(400);
-        }
 
             if (refreshCurrent)
                 LoadLyricsFor(_loadedIndex);
 
-            var summary = $"补全歌词完成：新下载 {downloaded}，补全翻译/罗马音 {topped}，失败 {failed} / {total}";
+            var stopped = ct.IsCancellationRequested;
+            var summary = stopped
+                ? $"补全已停止：新下载 {downloaded}，补全翻译/罗马音 {topped}，失败 {failed}"
+                : $"补全歌词完成：新下载 {downloaded}，补全翻译/罗马音 {topped}，失败 {failed} / {queue.Count}";
             AppLog.WriteLyricCompletionSection(summary);
+            LyricStatusText.Text = summary;
             ShowInfoBar(summary + $"。日志：{AppLog.LyricCompletionLogPath}");
         }
         catch (Exception ex)
@@ -3582,7 +3690,55 @@ public sealed partial class MainWindow : Window
             // catch the exception, and leaving the guard set would permanently
             // lock the action out until the app is restarted.
             _batchLyricRunning = false;
+            _lyricBatchCts?.Dispose();
+            _lyricBatchCts = null;
+            LyricFilterCombo.IsEnabled = true;
+            UpdateLyricSummary();
         }
+    }
+
+    /// <summary>Sets one row's state and re-stamps the summary.</summary>
+    private void SetLyricTaskState(LyricTaskItem item, LyricTaskStatus status, string detail)
+    {
+        item.Status = status;
+        item.Detail = detail;
+        StampLyricTaskBrush(item);
+        UpdateLyricSummary();
+    }
+
+    /// <summary>
+    /// Status colours live in ThemeDictionaries, which the plain resource
+    /// indexer can't see, so the brush is resolved here and handed to the row.
+    /// Re-stamped for every row when the theme flips.
+    /// </summary>
+    private void StampLyricTaskBrush(LyricTaskItem item)
+    {
+        var key = item.Status switch
+        {
+            LyricTaskStatus.Running => "QqGreen",
+            LyricTaskStatus.Success => "TextSuccess",
+            LyricTaskStatus.Failed => "TextDanger",
+            _ => "TextMuted",
+        };
+        item.StatusBrush = FindResource(key) as Microsoft.UI.Xaml.Media.Brush;
+    }
+
+    private void UpdateLyricSummary()
+    {
+        int total = _lyricTasks.Count;
+        int ok = _lyricTasks.Count(t => t.Status == LyricTaskStatus.Success);
+        int bad = _lyricTasks.Count(t => t.Status == LyricTaskStatus.Failed);
+        int done = _lyricTasks.Count(t => t.Status is LyricTaskStatus.Success
+                                            or LyricTaskStatus.Failed
+                                            or LyricTaskStatus.Cancelled);
+
+        LyricProgressBar.Maximum = total == 0 ? 1 : total;
+        LyricProgressBar.Value = done;
+        LyricCountText.Text = total == 0 ? "共 0 首" : $"{done}/{total}　成功 {ok}　失败 {bad}";
+
+        BtnLyricStart.IsEnabled = !_batchLyricRunning;
+        BtnLyricStop.IsEnabled = _batchLyricRunning;
+        BtnLyricRetry.IsEnabled = !_batchLyricRunning && bad > 0;
     }
 
     private void ShowInfoBar(string message)
@@ -3970,6 +4126,7 @@ public sealed partial class MainWindow : Window
             });
             if (FindResource("TextSecondary") is Microsoft.UI.Xaml.Media.Brush dim)
                 CacheDirStatus.Foreground = dim;
+            foreach (var item in _lyricTasks) StampLyricTaskBrush(item);
         }
         _themeModeApplied = true;
 
