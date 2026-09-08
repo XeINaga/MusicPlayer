@@ -38,6 +38,9 @@ public sealed partial class MainWindow : Window
 
     // Guards ThemeModeCombo.SelectedIndex from re-entering its own handler.
     private bool _applyingThemeMode;
+    // Set once the first theme has been applied, so a live switch can refresh the
+    // brushes that were assigned from code (they don't re-resolve like ThemeResource).
+    private bool _themeModeApplied;
     private readonly DispatcherQueue _dispatcher;
     private readonly BulkObservableCollection<Track> _displayTracks = new();
 
@@ -680,8 +683,8 @@ public sealed partial class MainWindow : Window
             NavView.NowPlaying => null,
             _ => NavLocal
         };
-        if (sel != null)
-            sel.Background = (SolidColorBrush)RootGrid.Resources["NavSelected"];
+        if (sel != null && FindResource("NavSelected") is SolidColorBrush nav)
+            sel.Background = nav;
     }
 
     // ---------- View mode + sorting ----------
@@ -1725,9 +1728,8 @@ public sealed partial class MainWindow : Window
     {
         if (el is not FontIcon icon) return;
         icon.Glyph = favorite ? "\uE735" : "\uE734";
-        icon.Foreground = favorite
-            ? (Microsoft.UI.Xaml.Media.Brush)RootGrid.Resources["QqGreen"]
-            : (Microsoft.UI.Xaml.Media.Brush)RootGrid.Resources["TextSecondary"];
+        if (FindResource(favorite ? "QqGreen" : "TextSecondary") is Microsoft.UI.Xaml.Media.Brush tint)
+            icon.Foreground = tint;
     }
 
     /// <summary>
@@ -3659,7 +3661,8 @@ public sealed partial class MainWindow : Window
         CacheDirStatus.Text = DataLocation.IsCustom
             ? "当前为自定义位置（默认：%LOCALAPPDATA%\\MusicPlayer）。"
             : "当前使用默认位置：%LOCALAPPDATA%\\MusicPlayer。";
-        CacheDirStatus.Foreground = (Microsoft.UI.Xaml.Media.Brush)RootGrid.Resources["TextSecondary"];
+        if (FindResource("TextSecondary") is Microsoft.UI.Xaml.Media.Brush dim)
+            CacheDirStatus.Foreground = dim;
 
         // Last.fm connection state.
         LastFmApiKeyBox.Text = _settings.LastFmApiKey;
@@ -3954,6 +3957,22 @@ public sealed partial class MainWindow : Window
         var light = string.Equals(_settings.ThemeMode, "Light", StringComparison.OrdinalIgnoreCase);
         RootGrid.RequestedTheme = light ? ElementTheme.Light : ElementTheme.Dark;
 
+        // On a live switch, redo the brushes that were assigned from code: unlike
+        // {ThemeResource} they are plain property values and won't re-resolve.
+        // Skipped on the first pass — the tree has no DataContext yet and the
+        // initial ShowView / Loaded handlers set these up correctly anyway.
+        if (_themeModeApplied)
+        {
+            SetNavSelected(_currentView);
+            ForEachVisual<FontIcon>(RootGrid, icon =>
+            {
+                if (icon.DataContext is Track t) UpdateFavIcon(icon, t.Favorite);
+            });
+            if (FindResource("TextSecondary") is Microsoft.UI.Xaml.Media.Brush dim)
+                CacheDirStatus.Foreground = dim;
+        }
+        _themeModeApplied = true;
+
         // Syncing the combo re-enters the selection handler; guard against it.
         _applyingThemeMode = true;
         try
@@ -3966,14 +3985,62 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>Resolves a resource key the way the {ThemeResource} markup extension does.
+    ///
+    /// Colour brushes live in ThemeDictionaries so that flipping RequestedTheme
+    /// re-evaluates them — but those keys are NOT visible to the plain
+    /// <c>Resources[key]</c> indexer, which throws instead of returning null.
+    /// QqGreen / AccentGlow are the exception: they stay in plain resources because
+    /// ApplyAccentColor() mutates their Color at runtime.</summary>
+    private object? FindResource(string key)
+    {
+        if (RootGrid.Resources.TryGetValue(key, out var plain)) return plain;
+
+        string theme = RootGrid.RequestedTheme switch
+        {
+            ElementTheme.Light => "Light",
+            ElementTheme.Dark => "Dark",
+            _ => Application.Current.RequestedTheme == ApplicationTheme.Light ? "Light" : "Dark",
+        };
+
+        return FindInThemeDictionaries(Application.Current.Resources, theme, key);
+    }
+
+    private static object? FindInThemeDictionaries(ResourceDictionary root, string theme, string key)
+    {
+        if (root.ThemeDictionaries.TryGetValue(theme, out var td)
+            && td is ResourceDictionary dict
+            && dict.TryGetValue(key, out var found))
+            return found;
+
+        foreach (var merged in root.MergedDictionaries)
+            if (FindInThemeDictionaries(merged, theme, key) is { } nested)
+                return nested;
+
+        return null;
+    }
+
+    /// <summary>Invokes <paramref name="action"/> on every descendant of type
+    /// <typeparamref name="T"/> below <paramref name="root"/>.</summary>
+    private static void ForEachVisual<T>(DependencyObject root, Action<T> action) where T : DependencyObject
+    {
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) action(match);
+            ForEachVisual(child, action);
+        }
+    }
+
     /// <summary>Applies the chosen theme color live by retinting the shared accent brushes
     /// ("QqGreen" solid + "AccentGlow" gradient first stop) that the whole UI references.</summary>
     private void ApplyAccentColor()
     {
         var color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#31c27c" : _settings.AccentColor);
-        if (RootGrid.Resources["QqGreen"] is SolidColorBrush qq)
+        if (FindResource("QqGreen") is SolidColorBrush qq)
             qq.Color = color;
-        if (RootGrid.Resources["AccentGlow"] is LinearGradientBrush glow && glow.GradientStops.Count > 0)
+        if (FindResource("AccentGlow") is LinearGradientBrush glow && glow.GradientStops.Count > 0)
             glow.GradientStops[0].Color = color;
     }
 
