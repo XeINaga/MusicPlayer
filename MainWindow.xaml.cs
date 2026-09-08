@@ -3541,6 +3541,10 @@ public sealed partial class MainWindow : Window
     /// LyricTaskItem instances, so live status updates keep flowing through.</summary>
     private void ApplyLyricFilter()
     {
+        // The ComboBox declares SelectedIndex="0" in XAML, so this fires during
+        // InitializeComponent — before the ListView further down the tree exists.
+        if (LyricTaskList == null) return;
+
         IEnumerable<LyricTaskItem> src = _lyricFilter switch
         {
             "Failed" => _lyricTasks.Where(t => t.Status == LyricTaskStatus.Failed),

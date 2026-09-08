@@ -3,7 +3,7 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="MusicPlayer"
            Manufacturer="MusicPlayer"
-           Version="1.1.0.0"
+           Version="1.1.1.0"
            Language="1033"
            Codepage="65001"
            UpgradeCode="{6F3E8C2A-1B4D-4E7A-9C5B-2D8E0F1A3B4C}"
@@ -11,8 +11,15 @@
            InstallerVersion="500"
            Compressed="yes">
 
-    <!-- Allow major-upgrade: newer version replaces older; block downgrades. -->
-    <MajorUpgrade DowngradeErrorMessage="已安装更新版本的 MusicPlayer，无法降级安装。" />
+    <!-- Allow major-upgrade: newer version replaces older; block downgrades.
+         AllowSameVersionUpgrades is required for the day-to-day case of
+         rebuilding the installer without bumping the version: by default MSI
+         only removes a product with a LOWER version, so a same-version
+         reinstall left the old entry in Programs and Features — you ended up
+         with two identical "MusicPlayer" entries. With this set, the previous
+         install is removed first, leaving exactly one entry. -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="已安装更新版本的 MusicPlayer，无法降级安装。" />
 
     <!-- Embed all files into a single cabinet inside the .msi. -->
     <MediaTemplate EmbedCab="yes" />
@@ -145,9 +152,18 @@
     <!-- Destination-folder selection dialog. -->
     <UI>
       <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
-      <!-- Normalize the path as soon as the user leaves the folder dialog,
-           so the Confirmation dialog shows the corrected target. -->
-      <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="NormalizeInstallDir" Condition="1" />
+      <!-- Normalize the path as soon as the user leaves the folder dialog, so
+           the Confirmation dialog shows the corrected target.
+           WixUI_InstallDir's own Next events write the chosen path into the
+           directory table (SetTargetPath) around Order 1-2; a single DoAction
+           published without an Order ran too late, after that write, so the UI
+           kept showing the un-normalized path even though the final install
+           directory was correct. Publishing the CA at Order 1 plus our own
+           SetTargetPath at Order 2 re-applies the corrected value: whichever
+           of the two SetTargetPath calls lands first, the last one carries the
+           normalized path. -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="NormalizeInstallDir" Condition="1" Order="1" />
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="SetTargetPath" Value="INSTALLFOLDER" Condition="1" Order="2" />
     </UI>
 
     <!-- Also normalize before costing in the execute sequence (covers silent
