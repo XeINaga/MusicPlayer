@@ -15,6 +15,12 @@ public sealed class AppSettings
     public string LyricColor { get; set; } = "#FFFFFFFF";
     public string AccentColor { get; set; } = "#31c27c"; // app theme / accent color
 
+    /// <summary>
+    /// Colour theme: "Dark" | "Light". Applied to RootGrid.RequestedTheme, which
+    /// is what makes every {ThemeResource} in Themes/SukiTheme.xaml re-evaluate.
+    /// </summary>
+    public string ThemeMode { get; set; } = "Dark";
+
     /// <summary>Custom data/cache directory. Empty = default %LOCALAPPDATA%\MusicPlayer.</summary>
     public string CacheDir { get; set; } = "";
     public double LyricBgOpacity { get; set; } = 0.0; // 0..1 (0 = fully transparent)

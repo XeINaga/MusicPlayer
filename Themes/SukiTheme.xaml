@@ -1,0 +1,114 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!--
+      Design tokens in the spirit of SukiUI: layered surfaces, generous corner
+      radii, soft elevation.
+
+      Colours live in ThemeDictionaries so flipping RequestedTheme re-evaluates
+      every {ThemeResource} reference in the app. Geometry (radii, padding) does
+      not change between themes and keeps using {StaticResource}.
+
+      Accent brushes are deliberately absent here. QqGreen and AccentGlow stay
+      in MainWindow's own resource dictionary because ApplyAccentColor() looks
+      them up there and mutates their Color at runtime from the saved setting.
+    -->
+
+    <ResourceDictionary.ThemeDictionaries>
+
+        <!-- ===================== Dark ===================== -->
+        <ResourceDictionary x:Key="Dark">
+            <!-- Layered surfaces, each step reading as a level above the last.
+                 Surface keeps alpha so the Mica material shows through. -->
+            <SolidColorBrush x:Key="AppBackground" Color="#0b0b11" />
+            <SolidColorBrush x:Key="Surface" Color="#e6101017" />
+            <SolidColorBrush x:Key="Surface2" Color="#16161f" />
+            <SolidColorBrush x:Key="Surface3" Color="#1f1f2b" />
+            <SolidColorBrush x:Key="CardBg" Color="#1a1a24" />
+            <SolidColorBrush x:Key="BorderSoft" Color="#20202b" />
+
+            <SolidColorBrush x:Key="TextPrimary" Color="#f2f2f5" />
+            <SolidColorBrush x:Key="TextSecondary" Color="#8b8b97" />
+
+            <!-- Accent-tinted navigation states: a translucent pill. -->
+            <SolidColorBrush x:Key="NavHover" Color="#1a1a24" />
+            <SolidColorBrush x:Key="NavSelected" Color="#1f2a27" />
+            <SolidColorBrush x:Key="NavRailBg" Color="#d90a0a10" />
+
+            <!-- WinUI's Button template reads these, so defining them once gives
+                 every button consistent hover / pressed feedback. -->
+            <SolidColorBrush x:Key="ButtonBackground" Color="#17171f" />
+            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#23232f" />
+            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#101018" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#262633" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#3a3a52" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#2c2c3e" />
+            <SolidColorBrush x:Key="ButtonForeground" Color="#f2f2f5" />
+            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#ffffff" />
+            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#d8d8e0" />
+
+            <LinearGradientBrush x:Key="CardPlaceholder" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#2c2c3a" Offset="0" />
+                <GradientStop Color="#191922" Offset="1" />
+            </LinearGradientBrush>
+
+            <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#d8181820" Offset="0" />
+                <GradientStop Color="#d80c0c12" Offset="1" />
+            </LinearGradientBrush>
+
+            <AcrylicBrush x:Key="QueueAcrylic"
+                          TintColor="#15151d" TintOpacity="0.82" TintLuminosityOpacity="0.7"
+                          FallbackColor="#15151d" />
+        </ResourceDictionary>
+
+        <!-- ===================== Light ===================== -->
+        <ResourceDictionary x:Key="Light">
+            <SolidColorBrush x:Key="AppBackground" Color="#f3f3f6" />
+            <SolidColorBrush x:Key="Surface" Color="#f7f7fa" />
+            <SolidColorBrush x:Key="Surface2" Color="#ffffff" />
+            <SolidColorBrush x:Key="Surface3" Color="#ececf2" />
+            <SolidColorBrush x:Key="CardBg" Color="#ffffff" />
+            <SolidColorBrush x:Key="BorderSoft" Color="#dcdce5" />
+
+            <SolidColorBrush x:Key="TextPrimary" Color="#16161c" />
+            <SolidColorBrush x:Key="TextSecondary" Color="#61616e" />
+
+            <SolidColorBrush x:Key="NavHover" Color="#ebebf1" />
+            <SolidColorBrush x:Key="NavSelected" Color="#dcf0e7" />
+            <SolidColorBrush x:Key="NavRailBg" Color="#fbfbfd" />
+
+            <SolidColorBrush x:Key="ButtonBackground" Color="#ffffff" />
+            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#f2f2f7" />
+            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#e6e6ee" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#dcdce5" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#c2c2d2" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#adadbf" />
+            <SolidColorBrush x:Key="ButtonForeground" Color="#16161c" />
+            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#000000" />
+            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#3a3a44" />
+
+            <LinearGradientBrush x:Key="CardPlaceholder" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#e2e2ea" Offset="0" />
+                <GradientStop Color="#f0f0f5" Offset="1" />
+            </LinearGradientBrush>
+
+            <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#f7f7fa" Offset="0" />
+                <GradientStop Color="#ebebf1" Offset="1" />
+            </LinearGradientBrush>
+
+            <AcrylicBrush x:Key="QueueAcrylic"
+                          TintColor="#ffffff" TintOpacity="0.85" TintLuminosityOpacity="0.75"
+                          FallbackColor="#fbfbfd" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+
+    <!-- Theme-independent geometry. -->
+    <CornerRadius x:Key="RadiusSmall">8</CornerRadius>
+    <CornerRadius x:Key="RadiusMedium">12</CornerRadius>
+    <CornerRadius x:Key="RadiusLarge">16</CornerRadius>
+    <CornerRadius x:Key="RadiusPill">20</CornerRadius>
+    <Thickness x:Key="CardPadding">18,16</Thickness>
+</ResourceDictionary>
