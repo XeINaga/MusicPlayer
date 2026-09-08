@@ -35,6 +35,9 @@ public sealed partial class MainWindow : Window
     private readonly ObservableCollection<Track> _recent = new();
     private readonly ObservableCollection<Playlist> _playlists = new();
     private readonly AppSettings _settings = SettingsStore.Load();
+
+    // Guards ThemeModeCombo.SelectedIndex from re-entering its own handler.
+    private bool _applyingThemeMode;
     private readonly DispatcherQueue _dispatcher;
     private readonly BulkObservableCollection<Track> _displayTracks = new();
 
@@ -164,6 +167,9 @@ public sealed partial class MainWindow : Window
 
         // Apply the persisted theme color before the first paint.
         ApplyAccentColor();
+
+        // Switch the whole visual language (dark / light) before the first paint.
+        ApplyThemeMode();
 
         // Mica window backdrop (Windows 11+): the desktop material tints the
         // whole window. The layered fills in XAML are semi-transparent for
@@ -3929,6 +3935,35 @@ public sealed partial class MainWindow : Window
         _settings.AccentColor = ToHex(args.NewColor);
         SettingsStore.Save(_settings);
         ApplyAccentColor();
+    }
+
+    private void ThemeModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_applyingThemeMode)
+            return;
+        _settings.ThemeMode = ThemeModeCombo.SelectedIndex == 1 ? "Light" : "Dark";
+        SettingsStore.Save(_settings);
+        ApplyThemeMode();
+    }
+
+    /// <summary>Switches between the dark and light resource dictionaries. Setting
+    /// RequestedTheme on the root is what makes every {ThemeResource} in
+    /// Themes/SukiTheme.xaml re-resolve, so nothing needs repainting by hand.</summary>
+    private void ApplyThemeMode()
+    {
+        var light = string.Equals(_settings.ThemeMode, "Light", StringComparison.OrdinalIgnoreCase);
+        RootGrid.RequestedTheme = light ? ElementTheme.Light : ElementTheme.Dark;
+
+        // Syncing the combo re-enters the selection handler; guard against it.
+        _applyingThemeMode = true;
+        try
+        {
+            ThemeModeCombo.SelectedIndex = light ? 1 : 0;
+        }
+        finally
+        {
+            _applyingThemeMode = false;
+        }
     }
 
     /// <summary>Applies the chosen theme color live by retinting the shared accent brushes
