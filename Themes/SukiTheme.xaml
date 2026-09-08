@@ -30,6 +30,10 @@
 
             <SolidColorBrush x:Key="TextPrimary" Color="#f2f2f5" />
             <SolidColorBrush x:Key="TextSecondary" Color="#8b8b97" />
+            <!-- Task outcome colours for the lyric-completion list. -->
+            <SolidColorBrush x:Key="TextSuccess" Color="#31c27c" />
+            <SolidColorBrush x:Key="TextDanger" Color="#e5484d" />
+            <SolidColorBrush x:Key="TextMuted" Color="#6d6d7a" />
 
             <!-- Accent-tinted navigation states: a translucent pill. -->
             <SolidColorBrush x:Key="NavHover" Color="#1a1a24" />
@@ -74,6 +78,9 @@
 
             <SolidColorBrush x:Key="TextPrimary" Color="#16161c" />
             <SolidColorBrush x:Key="TextSecondary" Color="#61616e" />
+            <SolidColorBrush x:Key="TextSuccess" Color="#12a05f" />
+            <SolidColorBrush x:Key="TextDanger" Color="#c62a30" />
+            <SolidColorBrush x:Key="TextMuted" Color="#8a8a99" />
 
             <SolidColorBrush x:Key="NavHover" Color="#ebebf1" />
             <SolidColorBrush x:Key="NavSelected" Color="#dcf0e7" />
