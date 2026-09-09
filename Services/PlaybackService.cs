@@ -49,6 +49,10 @@ public sealed class PlaybackService
     // queue is edited — a deleted entry is simply skipped, and a moved one is
     // found at its new position.
     private readonly Stack<Track> _randomHistory = new();
+    // Random mode: tracks stepped *back* from, so Next can retrace them.
+    // Without it, Previous never records where it left and the back history
+    // collapses to a single entry after one Previous/Next round trip.
+    private readonly Stack<Track> _randomForward = new();
     // Random mode: indices not yet played in the current round. Drawing from
     // this until it empties plays every track once before any repeat.
     // It holds *indices*, so it is only meaningful for the exact queue it was
@@ -155,9 +159,13 @@ public sealed class PlaybackService
                 return;
             _mode = value;
             // Switching into random starts a clean round instead of resuming a
-            // pool left over from an earlier queue.
+            // pool left over from an earlier queue, and drops any half-finished
+            // step back from the previous random session.
             if (_mode == PlayMode.Random)
+            {
                 ResetRandomBag();
+                _randomForward.Clear();
+            }
             ModeChanged?.Invoke();
         }
     }
@@ -176,6 +184,7 @@ public sealed class PlaybackService
             return;
 
         _randomHistory.Clear();
+        _randomForward.Clear();
         ResetRandomBag();
         _queue = tracks;
 
@@ -204,28 +213,50 @@ public sealed class PlaybackService
             _player.Play();
     }
 
-    public void Next()
+    /// <summary>Point playback at <paramref name="index"/>, announce it and load it.</summary>
+    private void GoTo(int index)
     {
-        if (_queue == null || _queue.Count == 0)
-            return;
-
-        var n = ComputeNext(true);
-        if (n < 0)
-            return; // end of sequential list
-
-        RememberRandomHistory();
-        _index = n;
+        _index = index;
         CurrentIndexChanged?.Invoke(_index);
 
         if (_crossfadeDurationMs > 0)
         {
             _pendingTargetVolume = _targetVolume;
-            StartCrossfade(n);
+            StartCrossfade(index);
         }
         else
         {
             LoadCurrent(play: true);
         }
+    }
+
+    public void Next()
+    {
+        if (_queue == null || _queue.Count == 0)
+            return;
+
+        // Random mode: retrace a step back instead of spending a fresh draw,
+        // so Previous followed by Next lands where the user started.
+        if (_mode == PlayMode.Random && _randomForward.Count > 0)
+        {
+            var redo = PopValidRandomTrack(_randomForward);
+            if (redo >= 0)
+            {
+                RememberRandomHistory();
+                GoTo(redo);
+                return;
+            }
+        }
+
+        var n = ComputeNext(true);
+        if (n < 0)
+            return; // end of sequential list
+
+        // A track the bag picked is new ground, not a redo: the forward path
+        // ends here, same as navigating to a new page in a browser.
+        _randomForward.Clear();
+        RememberRandomHistory();
+        GoTo(n);
     }
 
     public void Previous()
@@ -244,35 +275,17 @@ public sealed class PlaybackService
         if (_mode == PlayMode.Random && _randomHistory.Count > 0)
         {
             // Tracks deleted since they played are skipped over.
-            var prev = PopValidRandomHistory();
+            var prev = PopValidRandomTrack(_randomHistory);
             if (prev < 0)
                 return; // nothing remembered still exists in the queue
 
-            _index = prev;
-            CurrentIndexChanged?.Invoke(_index);
-            if (_crossfadeDurationMs > 0)
-            {
-                _pendingTargetVolume = _targetVolume;
-                StartCrossfade(_index);
-            }
-            else
-            {
-                LoadCurrent(play: true);
-            }
+            // Record where we are leaving from, so Next can retrace it.
+            RememberInto(_randomForward);
+            GoTo(prev);
             return;
         }
 
-        _index = ComputeNext(false);
-        CurrentIndexChanged?.Invoke(_index);
-        if (_crossfadeDurationMs > 0)
-        {
-            _pendingTargetVolume = _targetVolume;
-            StartCrossfade(_index);
-        }
-        else
-        {
-            LoadCurrent(play: true);
-        }
+        GoTo(ComputeNext(false));
     }
 
     public void MoveTo(int index)
@@ -280,21 +293,16 @@ public sealed class PlaybackService
         if (_queue == null || index < 0 || index >= _queue.Count)
             return;
 
-        _index = index;
-        // Hand-picked track: count it as played this round so the bag will not
-        // hand it back until the next one.
         if (_mode == PlayMode.Random)
+        {
+            // Hand-picked track: count it as played this round so the bag will
+            // not hand it back until the next one.
             _randomBag.Remove(index);
-        CurrentIndexChanged?.Invoke(_index);
-        if (_crossfadeDurationMs > 0)
-        {
-            _pendingTargetVolume = _targetVolume;
-            StartCrossfade(index);
+            // Picking by hand is new ground, not a redo.
+            _randomForward.Clear();
         }
-        else
-        {
-            LoadCurrent(play: true);
-        }
+
+        GoTo(index);
     }
 
     /// <summary>Adjust the internal index after a track is removed from the queue.</summary>
@@ -335,6 +343,7 @@ public sealed class PlaybackService
         if (tracks == null || tracks.Count == 0)
             return;
         _randomHistory.Clear();
+        _randomForward.Clear();
         ResetRandomBag();
         _queue = tracks;
         _index = Math.Clamp(currentIndex, 0, tracks.Count - 1);
@@ -359,6 +368,7 @@ public sealed class PlaybackService
             _hookedSession = null;
         }
         _randomHistory.Clear();
+        _randomForward.Clear();
         ResetRandomBag();
 
         _ffmpegSource?.Dispose();
@@ -639,43 +649,37 @@ public sealed class PlaybackService
         if (n < 0)
             return; // stop at the end of a sequential list
 
+        // A track the bag picked is new ground, not a redo.
+        _randomForward.Clear();
         RememberRandomHistory();
-        _index = n;
-        CurrentIndexChanged?.Invoke(_index);
-
-        if (_crossfadeDurationMs > 0)
-        {
-            _pendingTargetVolume = _targetVolume;
-            StartCrossfade(n);
-        }
-        else
-        {
-            LoadCurrent(play: true);
-        }
+        GoTo(n);
     }
 
-    private void RememberRandomHistory()
+    private void RememberRandomHistory() => RememberInto(_randomHistory);
+
+    /// <summary>Record the track being left, so a later step back can find it.</summary>
+    private void RememberInto(Stack<Track> stack)
     {
         if (_mode != PlayMode.Random || _queue == null)
             return;
         if (_index < 0 || _index >= _queue.Count)
             return;
-        _randomHistory.Push(_queue[_index]);
+        stack.Push(_queue[_index]);
     }
 
     /// <summary>
-    /// Pop the most recent history entry that is still in the queue, discarding
-    /// any whose track was removed since it played. Returns -1 when nothing
-    /// usable is left.
+    /// Pop the most recent entry of <paramref name="stack"/> that is still in
+    /// the queue, discarding any whose track was removed since it was recorded.
+    /// Returns -1 when nothing usable is left.
     /// </summary>
-    private int PopValidRandomHistory()
+    private int PopValidRandomTrack(Stack<Track> stack)
     {
         if (_queue == null)
             return -1;
 
-        while (_randomHistory.Count > 0)
+        while (stack.Count > 0)
         {
-            var t = _randomHistory.Pop();
+            var t = stack.Pop();
             // Track does not override Equals, so this is a reference lookup:
             // it resolves the entry wherever it sits now, or -1 if it is gone.
             var i = _queue.IndexOf(t);
