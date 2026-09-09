@@ -45,7 +45,10 @@ public sealed class PlaybackService
     private MediaPlaybackSession? _hookedSession;
     private readonly Random _rnd = new();
     // Random mode: real "previous" needs a history of what actually played.
-    private readonly Stack<int> _randomHistory = new();
+    // Holds Track references rather than indices so it stays correct when the
+    // queue is edited — a deleted entry is simply skipped, and a moved one is
+    // found at its new position.
+    private readonly Stack<Track> _randomHistory = new();
     // Random mode: indices not yet played in the current round. Drawing from
     // this until it empties plays every track once before any repeat.
     // It holds *indices*, so it is only meaningful for the exact queue it was
@@ -240,7 +243,7 @@ public sealed class PlaybackService
         // Random mode: go back through what actually played before.
         if (_mode == PlayMode.Random && _randomHistory.Count > 0)
         {
-            // Tracks deleted since they played leave stale indices behind.
+            // Tracks deleted since they played are skipped over.
             var prev = PopValidRandomHistory();
             if (prev < 0)
                 return; // nothing remembered still exists in the queue
@@ -295,7 +298,16 @@ public sealed class PlaybackService
     }
 
     /// <summary>Adjust the internal index after a track is removed from the queue.</summary>
-    public void ShiftIndex(int delta) => _index = Math.Max(-1, _index + delta);
+    public void ShiftIndex(int delta)
+    {
+        _index = Math.Max(-1, _index + delta);
+        // Every index the round was built from has moved, so it has to go. The
+        // count guard in ComputeNextRandom would usually catch this too, but
+        // that only holds while removals are the sole edit — drop the round
+        // explicitly rather than depend on it. History is kept on purpose: it
+        // tracks Track objects, which a removal does not renumber.
+        ResetRandomBag();
+    }
 
     /// <summary>
     /// Re-point the current index without loading/playing anything — used after
@@ -644,22 +656,30 @@ public sealed class PlaybackService
 
     private void RememberRandomHistory()
     {
-        if (_mode == PlayMode.Random && _index >= 0)
-            _randomHistory.Push(_index);
+        if (_mode != PlayMode.Random || _queue == null)
+            return;
+        if (_index < 0 || _index >= _queue.Count)
+            return;
+        _randomHistory.Push(_queue[_index]);
     }
 
     /// <summary>
-    /// Pop the most recent history entry whose index still points into the
-    /// queue, discarding any left stale by tracks removed since it played.
-    /// Returns -1 when nothing usable is left.
+    /// Pop the most recent history entry that is still in the queue, discarding
+    /// any whose track was removed since it played. Returns -1 when nothing
+    /// usable is left.
     /// </summary>
     private int PopValidRandomHistory()
     {
-        var n = _queue?.Count ?? 0;
+        if (_queue == null)
+            return -1;
+
         while (_randomHistory.Count > 0)
         {
-            var i = _randomHistory.Pop();
-            if (i >= 0 && i < n)
+            var t = _randomHistory.Pop();
+            // Track does not override Equals, so this is a reference lookup:
+            // it resolves the entry wherever it sits now, or -1 if it is gone.
+            var i = _queue.IndexOf(t);
+            if (i >= 0)
                 return i;
         }
         return -1;
