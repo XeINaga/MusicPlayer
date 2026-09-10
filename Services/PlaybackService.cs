@@ -294,17 +294,35 @@ public sealed class PlaybackService
         GoTo(ComputeNext(false));
     }
 
-    public void MoveTo(int index)
+    /// <summary>Point playback at <paramref name="index"/> — the user picked it.</summary>
+    public void MoveTo(int index) => MoveToCore(index, recordHistory: true);
+
+    /// <summary>
+    /// Point playback at <paramref name="index"/> because the track that was
+    /// playing has just been deleted. Same as <see cref="MoveTo"/>, except it
+    /// records no history: the index designates whatever slid into the freed
+    /// slot, which nobody listened to yet.
+    /// </summary>
+    public void TakeOverAfterRemoval(int index) => MoveToCore(index, recordHistory: false);
+
+    private void MoveToCore(int index, bool recordHistory)
     {
         if (_queue == null || index < 0 || index >= _queue.Count)
             return;
 
+        // A hand-picked track is a real navigation, so the track being left
+        // belongs in the back history — otherwise "previous" can never return
+        // to it. After a removal it does not: recording the track that slid
+        // into the slot would make the first "previous" press a no-op.
+        if (recordHistory)
+            RememberRandomHistory();
+
         if (_mode == PlayMode.Random)
         {
-            // Hand-picked track: count it as played this round so the bag will
-            // not hand it back until the next one.
+            // Count it as played this round so the bag will not hand it back
+            // until the next one.
             _randomBag.Remove(index);
-            // Picking by hand is new ground, not a redo.
+            // New ground, not a redo.
             _randomForward.Clear();
         }
 
@@ -503,10 +521,16 @@ public sealed class PlaybackService
         UpdateSmtcPlaybackStatus();
     }
 
+    // Bumped per thumbnail request. Reading the cover is async, so fast track
+    // switching can have two of them in flight; only the newest may touch the
+    // display, or an older cover lands on top of the current track.
+    private int _smtcThumbToken;
+
     /// <summary>Pull the embedded cover once more for the SMTC thumbnail
     /// (volume flyout / lock screen art) — cheap enough per track change.</summary>
     private async void UpdateSmtcThumbnail(string path)
     {
+        var token = ++_smtcThumbToken;
         try
         {
             var bytes = await Task.Run<byte[]?>(() =>
@@ -522,7 +546,9 @@ public sealed class PlaybackService
                 }
             });
 
-            if (bytes == null || bytes.Length == 0 || !_smtcBound || _smtc == null)
+            if (bytes == null || bytes.Length == 0 || token != _smtcThumbToken)
+                return;
+            if (!_smtcBound || _smtc == null)
                 return;
 
             var stream = new InMemoryRandomAccessStream();
