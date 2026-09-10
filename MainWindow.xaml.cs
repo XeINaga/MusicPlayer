@@ -1256,12 +1256,58 @@ public sealed partial class MainWindow : Window
             RefreshDisplay();
     }
 
+    /// <summary>
+    /// Keep the player pointing at the same track after <paramref name="list"/>
+    /// has just lost the tracks at <paramref name="removed"/>. Does nothing when
+    /// the player is playing some other collection, or when the removal did not
+    /// touch the position it is on.
+    /// </summary>
+    private void SyncAfterRemoval(IList<Track> list, IEnumerable<int> removed)
+    {
+        if (!ReferenceEquals(_playback.Queue, list))
+            return;
+
+        var indices = removed.ToList();
+        if (indices.Count == 0)
+            return;
+
+        var current = _playback.CurrentIndex;
+        if (current < 0)
+            return;
+
+        if (indices.Contains(current))
+        {
+            // The playing track itself went away: take whatever slid into its
+            // slot, or stop if nothing is left.
+            if (list.Count > 0)
+                _playback.MoveTo(Math.Min(current, list.Count - 1));
+            else
+            {
+                _playback.Clear();
+                ResetNowPlaying();
+            }
+            return;
+        }
+
+        // Later indices shifted down past the current one.
+        var shift = indices.Count(i => i < current);
+        if (shift > 0)
+            _playback.ShiftIndex(-shift);
+    }
+
     private void RemoveFromCurrentPlaylist(Track t)
     {
         if (_currentPlaylist == null)
             return;
-        if (!_currentPlaylist.Tracks.Remove(t))
+
+        var idx = _currentPlaylist.Tracks.IndexOf(t);
+        if (idx < 0)
             return;
+
+        _currentPlaylist.Tracks.RemoveAt(idx);
+        // 播放全部 hands the playlist itself to SetQueue, so the queue may well
+        // be this collection — in which case every later index just shifted.
+        SyncAfterRemoval(_currentPlaylist.Tracks, new[] { idx });
 
         PersistPlaylists();
         RefreshDisplay();
@@ -1344,8 +1390,17 @@ public sealed partial class MainWindow : Window
 
         if (_currentView == NavView.Playlist && _currentPlaylist != null)
         {
-            foreach (var t in sel)
-                _currentPlaylist.Tracks.Remove(t);
+            // Same shape as the library branch below: a playlist can be the
+            // playback queue, so the player has to be told about the removals.
+            var tracks = _currentPlaylist.Tracks;
+            var removed = sel.Select(t => tracks.IndexOf(t))
+                             .Where(i => i >= 0)
+                             .OrderByDescending(i => i)
+                             .ToList();
+
+            foreach (var i in removed)
+                tracks.RemoveAt(i);
+            SyncAfterRemoval(tracks, removed);
             PersistPlaylists();
         }
         else
@@ -1355,8 +1410,6 @@ public sealed partial class MainWindow : Window
             // later index, and the player would silently keep its old index and
             // point at a different track. Collect indices first and drop them
             // from the end downwards so the pending ones stay valid.
-            var queueIsLibrary = ReferenceEquals(_playback.Queue, _library);
-            var current = _playback.CurrentIndex;
             var indices = sel.Select(t => _library.IndexOf(t))
                              .Where(i => i >= 0)
                              .OrderByDescending(i => i)
@@ -1366,35 +1419,21 @@ public sealed partial class MainWindow : Window
                 _library.RemoveAt(i);
             PersistLibrary();
 
-            if (queueIsLibrary && indices.Count > 0)
-            {
-                if (indices.Contains(current))
-                {
-                    // The playing track itself went away: take whatever slid
-                    // into its slot, or stop if nothing is left.
-                    if (_library.Count > 0)
-                        _playback.MoveTo(Math.Min(current, _library.Count - 1));
-                    else
-                    {
-                        _playback.Clear();
-                        ResetNowPlaying();
-                    }
-                }
-                else
-                {
-                    // Keep pointing at the same track.
-                    var shift = indices.Count(i => i < current);
-                    if (shift > 0)
-                        _playback.ShiftIndex(-shift);
-                }
-            }
+            SyncAfterRemoval(_library, indices);
         }
 
         // Also clear from recent if the tracks were removed from the library.
         if (_currentView != NavView.Playlist)
         {
-            foreach (var t in sel)
-                _recent.Remove(t);
+            // 最近播放 can be the queue too, so it needs the same treatment.
+            var removed = sel.Select(t => _recent.IndexOf(t))
+                             .Where(i => i >= 0)
+                             .OrderByDescending(i => i)
+                             .ToList();
+
+            foreach (var i in removed)
+                _recent.RemoveAt(i);
+            SyncAfterRemoval(_recent, removed);
             PersistRecent();
         }
 
@@ -1845,10 +1884,30 @@ public sealed partial class MainWindow : Window
         if (_currentView != NavView.Playlist || _currentPlaylist == null)
             return;
 
-        _currentPlaylist.Tracks.Clear();
+        var tracks = _currentPlaylist.Tracks;
+
+        // Still the pre-drag order here, so this is the track actually playing —
+        // provided the queue is this playlist at all.
+        var playing = ReferenceEquals(_playback.Queue, tracks) &&
+                      _playback.CurrentIndex >= 0 &&
+                      _playback.CurrentIndex < tracks.Count
+            ? tracks[_playback.CurrentIndex]
+            : null;
+
+        tracks.Clear();
         foreach (var t in _displayTracks)
-            _currentPlaylist.Tracks.Add(t);
+            tracks.Add(t);
         PersistPlaylists();
+
+        // The rebuild ends with the same count it started with, so the service
+        // cannot detect it by length: re-point it, or Next, Previous and the
+        // shuffle bag all keep working from the old position.
+        if (playing == null)
+            return;
+
+        var idx = tracks.IndexOf(playing);
+        if (idx >= 0)
+            _playback.SetIndexSilent(idx);
     }
 
     private void UpdateEmptyHint()
