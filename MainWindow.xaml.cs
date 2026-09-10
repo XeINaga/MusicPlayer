@@ -109,7 +109,10 @@ public sealed partial class MainWindow : Window
 
     // "Recently played" bookkeeping: the restored session queue must not count
     // as "played" until playback actually starts.
-    private int _lastRecentIndex = -1;
+    // Which play the recent entry was already made for. Held as a Track, not an
+    // index: the same number means different tracks in different queues, and
+    // comparing bare indices across a queue switch silently drops the entry.
+    private Track? _lastRecentTrack;
     private bool _suppressNextRecent;
     // Consecutive playback failures (stop skipping when the whole queue is bad).
     private int _consecutiveFailures;
@@ -1280,7 +1283,7 @@ public sealed partial class MainWindow : Window
             // The playing track itself went away: take whatever slid into its
             // slot, or stop if nothing is left.
             if (list.Count > 0)
-                _playback.MoveTo(Math.Min(current, list.Count - 1));
+                _playback.TakeOverAfterRemoval(Math.Min(current, list.Count - 1));
             else
             {
                 _playback.Clear();
@@ -1560,11 +1563,7 @@ public sealed partial class MainWindow : Window
     private void CardPlay_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { DataContext: Track t })
-        {
-            var idx = _activeTracks.IndexOf(t);
-            if (idx >= 0)
-                StartPlay(_activeTracks, idx);
-        }
+            StartPlayFromView(t);
     }
 
     // Row hover: highlight + reveal the "play next" button (FindName resolves
@@ -1599,11 +1598,7 @@ public sealed partial class MainWindow : Window
             dep = VisualTreeHelper.GetParent(dep);
 
         if (dep is GridViewItem item && TrackGrid.ItemFromContainer(item) is Track track)
-        {
-            var idx = _activeTracks.IndexOf(track);
-            if (idx >= 0)
-                StartPlay(_activeTracks, idx);
-        }
+            StartPlayFromView(track);
     }
 
     private void TrackList_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -1615,11 +1610,7 @@ public sealed partial class MainWindow : Window
             dep = VisualTreeHelper.GetParent(dep);
 
         if (dep is ListViewItem item && TrackList.ItemFromContainer(item) is Track track)
-        {
-            var idx = _activeTracks.IndexOf(track);
-            if (idx >= 0)
-                StartPlay(_activeTracks, idx);
-        }
+            StartPlayFromView(track);
     }
 
     private void TrackItem_RightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -2059,6 +2050,48 @@ public sealed partial class MainWindow : Window
         BindQueue();
     }
 
+    /// <summary>
+    /// Play <paramref name="t"/> following the order currently on screen. The
+    /// visible rows are a filtered / sorted projection of _activeTracks, so
+    /// going through _activeTracks can walk a different order — and with a
+    /// search active, queue up rows the user cannot even see.
+    /// </summary>
+    private void StartPlayFromView(Track t)
+    {
+        var view = _displayTracks.IndexOf(t);
+        if (view >= 0 && ViewIsReordered())
+        {
+            // Snapshot: _displayTracks is rebuilt on every keystroke and sort
+            // change, so the live collection would renumber the queue under the
+            // player. _activeTracks is deliberately left alone so the view keeps
+            // its own source.
+            _playback.SetQueue(_displayTracks.ToList(), view);
+            BindQueue();
+            return;
+        }
+
+        var idx = _activeTracks.IndexOf(t);
+        if (idx >= 0)
+            StartPlay(_activeTracks, idx);
+    }
+
+    /// <summary>
+    /// True when the visible list is not just <see cref="_activeTracks"/> — a
+    /// search, an album drill-down or a sort is in play.
+    /// </summary>
+    private bool ViewIsReordered()
+    {
+        if (_displayTracks.Count != _activeTracks.Count)
+            return true;
+
+        for (var i = 0; i < _displayTracks.Count; i++)
+        {
+            if (!ReferenceEquals(_displayTracks[i], _activeTracks[i]))
+                return true;
+        }
+        return false;
+    }
+
     private void BindQueue()
     {
         if (_playback.Queue != _boundQueue)
@@ -2404,9 +2437,9 @@ public sealed partial class MainWindow : Window
                 var t = q[idx];
 
                 // Recent-play bookkeeping (skip suppressed during session restore).
-                if (idx != _lastRecentIndex && !_suppressNextRecent)
+                if (!ReferenceEquals(t, _lastRecentTrack) && !_suppressNextRecent)
                 {
-                    _lastRecentIndex = idx;
+                    _lastRecentTrack = t;
                     t.LastPlayed = DateTime.Now;
                     t.PlayCount++;
                     _libraryDirty = true;
@@ -2437,9 +2470,10 @@ public sealed partial class MainWindow : Window
         else
         {
             var q = _playback.Queue;
-            if (q != null && index >= 0 && index < q.Count && index != _lastRecentIndex)
+            if (q != null && index >= 0 && index < q.Count
+                && !ReferenceEquals(q[index], _lastRecentTrack))
             {
-                _lastRecentIndex = index;
+                _lastRecentTrack = q[index];
                 var t = q[index];
                 t.LastPlayed = DateTime.Now;
                 PushRecent(t);
@@ -2658,6 +2692,9 @@ public sealed partial class MainWindow : Window
         TimeCurrent.Text = "00:00";
         TimeTotal.Text = "00:00";
         SeekSlider.Value = 0;
+        // Nothing is playing, so the next play is a fresh entry even if it
+        // happens to be the same track again.
+        _lastRecentTrack = null;
     }
 
     private void BuildLyricUI(LyricDocument doc)
