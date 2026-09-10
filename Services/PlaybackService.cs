@@ -285,6 +285,12 @@ public sealed class PlaybackService
             return;
         }
 
+        // Nothing recorded to step back through. In random mode this draws a
+        // fresh track, so it needs the same bookkeeping as Next: drop a pending
+        // redo and record the track being left. Without it the place we came
+        // from is unrecoverable and a stale redo can resurface later.
+        _randomForward.Clear();
+        RememberRandomHistory();
         GoTo(ComputeNext(false));
     }
 
@@ -856,8 +862,14 @@ public sealed class PlaybackService
             var v = Math.Clamp(value, 0.0, 1.0);
             _player.Volume = v;
             _targetVolume = v;
-            if (!_fadingOut && !_fadeTimer.IsEnabled)
-                _pendingTargetVolume = v; // sync target when not crossfading
+            // A fade-in ramps toward _fadeTo and settles on
+            // _pendingTargetVolume, so a slider move during a crossfade has to
+            // reach them. Leaving them alone means the next tick overwrites the
+            // level the user just picked with the old one, and it only comes
+            // back after a restart (the persisted target is the new value).
+            if (!_fadingOut && _fadeTimer.IsEnabled)
+                _fadeTo = v;
+            _pendingTargetVolume = v;
         }
     }
 
