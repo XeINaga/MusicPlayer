@@ -124,6 +124,7 @@ public sealed partial class MainWindow : Window
     private Track? _queueDragCurrent;
 
     private readonly DispatcherTimer _discTimer = new();
+    private readonly DispatcherTimer _lyricTimer = new();
     private readonly DispatcherTimer _sleepTimer = new();
     private readonly DispatcherTimer _searchDebounceTimer = new();
     private readonly RotateTransform _discRotate = new();
@@ -146,6 +147,13 @@ public sealed partial class MainWindow : Window
         _playback.MediaFailed += OnPlaybackMediaFailed;
         // SMTC shuffle/repeat buttons can change the mode outside the UI.
         _playback.ModeChanged += () => ApplyPlayModeLabel();
+
+        // Lyric highlight clock. The player's PositionChanged only fires a few
+        // times per second (and late after long dispatcher queues), which made
+        // the highlighted line lag behind the song. Polling the session
+        // position directly on this fast timer keeps the highlight in sync.
+        _lyricTimer.Interval = TimeSpan.FromMilliseconds(40);
+        _lyricTimer.Tick += (_, _) => UpdateLyricHighlight(_playback.Position);
 
         _errorBarTimer.Interval = TimeSpan.FromSeconds(5);
         _errorBarTimer.Tick += (_, _) =>
@@ -1690,7 +1698,15 @@ public sealed partial class MainWindow : Window
         var track = _contextTrack ?? (sender as FrameworkElement)?.DataContext as Track;
         if (track == null)
             return;
+        await AssignLyricToTrackAsync(track);
+    }
 
+    /// <summary>
+    /// Pick a local lyric file and bind it to <paramref name="track"/>.
+    /// Returns true when a file was picked and bound, false when cancelled.
+    /// </summary>
+    private async Task<bool> AssignLyricToTrackAsync(Track track)
+    {
         var picker = new FileOpenPicker();
         InitPicker(picker);
         picker.ViewMode = PickerViewMode.List;
@@ -1700,13 +1716,14 @@ public sealed partial class MainWindow : Window
 
         var file = await picker.PickSingleFileAsync();
         if (file == null)
-            return;
+            return false;
 
         track.LyricPath = file.Path;
         LyricBindingStore.Set(track.Path, file.Path);
 
         if (_currentTrack == track)
             LoadLyricsFor(_loadedIndex);
+        return true;
     }
 
     private void ClearLyric_Click(object sender, RoutedEventArgs e)
@@ -2425,6 +2442,11 @@ public sealed partial class MainWindow : Window
         _isPlaying = state == MediaPlaybackState.Playing;
         BtnPlay.Content = new FontIcon { Glyph = _isPlaying ? "\uE103" : "\uE102", FontSize = 18 };
         UpdateDiscTimer();
+
+        if (_isPlaying)
+            _lyricTimer.Start();
+        else
+            _lyricTimer.Stop();
 
         if (state == MediaPlaybackState.Playing)
         {
@@ -3258,7 +3280,7 @@ public sealed partial class MainWindow : Window
     private void ShowOnlineLyricDialog(Track track)
         => SafeRun(() => ShowOnlineLyricDialogAsync(track), "下载歌词");
 
-    private async Task ShowOnlineLyricDialogAsync(Track track)
+    private async Task<bool> ShowOnlineLyricDialogAsync(Track track)
     {
         var keywordBox = new TextBox { Text = BuildSearchKeyword(track), Width = 290 };
         var status = new TextBlock
@@ -3354,14 +3376,14 @@ public sealed partial class MainWindow : Window
         DoSearch(); // fire the initial search while the dialog opens
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || selected == null)
-            return;
+            return false;
 
         ShowInfoBar($"正在下载歌词：{selected.Title} - {selected.Artist}");
         var lyric = await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId);
         if (string.IsNullOrEmpty(lyric?.Lyric))
         {
             ShowInfoBar("该歌曲没有可用歌词。");
-            return;
+            return false;
         }
 
         track.LyricPath = null; // drop an old manual binding; auto-detect the new file
@@ -3403,11 +3425,12 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             ShowInfoBar($"歌词保存失败：{ex.Message}（歌曲目录可能只读或无写入权限）");
-            return;
+            return false;
         }
         if (_currentTrack == track)
             LoadLyricsFor(_loadedIndex);
         ShowInfoBar($"已保存歌词：{selected.Title} - {selected.Artist}{extraNote}");
+        return true;
     }
 
     // ---------- Batch lyric download + translation/romaji completion ----------
@@ -3797,9 +3820,46 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Sets one row's state and re-stamps the summary.</summary>
-    private void SetLyricTaskState(LyricTaskItem item, LyricTaskStatus status, string detail)
+    /// <summary>
+    /// Right-click a row in the completion list to manually complete it —
+    /// either an online search (the same dialog the track context menu uses)
+    /// or a local lyric file. A successful assignment marks the row as done so
+    /// "retry failed" won't re-run tracks the user fixed by hand.
+    /// </summary>
+    private void LyricTask_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
+        if (sender is not FrameworkElement { DataContext: LyricTaskItem item })
+            return;
+        e.Handled = true;
+
+        var search = new MenuFlyoutItem
+        {
+            Text = "手动搜索歌词...",
+            Icon = new FontIcon { Glyph = "\uE721" }
+        };
+        search.Click += async (_, _) =>
+        {
+            if (await ShowOnlineLyricDialogAsync(item.Track))
+                SetLyricTaskState(item, LyricTaskStatus.Success, "手动搜索补全");
+        };
+
+        var assign = new MenuFlyoutItem
+        {
+            Text = "指定本地歌词文件...",
+            Icon = new FontIcon { Glyph = "\uE8E5" }
+        };
+        assign.Click += async (_, _) =>
+        {
+            if (await AssignLyricToTrackAsync(item.Track))
+                SetLyricTaskState(item, LyricTaskStatus.Success, "已指定本地歌词");
+        };
+
+        new MenuFlyout { Items = { search, assign } }
+            .ShowAt(sender as FrameworkElement, e.GetPosition(sender as FrameworkElement));
+    }
+
+    /// <summary>Sets one row's state and re-stamps the summary.</summary>
+    private void SetLyricTaskState(LyricTaskItem item, LyricTaskStatus status, string detail)    {
         item.Status = status;
         item.Detail = detail;
         StampLyricTaskBrush(item);

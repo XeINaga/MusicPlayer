@@ -811,7 +811,7 @@
                                       SelectionMode="None" Padding="6">
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
-                                        <Grid Padding="4,7">
+                                        <Grid Padding="4,7" RightTapped="LyricTask_RightTapped">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="26" />
                                                 <ColumnDefinition Width="*" />
@@ -975,7 +975,7 @@
                             </StackPanel>
                             <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0"
                                        Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}" Foreground="{ThemeResource TextSecondary}" FontSize="11" />
-                            <Button Grid.Column="3" Width="30" Height="28" VerticalAlignment="Center"
+                            <Button Grid.Column="3" Width="30" Height="28" Padding="0" VerticalAlignment="Center"
                                     Background="Transparent" BorderThickness="0"
                                     Click="QueueRemove_Click" ToolTipService.ToolTip="从播放队列中移除">
                                 <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE711;" FontSize="13"
