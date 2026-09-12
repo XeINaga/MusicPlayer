@@ -23,3 +23,6 @@ wix.json
 # Python helpers
 __pycache__/
 *.pyc
+
+# Icon design preview (dev artifact, not shipped)
+Assets/icon_preview.png
