@@ -177,6 +177,9 @@ public sealed partial class MainWindow : Window
         VolumeSlider.Value = _settings.Volume * 100.0;
         SeekSlider.Maximum = 1;
 
+        // Dynamic volume (loudness normalization) routing.
+        _playback.LoudnessNormalization = _settings.DynamicVolume;
+
         // Restore persisted playback rate.
         _playback.Rate = _settings.PlaybackRate;
         UpdateSpeedText();
@@ -4391,6 +4394,7 @@ public sealed partial class MainWindow : Window
         // Restores both the settings combo boxes and the toolbar's radio menus.
         SyncLyricOptionChecks();
         CoverSpinToggle.IsOn = _settings.CoverSpin;
+        DynamicVolumeToggle.IsOn = _settings.DynamicVolume;
         CloseActionCombo.SelectedIndex = _settings.CloseAction == "Tray" ? 1 : 0;
 
         // Sync auto-start from registry (source of truth).
@@ -4865,6 +4869,18 @@ public sealed partial class MainWindow : Window
         _settings.CoverSpin = ((ToggleSwitch)sender).IsOn;
         SettingsStore.Save(_settings);
         UpdateDiscTimer();
+    }
+
+    private void DynamicVolumeToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.DynamicVolume = DynamicVolumeToggle.IsOn;
+        SettingsStore.Save(_settings);
+        _playback.LoudnessNormalization = _settings.DynamicVolume;
+        // Re-route the current track so the change is heard immediately;
+        // playback state and position are preserved across the reload.
+        _playback.ReloadCurrent();
     }
 
     private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)

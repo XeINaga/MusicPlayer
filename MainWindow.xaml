@@ -683,6 +683,9 @@
                                     <TextBlock Text="播放" Style="{StaticResource SettingsCardTitle}" />
                                     <ToggleSwitch x:Name="CoverSpinToggle" Header="歌曲封面旋转（黑胶转动效果）" OffContent="关" OnContent="开"
                                                   Toggled="CoverSpinToggle_Toggled" />
+                                    <ToggleSwitch x:Name="DynamicVolumeToggle" Header="动态音量（自动均衡歌曲响度）" OffContent="关" OnContent="开"
+                                                  Margin="0,8,0,0" Toggled="DynamicVolumeToggle_Toggled"
+                                                  ToolTipService.ToolTip="播放时自动把声音偏小的歌调大、偏大的歌压低（EBU R128 响度归一，目标 -16 LUFS）。切换后立即重载当前曲目生效。" />
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <TextBlock Text="定时停止播放" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />
                                         <ComboBox x:Name="SleepTimerCombo" Width="130"

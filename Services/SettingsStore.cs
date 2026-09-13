@@ -61,6 +61,13 @@ public sealed class AppSettings
     /// <summary>What the window close button does: "Exit" or "Tray" (minimize to tray).</summary>
     public string CloseAction { get; set; } = "Exit";
 
+    /// <summary>
+    /// Dynamic volume: route all playback through FFmpeg's loudnorm filter so
+    /// quiet songs are amplified and loud ones attenuated (EBU R128, target
+    /// -16 LUFS). Takes effect on the current track via a seamless reload.
+    /// </summary>
+    public bool DynamicVolume { get; set; }
+
     // Player state persisted across launches.
     public double Volume { get; set; } = 0.8;          // 0..1
     public double PlaybackRate { get; set; } = 1.0;     // 0.5–2.0
