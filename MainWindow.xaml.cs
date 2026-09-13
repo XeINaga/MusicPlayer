@@ -2545,8 +2545,12 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Keep the queue popup following the currently playing track.
     /// Realizes the row with a quick ScrollIntoView, then glides the viewport
-    /// so the row sits centered — same feel as the lyric auto-scroll.</summary>
-    private void ScrollQueueToCurrent()
+    /// so the row sits centered — same feel as the lyric auto-scroll.
+    /// Right after the popup becomes visible the virtualizing panel has not
+    /// realized any containers yet, so realization retries once per frame.</summary>
+    private void ScrollQueueToCurrent() => ScrollQueueToCurrent(retries: 8);
+
+    private void ScrollQueueToCurrent(int retries)
     {
         if (QueuePanel.Visibility != Visibility.Visible)
             return;
@@ -2560,7 +2564,11 @@ public sealed partial class MainWindow : Window
         QueueList.UpdateLayout();
 
         if (QueueList.ContainerFromIndex(i) is not FrameworkElement container || container.ActualHeight <= 0)
+        {
+            if (retries > 0)
+                _dispatcher.TryEnqueue(() => ScrollQueueToCurrent(retries - 1));
             return;
+        }
 
         var sv = FindScrollViewerDescendant(QueueList);
         if (sv == null || sv.ActualHeight <= 0)
