@@ -280,23 +280,27 @@ public sealed class PlaybackService
         }
 
         // Random mode: go back through what actually played before.
-        if (_mode == PlayMode.Random && _randomHistory.Count > 0)
+        if (_mode == PlayMode.Random)
         {
-            // Tracks deleted since they played are skipped over.
             var prev = PopValidRandomTrack(_randomHistory);
-            if (prev < 0)
-                return; // nothing remembered still exists in the queue
+            if (prev >= 0)
+            {
+                // Record where we are leaving from, so Next can retrace it.
+                RememberInto(_randomForward);
+                GoTo(prev);
+                return;
+            }
 
-            // Record where we are leaving from, so Next can retrace it.
+            // Nothing remembered (fresh session, or the queue was rebuilt and
+            // the entries no longer match): fall back to plain list order.
+            // Drawing a random track here would make "previous" feel broken.
             RememberInto(_randomForward);
-            GoTo(prev);
+            var pi = _index > 0 ? _index - 1 : _index;
+            GoTo(pi); // index 0 → reloads/restarts the first track
             return;
         }
 
-        // Nothing recorded to step back through. In random mode this draws a
-        // fresh track, so it needs the same bookkeeping as Next: drop a pending
-        // redo and record the track being left. Without it the place we came
-        // from is unrecoverable and a stale redo can resurface later.
+        // Nothing recorded to step back through.
         _randomForward.Clear();
         RememberRandomHistory();
         GoTo(ComputeNext(false));
@@ -369,13 +373,15 @@ public sealed class PlaybackService
     /// (no reload, no playback interruption) — used by "play next", which
     /// snapshots the queue into a dedicated list instead of mutating the
     /// library / a user playlist.
+    /// The random back/forward histories are KEPT: they hold Track references
+    /// and resolve against whatever queue is current (see PopValidRandomTrack),
+    /// so wiping them here would break "previous" after a play-next. Only the
+    /// round bag dies — its entries are indices of the old queue.
     /// </summary>
     public void ReplaceQueueSilent(IList<Track> tracks, int currentIndex)
     {
         if (tracks == null || tracks.Count == 0)
             return;
-        _randomHistory.Clear();
-        _randomForward.Clear();
         ResetRandomBag();
         _queue = tracks;
         _index = Math.Clamp(currentIndex, 0, tracks.Count - 1);
@@ -754,6 +760,20 @@ public sealed class PlaybackService
     }
 
     private void RememberRandomHistory() => RememberInto(_randomHistory);
+
+    /// <summary>
+    /// Pre-fill the random back-history from a most-recent-first list, so
+    /// "previous" works right after a session restore (the in-session history
+    /// would otherwise be empty). Callers pass the recent-plays list minus the
+    /// track being resumed; the last entry pushed ends up on top, so iterate
+    /// from oldest to newest.
+    /// </summary>
+    public void SeedRandomHistory(IEnumerable<Track> oldestFirst)
+    {
+        _randomHistory.Clear();
+        foreach (var t in oldestFirst)
+            _randomHistory.Push(t);
+    }
 
     /// <summary>Record the track being left, so a later step back can find it.</summary>
     private void RememberInto(Stack<Track> stack)

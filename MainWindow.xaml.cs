@@ -417,6 +417,17 @@ public sealed partial class MainWindow : Window
                 _suppressNextRecent = true;
                 _playback.SetQueue(_library, idx, TimeSpan.FromMilliseconds(prog.PositionMs), autoPlay: false);
                 BindQueue();
+
+                // Random mode: the in-session back history starts empty, which
+                // used to make the first "previous" press jump to a random
+                // track. 最近播放 IS the cross-session play history — seed the
+                // stack from it (most recent 50, resumed track excluded,
+                // pushed oldest-first so the previous song sits on top).
+                var seed = _recent.Where(t => t.Path != prog.Path)
+                                  .Take(50)
+                                  .ToList();
+                seed.Reverse();
+                _playback.SeedRandomHistory(seed);
             }
         }
     }
