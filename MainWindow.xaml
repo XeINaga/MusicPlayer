@@ -13,6 +13,7 @@
 
         <Grid.Resources>
             <services:TimeSpanConverter x:Key="TimeSpanConverter" />
+            <services:CurrentTrackBrushConverter x:Key="CurrentTrackBrush" />
             <SolidColorBrush x:Key="QqGreen" Color="#31c27c" />
             <!-- Surface, text, navigation and button colours now live in
                  Themes/SukiTheme.xaml inside ThemeDictionaries, so both light and
@@ -207,11 +208,13 @@
 
                     <Grid Grid.Column="0" Width="48" Height="48">
                         <Border Background="{ThemeResource Surface3}" CornerRadius="{StaticResource RadiusSmall}" />
+                        <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource TextSecondary}"
+                                  Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                     </Grid>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource TextPrimary}" TextTrimming="CharacterEllipsis" />
+                                   Foreground="{Binding IsCurrent, Converter={StaticResource CurrentTrackBrush}, ConverterParameter={StaticResource QqGreen}}" TextTrimming="CharacterEllipsis" />
                         <TextBlock Text="{Binding Artist}" FontSize="12" Foreground="{ThemeResource TextSecondary}"
                                    TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
                     </StackPanel>
@@ -511,6 +514,11 @@
                               ItemTemplate="{StaticResource TrackCardTemplate}"
                               DoubleTapped="TrackGrid_DoubleTapped"
                               AllowDrop="True" DragOver="TrackGrid_DragOver" Drop="TrackGrid_Drop">
+                        <GridView.ItemContainerTransitions>
+                            <TransitionCollection>
+                                <AddDeleteThemeTransition />
+                            </TransitionCollection>
+                        </GridView.ItemContainerTransitions>
                     </GridView>
 
                     <ListView x:Name="TrackList" Background="Transparent" BorderThickness="0" Margin="12,4,12,12"
@@ -519,6 +527,11 @@
                               DoubleTapped="TrackList_DoubleTapped"
                               DragItemsCompleted="TrackList_DragItemsCompleted"
                               AllowDrop="True" DragOver="TrackGrid_DragOver" Drop="TrackGrid_Drop">
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection>
+                                <AddDeleteThemeTransition />
+                            </TransitionCollection>
+                        </ListView.ItemContainerTransitions>
                     </ListView>
 
                     <GridView x:Name="AlbumGrid" Background="Transparent" BorderThickness="0" Margin="12,4,12,12"
@@ -809,6 +822,11 @@
                                 BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
                             <ListView x:Name="LyricTaskList" Background="Transparent" BorderThickness="0"
                                       SelectionMode="None" Padding="6">
+                                <ListView.ItemContainerTransitions>
+                                    <TransitionCollection>
+                                        <AddDeleteThemeTransition />
+                                    </TransitionCollection>
+                                </ListView.ItemContainerTransitions>
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
                                         <Grid Padding="4,7" RightTapped="LyricTask_RightTapped">
@@ -840,9 +858,13 @@
             </Grid>
 
             <!-- Right now-playing + lyrics (toggled from the bottom bar).
-                 Cover + track info on the left, lyrics on the right. -->
+                 Cover + track info on the left, lyrics on the right.
+                 Slides in from the right — see AnimatePanelIn. -->
             <Grid x:Name="NowPlayingPanel" Grid.Column="2" Background="{ThemeResource NowPanelBg}"
                   BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1,0,0,0" Visibility="Collapsed">
+                <Grid.RenderTransform>
+                    <CompositeTransform x:Name="NowPanelTransform" />
+                </Grid.RenderTransform>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -871,6 +893,8 @@
                         <Grid x:Name="CoverDisc" Width="232" Height="232" Margin="0,12,0,0" HorizontalAlignment="Center">
                             <Ellipse Width="232" Height="232" Fill="{ThemeResource Surface2}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2" />
                             <Ellipse x:Name="NowCoverEllipse" Width="232" Height="232" Fill="{ThemeResource Surface2}" />
+                            <!-- Second layer for the cover crossfade (see ApplyCover) -->
+                            <Ellipse x:Name="NowCoverEllipseB" Width="232" Height="232" Fill="{ThemeResource Surface2}" Opacity="0" />
                             <!-- Vinyl groove shimmer over the cover -->
                             <Ellipse Width="232" Height="232" IsHitTestVisible="False">
                                 <Ellipse.Fill>
@@ -924,7 +948,10 @@
                                                      Checked="LyricTransToggle_Changed" Unchecked="LyricTransToggle_Changed" />
                         </StackPanel>
 
-                        <ScrollViewer x:Name="LyricScroll" Grid.Row="1" Margin="4,2,10,12" VerticalScrollBarVisibility="Auto">
+                        <!-- Scrollbar hidden: the view auto-centers on every line
+                             change, a visible bar only added clutter. Wheel /
+                             touch scrolling still work. -->
+                        <ScrollViewer x:Name="LyricScroll" Grid.Row="1" Margin="4,2,10,12" VerticalScrollBarVisibility="Hidden">
                             <StackPanel x:Name="LyricStack" HorizontalAlignment="Center" Padding="10" />
                         </ScrollViewer>
                     </Grid>
@@ -932,13 +959,24 @@
             </Grid>
         </Grid>
 
-        <!-- Queue popup (floating frosted panel above the bottom bar) -->
-        <Grid x:Name="QueuePanel" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
-              VerticalAlignment="Bottom" Height="340" Margin="10,0,10,0"
-              Background="{ThemeResource QueueAcrylic}" BorderBrush="{ThemeResource BorderSoft}"
-              BorderThickness="1" CornerRadius="14,14,0,0"
-              Translation="0,0,24"
-              Visibility="Collapsed">
+            <!-- Click-outside light-dismiss layer: sits under QueuePanel (later
+                 sibling wins z-order) and covers the whole window while the
+                 queue is open. -->
+            <Border x:Name="QueueDismissLayer" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="3"
+                    Background="Transparent" Visibility="Collapsed"
+                    Tapped="QueueDismissLayer_Tapped" />
+
+            <!-- Queue popup (floating frosted panel above the bottom bar).
+                 Shows with a slide-up + fade; see ShowQueuePanel/HideQueuePanel. -->
+            <Grid x:Name="QueuePanel" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                  VerticalAlignment="Bottom" HorizontalAlignment="Right"
+                  Width="560" Height="340" Margin="10,0,10,0"
+                  Background="{ThemeResource QueueAcrylic}" BorderBrush="{ThemeResource BorderSoft}"
+                  BorderThickness="1" CornerRadius="14,14,0,0"
+                  Visibility="Collapsed">
+                <Grid.RenderTransform>
+                    <CompositeTransform x:Name="QueuePanelTransform" />
+                </Grid.RenderTransform>
             <!-- Lifted off the content behind it so the panel reads as a
                  floating layer rather than another docked strip. -->
             <Grid.Shadow>
@@ -984,10 +1022,13 @@
                             </Grid.ColumnDefinitions>
                             <Grid Grid.Column="0" Width="40" Height="40">
                                 <Border Background="{ThemeResource Surface3}" CornerRadius="{StaticResource RadiusSmall}" />
+                                <FontIcon Glyph="&#xE8D6;" FontSize="12" Foreground="{ThemeResource TextSecondary}"
+                                          Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                             </Grid>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Title}" Foreground="{ThemeResource TextPrimary}" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis"
+                                           Foreground="{Binding IsCurrent, Converter={StaticResource CurrentTrackBrush}, ConverterParameter={StaticResource QqGreen}}" />
                                 <TextBlock Text="{Binding Artist}" Foreground="{ThemeResource TextSecondary}" FontSize="11" Margin="0,2,0,0" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                             <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="0,0,10,0"
@@ -1023,6 +1064,8 @@
                 <StackPanel Orientation="Horizontal" Spacing="12" Margin="16,0,0,0" VerticalAlignment="Center">
                     <Grid Width="54" Height="54">
                         <Border Background="{ThemeResource Surface3}" CornerRadius="{StaticResource RadiusSmall}" />
+                        <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource TextSecondary}"
+                                  Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         <Image x:Name="MiniCover" Stretch="UniformToFill" />
                     </Grid>
                     <StackPanel VerticalAlignment="Center" MaxWidth="210" Spacing="2">
