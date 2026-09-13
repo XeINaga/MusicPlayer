@@ -14,6 +14,11 @@ public static class LyricBindingStore
     private static string FilePath =>
         Path.Combine(DataLocation.Root, "lyricbindings.json");
 
+    // Get runs on background threads (batch lyric scans) while Set/Clear run
+    // on the UI thread — unsynchronized Dictionary access across threads can
+    // corrupt the bucket list, so every touch goes through this gate.
+    private static readonly object Gate = new();
+
     private static Dictionary<string, string> _map = Load();
 
     private static Dictionary<string, string> Load()
@@ -48,18 +53,27 @@ public static class LyricBindingStore
         }
     }
 
-    public static string? Get(string audioPath) =>
-        _map.TryGetValue(audioPath, out var v) ? v : null;
+    public static string? Get(string audioPath)
+    {
+        lock (Gate)
+            return _map.TryGetValue(audioPath, out var v) ? v : null;
+    }
 
     public static void Set(string audioPath, string lyricPath)
     {
-        _map[audioPath] = lyricPath;
-        Save();
+        lock (Gate)
+        {
+            _map[audioPath] = lyricPath;
+            Save();
+        }
     }
 
     public static void Clear(string audioPath)
     {
-        if (_map.Remove(audioPath))
-            Save();
+        lock (Gate)
+        {
+            if (_map.Remove(audioPath))
+                Save();
+        }
     }
 }

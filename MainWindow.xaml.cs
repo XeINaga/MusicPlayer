@@ -1060,11 +1060,36 @@ public sealed partial class MainWindow : Window
 
         if (toRemove.Count > 0)
         {
-            // Drop from the end downwards so the pending indices stay valid,
-            // then let the player resync (the queue may be _library itself).
+            // Drop from the end downwards so the pending indices stay valid.
+            // NOT SyncAfterRemoval here: it answers a removed playing track by
+            // loading the next one (play: true), which would auto-start
+            // playback at launch. The restored session is paused; re-point it
+            // silently or drop it, but never start playing.
+            var curPath = CurrentPath();
             foreach (var i in toRemove.AsEnumerable().Reverse())
                 _library.RemoveAt(i);
-            SyncAfterRemoval(_library, toRemove);
+
+            if (ReferenceEquals(_playback.Queue, _library))
+            {
+                var idx = -1;
+                if (curPath != null)
+                    idx = _library.ToList().FindIndex(t => t.Path == curPath);
+
+                if (idx >= 0)
+                {
+                    _playback.SetIndexSilent(idx);
+                    QueueList.SelectedIndex = idx;
+                }
+                else
+                {
+                    // The track the session wanted to resume is gone — there is
+                    // nothing meaningful to point at, so retire the queue
+                    // instead of silently playing a neighbour.
+                    _playback.Clear();
+                    ResetNowPlaying();
+                    QueueList.SelectedIndex = -1;
+                }
+            }
         }
 
         if (toAdd.Count > 0)
@@ -1115,6 +1140,15 @@ public sealed partial class MainWindow : Window
 
     private void BtnClear_Click(object sender, RoutedEventArgs e)
     {
+        // Clearing while the files still sit inside watched folders must not
+        // be undone by the next startup sync — exclude them, same as a normal
+        // remove-from-library does.
+        foreach (var t in _library)
+            if (!_settings.LibraryExclusions.Contains(t.Path, StringComparer.OrdinalIgnoreCase))
+                _settings.LibraryExclusions.Add(t.Path);
+        if (_settings.LibraryExclusions.Count > 0)
+            SettingsStore.Save(_settings);
+
         _library.Clear();
         _playback.Clear();
         _boundQueue = null;
@@ -4571,10 +4605,9 @@ public sealed partial class MainWindow : Window
     private void BtnCollapseCover_Click(object sender, RoutedEventArgs e)
     {
         _coverCollapsed = !_coverCollapsed;
-        // Fold the cover (and the song/artist/album block) upward; the lyrics
-        // scroll area (Grid.Row 3, height *) grows to fill the freed space.
-        CoverDisc.Visibility = _coverCollapsed ? Visibility.Collapsed : Visibility.Visible;
-        NowInfoPanel.Visibility = _coverCollapsed ? Visibility.Collapsed : Visibility.Visible;
+        // Collapse the whole left column (cover + song/artist/album block) so
+        // the lyrics column stretches across the full panel width.
+        NowCoverColumn.Visibility = _coverCollapsed ? Visibility.Collapsed : Visibility.Visible;
         CoverChevron.Glyph = _coverCollapsed ? "\uE74F" : "\uE74E"; // down to expand, up to fold
     }
 

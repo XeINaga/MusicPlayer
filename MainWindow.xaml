@@ -866,7 +866,7 @@
                     </Grid.ColumnDefinitions>
 
                     <!-- Left: cover + track info -->
-                    <StackPanel Grid.Column="0" MinWidth="264" MaxWidth="320" Margin="16,0,4,0"
+                    <StackPanel x:Name="NowCoverColumn" Grid.Column="0" MinWidth="264" MaxWidth="320" Margin="16,0,4,0"
                                 VerticalAlignment="Center">
                         <Grid x:Name="CoverDisc" Width="232" Height="232" Margin="0,12,0,0" HorizontalAlignment="Center">
                             <Ellipse Width="232" Height="232" Fill="{ThemeResource Surface2}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2" />
