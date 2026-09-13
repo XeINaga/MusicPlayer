@@ -13,7 +13,9 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Windowing;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Media.Playback;
@@ -122,12 +124,12 @@ public sealed partial class MainWindow : Window
     private bool _selectMode;
     // Current track captured when a queue drag starts (to resync the index).
     private Track? _queueDragCurrent;
+    // True while the vinyl's composition spin animation is running.
+    private bool _spinRunning;
 
-    private readonly DispatcherTimer _discTimer = new();
     private readonly DispatcherTimer _lyricTimer = new();
     private readonly DispatcherTimer _sleepTimer = new();
     private readonly DispatcherTimer _searchDebounceTimer = new();
-    private readonly RotateTransform _discRotate = new();
     private static readonly Brush CoverPlaceholder =
         new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x15, 0x15, 0x1c));
 
@@ -207,13 +209,14 @@ public sealed partial class MainWindow : Window
         _viewMode = _settings.ViewMode == "List" ? "List" : "Grid";
         _sortBy = _settings.SortBy;
 
-        // Spinning vinyl disc (animates only while playing AND spin is enabled).
-        CoverDisc.RenderTransform = _discRotate;
-        CoverDisc.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
-        _discTimer.Interval = TimeSpan.FromMilliseconds(40);
-        _discTimer.Tick += (_, _) =>
+        // Spinning vinyl disc (animates only while playing AND spin is enabled);
+        // driven by a composition animation — see UpdateDiscSpin.
+        CoverDisc.SizeChanged += (_, _) =>
         {
-            _discRotate.Angle = (_discRotate.Angle + 0.9) % 360;
+            // Rotation must be centered on the real disc, whenever layout lands.
+            var v = ElementCompositionPreview.GetElementVisual(CoverDisc);
+            v.CenterPoint = new System.Numerics.Vector3(
+                (float)(CoverDisc.ActualWidth / 2), (float)(CoverDisc.ActualHeight / 2), 0);
         };
 
         // Sleep timer: fires once after the chosen interval to pause playback.
@@ -249,6 +252,12 @@ public sealed partial class MainWindow : Window
         LyricFontSlider.Minimum = 12;
         LyricFontSlider.Maximum = 72;
         _suppressSettingEvents = false;
+
+        // Play button: a gentle grow on hover — it is the transport bar's
+        // focal point. Scale is center-anchored; Vector3Transition animates it.
+        BtnPlay.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(120) };
+        BtnPlay.PointerEntered += (_, _) => BtnPlay.Scale = new System.Numerics.Vector3(1.06f, 1.06f, 1f);
+        BtnPlay.PointerExited += (_, _) => BtnPlay.Scale = System.Numerics.Vector3.One;
 
         this.Activated += MainWindow_Activated;
         this.Closed += MainWindow_Closed;
@@ -518,6 +527,7 @@ public sealed partial class MainWindow : Window
             RightCol.Width = new GridLength(1, GridUnitType.Star);
             CenterGrid.Visibility = Visibility.Collapsed;
             NowPlayingPanel.Visibility = Visibility.Visible;
+            AnimatePanelIn(NowPlayingPanel, NowPanelTransform, fromX: 56, fromY: 0);
             TrackGrid.Visibility = Visibility.Collapsed;
             TrackList.Visibility = Visibility.Collapsed;
             AlbumGrid.Visibility = Visibility.Collapsed;
@@ -2435,18 +2445,93 @@ public sealed partial class MainWindow : Window
 
     private void BtnQueueToggle_Click(object sender, RoutedEventArgs e)
     {
-        var showing = QueuePanel.Visibility != Visibility.Visible;
-        QueuePanel.Visibility = showing ? Visibility.Visible : Visibility.Collapsed;
-        if (showing)
-        {
-            // Let the panel run one layout pass first so ScrollIntoView has
-            // realizable items to scroll to.
-            _dispatcher.TryEnqueue(ScrollQueueToCurrent);
-        }
+        if (QueuePanel.Visibility != Visibility.Visible)
+            ShowQueuePanel();
+        else
+            HideQueuePanel();
     }
 
     private void BtnQueueClose_Click(object sender, RoutedEventArgs e) =>
-        QueuePanel.Visibility = Visibility.Collapsed;
+        HideQueuePanel();
+
+    private void QueueDismissLayer_Tapped(object sender, TappedRoutedEventArgs e) =>
+        HideQueuePanel();
+
+    private void ShowQueuePanel()
+    {
+        QueueDismissLayer.Visibility = Visibility.Visible;
+        QueuePanel.Visibility = Visibility.Visible;
+        AnimatePanelIn(QueuePanel, QueuePanelTransform, fromX: 0, fromY: 48);
+        // Let the panel run one layout pass first so the scroll target has
+        // realizable items to work with.
+        _dispatcher.TryEnqueue(ScrollQueueToCurrent);
+    }
+
+    private void HideQueuePanel()
+    {
+        if (QueuePanel.Visibility != Visibility.Visible)
+            return;
+        QueueDismissLayer.Visibility = Visibility.Collapsed;
+
+        // Short fade-out, then collapse on completion.
+        var fade = new DoubleAnimation { To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(90)) };
+        Storyboard.SetTarget(fade, QueuePanel);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fade);
+        sb.Completed += (_, _) =>
+        {
+            QueuePanel.Visibility = Visibility.Collapsed;
+            QueuePanel.Opacity = 1;
+        };
+        sb.Begin();
+    }
+
+    /// <summary>
+    /// Entrance animation for the floating panels: fade in while easing the
+    /// render transform back to rest. Plain storyboards on a CompositeTransform
+    /// (rather than composition Offset animations) so window resizes / layout
+    /// moves keep working once the animation completes.
+    /// </summary>
+    private static void AnimatePanelIn(FrameworkElement panel, CompositeTransform transform, double fromX, double fromY)
+    {
+        transform.TranslateX = fromX;
+        transform.TranslateY = fromY;
+
+        var sb = new Storyboard();
+
+        var slideX = new DoubleAnimation
+        {
+            From = fromX,
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(170)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(slideX, transform);
+        Storyboard.SetTargetProperty(slideX, "TranslateX");
+        sb.Children.Add(slideX);
+
+        if (fromY != 0)
+        {
+            var slideY = new DoubleAnimation
+            {
+                From = fromY,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(170)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            };
+            Storyboard.SetTarget(slideY, transform);
+            Storyboard.SetTargetProperty(slideY, "TranslateY");
+            sb.Children.Add(slideY);
+        }
+
+        var fadeIn = new DoubleAnimation { From = 0, To = 1, Duration = new Duration(TimeSpan.FromMilliseconds(150)) };
+        Storyboard.SetTarget(fadeIn, panel);
+        Storyboard.SetTargetProperty(fadeIn, "Opacity");
+        sb.Children.Add(fadeIn);
+
+        sb.Begin();
+    }
 
     private void BtnQueueClear_Click(object sender, RoutedEventArgs e)
     {
@@ -2458,7 +2543,9 @@ public sealed partial class MainWindow : Window
         LoadLyricsFor(-1);
     }
 
-    /// <summary>Keep the queue popup following the currently playing track.</summary>
+    /// <summary>Keep the queue popup following the currently playing track.
+    /// Realizes the row with a quick ScrollIntoView, then glides the viewport
+    /// so the row sits centered — same feel as the lyric auto-scroll.</summary>
     private void ScrollQueueToCurrent()
     {
         if (QueuePanel.Visibility != Visibility.Visible)
@@ -2470,6 +2557,33 @@ public sealed partial class MainWindow : Window
             return;
 
         QueueList.ScrollIntoView(q[i]);
+        QueueList.UpdateLayout();
+
+        if (QueueList.ContainerFromIndex(i) is not FrameworkElement container || container.ActualHeight <= 0)
+            return;
+
+        var sv = FindScrollViewerDescendant(QueueList);
+        if (sv == null || sv.ActualHeight <= 0)
+            return;
+
+        var top = container.ActualOffset.Y - sv.ActualHeight / 2 + container.ActualHeight / 2;
+        if (top > 0)
+            sv.ChangeView(null, top, null); // animated by default
+    }
+
+    private static ScrollViewer? FindScrollViewerDescendant(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is ScrollViewer sv)
+                return sv;
+            var inner = FindScrollViewerDescendant(child);
+            if (inner != null)
+                return inner;
+        }
+        return null;
     }
 
     private void QueueList_ItemClick(object sender, ItemClickEventArgs e)
@@ -2583,20 +2697,35 @@ public sealed partial class MainWindow : Window
     /// Starts or stops the disc rotation timer based on the current playback
     /// state and the CoverSpin setting. Only spins while Playing AND spin enabled.
     /// </summary>
+    /// <summary>
+    /// Starts or stops the vinyl spin based on the current playback state and
+    /// the CoverSpin setting. Only spins while Playing AND spin enabled. Runs
+    /// as a composition keyframe animation on the element visual: real 60fps
+    /// linear rotation, unlike the old DispatcherTimer stepping 0.9° per 40ms.
+    /// </summary>
     private void UpdateDiscTimer()
     {
+        var visual = ElementCompositionPreview.GetElementVisual(CoverDisc);
         if (_isPlaying && _settings.CoverSpin)
         {
-            if (!_discTimer.IsEnabled)
-                _discTimer.Start();
+            visual.CenterPoint = new System.Numerics.Vector3(
+                (float)(CoverDisc.ActualWidth / 2), (float)(CoverDisc.ActualHeight / 2), 0);
+            if (_spinRunning)
+                return;
+            var spin = visual.Compositor.CreateScalarKeyFrameAnimation();
+            spin.InsertKeyFrame(1f, 360f);
+            spin.Duration = TimeSpan.FromSeconds(16); // 22.5°/s, same speed as before
+            spin.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
+            visual.StartAnimation("RotationAngle", spin);
+            _spinRunning = true;
         }
         else
         {
-            if (_discTimer.IsEnabled)
-            {
-                _discTimer.Stop();
-                _discRotate.Angle = 0;
-            }
+            if (!_spinRunning)
+                return;
+            visual.StopAnimation("RotationAngle");
+            visual.RotationAngle = 0;
+            _spinRunning = false;
         }
     }
 
@@ -2644,6 +2773,22 @@ public sealed partial class MainWindow : Window
         _suppressNextRecent = false;
     }
 
+    // Accent-titles the row of the track that is currently playing (lists read
+    // Track.IsCurrent through CurrentTrackBrushConverter). O(1): toggles only
+    // the previous and the new track.
+    private Track? _highlightedTrack;
+
+    private void SetCurrentTrackHighlight(Track? track)
+    {
+        if (ReferenceEquals(_highlightedTrack, track))
+            return;
+        if (_highlightedTrack != null)
+            _highlightedTrack.IsCurrent = false;
+        _highlightedTrack = track;
+        if (track != null)
+            track.IsCurrent = true;
+    }
+
     private void OnCurrentIndexChanged(int index)
     {
         // During session restore the index changes without any playback; the
@@ -2664,6 +2809,9 @@ public sealed partial class MainWindow : Window
                 PushRecent(t);
             }
         }
+
+        var queue = _playback.Queue;
+        SetCurrentTrackHighlight(queue != null && index >= 0 && index < queue.Count ? queue[index] : null);
 
         LoadLyricsFor(index);
 
@@ -2858,15 +3006,37 @@ public sealed partial class MainWindow : Window
         MiniCover.Source = track.Cover;
     }
 
+    // Alternate between the two cover layers on every change, so switching
+    // tracks crossfades instead of hard-cutting the artwork.
+    private bool _coverFrontIsA = true;
+
     private void ApplyCover(ImageSource? cover)
     {
-        NowCoverEllipse.Fill = cover == null
+        var newBrush = cover == null
             ? CoverPlaceholder
             : new ImageBrush { ImageSource = cover };
+
+        var back = _coverFrontIsA ? NowCoverEllipseB : NowCoverEllipse;
+        var front = _coverFrontIsA ? NowCoverEllipse : NowCoverEllipseB;
+        _coverFrontIsA = !_coverFrontIsA;
+
+        back.Fill = newBrush;
+
+        var sb = new Storyboard();
+        var fadeIn = new DoubleAnimation { To = 1, Duration = new Duration(TimeSpan.FromMilliseconds(220)) };
+        Storyboard.SetTarget(fadeIn, back);
+        Storyboard.SetTargetProperty(fadeIn, "Opacity");
+        var fadeOut = new DoubleAnimation { To = 0, Duration = new Duration(TimeSpan.FromMilliseconds(220)) };
+        Storyboard.SetTarget(fadeOut, front);
+        Storyboard.SetTargetProperty(fadeOut, "Opacity");
+        sb.Children.Add(fadeIn);
+        sb.Children.Add(fadeOut);
+        sb.Begin();
     }
 
     private void ResetNowPlaying()
     {
+        SetCurrentTrackHighlight(null);
         NowTitle.Text = "未在播放";
         NowArtist.Text = string.Empty;
         NowAlbum.Text = string.Empty;
@@ -2935,7 +3105,11 @@ public sealed partial class MainWindow : Window
             Foreground = new SolidColorBrush(color),
             TextWrapping = TextWrapping.Wrap,
             TextAlignment = TextAlignment.Center,
-            Opacity = 0.45
+            Opacity = 0.45,
+            // Opacity + Scale animate smoothly when a line activates, instead
+            // of hard-switching (see SetLineActive).
+            OpacityTransition = new ScalarTransition { Duration = TimeSpan.FromMilliseconds(180) },
+            ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(180) },
         };
     }
 
@@ -4163,6 +4337,11 @@ public sealed partial class MainWindow : Window
             {
                 tb.Opacity = active ? 1.0 : 0.45;
                 tb.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+                // Scale is center-anchored and animated via ScaleTransition —
+                // the active line gently grows instead of popping.
+                tb.Scale = active
+                    ? new System.Numerics.Vector3(1.03f, 1.03f, 1f)
+                    : System.Numerics.Vector3.One;
             }
         }
     }
@@ -4677,8 +4856,6 @@ public sealed partial class MainWindow : Window
     {
         _settings.CoverSpin = ((ToggleSwitch)sender).IsOn;
         SettingsStore.Save(_settings);
-        if (!_settings.CoverSpin)
-            _discRotate.Angle = 0;
         UpdateDiscTimer();
     }
 

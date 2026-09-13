@@ -20,6 +20,7 @@ public sealed class Track : INotifyPropertyChanged
     private DateTime _dateAdded = DateTime.Now;
     private int _playCount;
     private bool _favorite;
+    private bool _isCurrent;
 
     public Track(string path)
     {
@@ -97,6 +98,17 @@ public sealed class Track : INotifyPropertyChanged
     {
         get => _favorite;
         set { _favorite = value; OnChanged(nameof(Favorite)); }
+    }
+
+    /// <summary>
+    /// True while this track is the playback queue's current item. Drives the
+    /// accent title color in the track lists (see CurrentTrackBrushConverter);
+    /// MainWindow toggles exactly one track at a time.
+    /// </summary>
+    public bool IsCurrent
+    {
+        get => _isCurrent;
+        set { if (_isCurrent != value) { _isCurrent = value; OnChanged(nameof(IsCurrent)); } }
     }
 
     /// <summary>
