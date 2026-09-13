@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -86,6 +87,27 @@ public sealed class AppSettings
     public string LastFmApiSecret { get; set; } = "";
     public string LastFmSessionKey { get; set; } = "";
     public string LastFmUsername { get; set; } = "";
+
+    /// <summary>
+    /// Folders under library surveillance. Every launch rescans them and syncs
+    /// the result into the library: new audio files are added, files that
+    /// disappeared are removed.
+    /// </summary>
+    public List<WatchedFolder> WatchedFolders { get; set; } = new();
+
+    /// <summary>
+    /// Track paths the user deliberately removed from the library while the
+    /// file still exists inside a watched folder. The startup sync never
+    /// re-adds these; adding the file back by hand clears the exclusion.
+    /// </summary>
+    public List<string> LibraryExclusions { get; set; } = new();
+}
+
+/// <summary>One monitored folder and how deep the scan goes.</summary>
+public sealed class WatchedFolder
+{
+    public string Path { get; set; } = "";
+    public bool Recursive { get; set; }
 }
 
 /// <summary>Lyric sources the user can choose from.</summary>

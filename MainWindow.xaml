@@ -839,13 +839,11 @@
                 </Grid>
             </Grid>
 
-            <!-- Right now-playing + lyrics (toggled from the bottom bar) -->
+            <!-- Right now-playing + lyrics (toggled from the bottom bar).
+                 Cover + track info on the left, lyrics on the right. -->
             <Grid x:Name="NowPlayingPanel" Grid.Column="2" Background="{ThemeResource NowPanelBg}"
                   BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1,0,0,0" Visibility="Collapsed">
                 <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
@@ -861,57 +859,76 @@
                     </Button>
                 </Grid>
 
-                <Grid x:Name="CoverDisc" Grid.Row="1" Width="232" Height="232" Margin="0,12,0,0" HorizontalAlignment="Center">
-                    <Ellipse Width="232" Height="232" Fill="{ThemeResource Surface2}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2" />
-                    <Ellipse x:Name="NowCoverEllipse" Width="232" Height="232" Fill="{ThemeResource Surface2}" />
-                    <!-- Vinyl groove shimmer over the cover -->
-                    <Ellipse Width="232" Height="232" IsHitTestVisible="False">
-                        <Ellipse.Fill>
-                            <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
-                                <GradientStop Color="#00000000" Offset="0.55" />
-                                <GradientStop Color="#1fffffff" Offset="0.72" />
-                                <GradientStop Color="#00000000" Offset="0.82" />
-                                <GradientStop Color="#14ffffff" Offset="0.92" />
-                                <GradientStop Color="#40000000" Offset="1" />
-                            </RadialGradientBrush>
-                        </Ellipse.Fill>
-                    </Ellipse>
-                    <Ellipse Width="46" Height="46" Fill="{ThemeResource Surface}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2"
-                             HorizontalAlignment="Center" VerticalAlignment="Center" />
-                    <Ellipse Width="10" Height="10" Fill="{StaticResource QqGreen}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Left: cover + track info -->
+                    <StackPanel Grid.Column="0" MinWidth="264" MaxWidth="320" Margin="16,0,4,0"
+                                VerticalAlignment="Center">
+                        <Grid x:Name="CoverDisc" Width="232" Height="232" Margin="0,12,0,0" HorizontalAlignment="Center">
+                            <Ellipse Width="232" Height="232" Fill="{ThemeResource Surface2}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2" />
+                            <Ellipse x:Name="NowCoverEllipse" Width="232" Height="232" Fill="{ThemeResource Surface2}" />
+                            <!-- Vinyl groove shimmer over the cover -->
+                            <Ellipse Width="232" Height="232" IsHitTestVisible="False">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                        <GradientStop Color="#00000000" Offset="0.55" />
+                                        <GradientStop Color="#1fffffff" Offset="0.72" />
+                                        <GradientStop Color="#00000000" Offset="0.82" />
+                                        <GradientStop Color="#14ffffff" Offset="0.92" />
+                                        <GradientStop Color="#40000000" Offset="1" />
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                            </Ellipse>
+                            <Ellipse Width="46" Height="46" Fill="{ThemeResource Surface}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <Ellipse Width="10" Height="10" Fill="{StaticResource QqGreen}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <StackPanel x:Name="NowInfoPanel" HorizontalAlignment="Center" Spacing="5" Margin="12,14,12,8">
+                            <TextBlock x:Name="NowTitle" Text="未在播放" FontSize="20" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextPrimary}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="300" />
+                            <TextBlock x:Name="NowArtist" Text="" FontSize="13" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
+                            <TextBlock x:Name="NowAlbum" Text="" FontSize="11" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Right: lyric calibration bar + scrolling lyrics -->
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Lyric offset calibration + romaji/translation toggles -->
+                        <StackPanel x:Name="LyricOffsetBar" Orientation="Horizontal" Spacing="6"
+                                    HorizontalAlignment="Center" Margin="10,8,10,4">
+                            <Button x:Name="BtnLyricOffsetDown" Content="-0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
+                                    Click="BtnLyricOffsetDown_Click" ToolTipService.ToolTip="歌词提前 0.5 秒" />
+                            <TextBlock x:Name="LyricOffsetText" Text="0.0s" FontSize="11" Foreground="{ThemeResource TextSecondary}"
+                                       VerticalAlignment="Center" MinWidth="38" TextAlignment="Center" />
+                            <Button x:Name="BtnLyricOffsetUp" Content="+0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
+                                    Click="BtnLyricOffsetUp_Click" ToolTipService.ToolTip="歌词延后 0.5 秒" />
+                            <Button x:Name="BtnLyricOffsetReset" Content="重置" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
+                                    Click="BtnLyricOffsetReset_Click" />
+                            <primitives:ToggleButton x:Name="LyricRomajiToggle" Content="罗马音" Padding="9,3" FontSize="11"
+                                                     CornerRadius="{StaticResource RadiusSmall}" Background="Transparent"
+                                                     BorderBrush="{ThemeResource BorderSoft}"
+                                                     Checked="LyricRomajiToggle_Changed" Unchecked="LyricRomajiToggle_Changed" />
+                            <primitives:ToggleButton x:Name="LyricTransToggle" Content="翻译" Padding="9,3" FontSize="11"
+                                                     CornerRadius="{StaticResource RadiusSmall}" Background="Transparent"
+                                                     BorderBrush="{ThemeResource BorderSoft}"
+                                                     Checked="LyricTransToggle_Changed" Unchecked="LyricTransToggle_Changed" />
+                        </StackPanel>
+
+                        <ScrollViewer x:Name="LyricScroll" Grid.Row="1" Margin="4,2,10,12" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="LyricStack" HorizontalAlignment="Center" Padding="10" />
+                        </ScrollViewer>
+                    </Grid>
                 </Grid>
-
-                <StackPanel x:Name="NowInfoPanel" Grid.Row="2" HorizontalAlignment="Center" Spacing="5" Margin="12,14,12,8">
-                    <TextBlock x:Name="NowTitle" Text="未在播放" FontSize="20" FontWeight="SemiBold"
-                               Foreground="{ThemeResource TextPrimary}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="300" />
-                    <TextBlock x:Name="NowArtist" Text="" FontSize="13" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
-                    <TextBlock x:Name="NowAlbum" Text="" FontSize="11" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
-                </StackPanel>
-
-                <!-- Lyric offset calibration + romaji/translation toggles -->
-                <StackPanel x:Name="LyricOffsetBar" Grid.Row="3" Orientation="Horizontal" Spacing="6"
-                            HorizontalAlignment="Center" Margin="10,4,10,4">
-                    <Button x:Name="BtnLyricOffsetDown" Content="-0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
-                            Click="BtnLyricOffsetDown_Click" ToolTipService.ToolTip="歌词提前 0.5 秒" />
-                    <TextBlock x:Name="LyricOffsetText" Text="0.0s" FontSize="11" Foreground="{ThemeResource TextSecondary}"
-                               VerticalAlignment="Center" MinWidth="38" TextAlignment="Center" />
-                    <Button x:Name="BtnLyricOffsetUp" Content="+0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
-                            Click="BtnLyricOffsetUp_Click" ToolTipService.ToolTip="歌词延后 0.5 秒" />
-                    <Button x:Name="BtnLyricOffsetReset" Content="重置" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
-                            Click="BtnLyricOffsetReset_Click" />
-                    <primitives:ToggleButton x:Name="LyricRomajiToggle" Content="罗马音" Padding="9,3" FontSize="11"
-                                             CornerRadius="{StaticResource RadiusSmall}" Background="Transparent"
-                                             BorderBrush="{ThemeResource BorderSoft}"
-                                             Checked="LyricRomajiToggle_Changed" Unchecked="LyricRomajiToggle_Changed" />
-                    <primitives:ToggleButton x:Name="LyricTransToggle" Content="翻译" Padding="9,3" FontSize="11"
-                                             CornerRadius="{StaticResource RadiusSmall}" Background="Transparent"
-                                             BorderBrush="{ThemeResource BorderSoft}"
-                                             Checked="LyricTransToggle_Changed" Unchecked="LyricTransToggle_Changed" />
-                </StackPanel>
-
-                <ScrollViewer x:Name="LyricScroll" Grid.Row="4" Margin="10,2,10,12" VerticalScrollBarVisibility="Auto">
-                    <StackPanel x:Name="LyricStack" HorizontalAlignment="Center" Padding="10" />
-                </ScrollViewer>
             </Grid>
         </Grid>
 

@@ -242,14 +242,23 @@ public sealed partial class MainWindow : Window
         // Slider range set in code: this exact slider's Minimum/Maximum as XAML
         // attributes produced a corrupt XBF node ("Failed to assign to property
         // 'RangeBase.Minimum'" at runtime) even though it compiled fine.
+        // The range assignment coerces Value (0 -> 12) which fires
+        // ValueChanged; the guard keeps that from saving 12 over the user's
+        // persisted font size before it was ever read back.
+        _suppressSettingEvents = true;
         LyricFontSlider.Minimum = 12;
         LyricFontSlider.Maximum = 72;
+        _suppressSettingEvents = false;
 
         this.Activated += MainWindow_Activated;
         this.Closed += MainWindow_Closed;
 
         RestoreSession();
         ShowView(NavView.Local);
+
+        // Watched folders: reconcile the library with what is on disk (runs
+        // async; it is pure disk I/O plus dispatcher-marshaled list edits).
+        SafeRun(SyncWatchedFoldersAsync, "监控文件夹同步");
 
         // Apply the embedded app icon to the window title bar / taskbar.
         TrySetWindowIcon();
@@ -792,6 +801,7 @@ public sealed partial class MainWindow : Window
         // would freeze the window if it ran on the UI thread.
         var paths = await Task.Run(() => FolderScanner.Scan(folder.Path, recursive: true));
         AddItemsToLibrary(paths);
+        WatchFolder(folder.Path, recursive: true);
     }
 
     private void BtnAddFolderFlat_Click(object sender, RoutedEventArgs e)
@@ -806,6 +816,35 @@ public sealed partial class MainWindow : Window
         // UI thread.
         var paths = await Task.Run(() => FolderScanner.Scan(folder.Path, recursive: false));
         AddItemsToLibrary(paths);
+        WatchFolder(folder.Path, recursive: false);
+    }
+
+    /// <summary>
+    /// Register a folder for surveillance: every launch rescans it and syncs
+    /// the changes (new files in, deleted files out) into the library.
+    /// Re-adding the same folder just updates its recursive flag.
+    /// </summary>
+    private void WatchFolder(string path, bool recursive)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var normalized = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var existing = _settings.WatchedFolders.FirstOrDefault(w =>
+            !string.IsNullOrWhiteSpace(w.Path) &&
+            string.Equals(
+                Path.GetFullPath(w.Path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                normalized, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            existing.Recursive = recursive;
+        }
+        else
+        {
+            _settings.WatchedFolders.Add(new WatchedFolder { Path = path, Recursive = recursive });
+        }
+        SettingsStore.Save(_settings);
+        ShowInfoBar($"已监控文件夹（每次启动自动同步变更）：{path}");
     }
 
     private void BtnOpenList_Click(object sender, RoutedEventArgs e)
@@ -855,12 +894,18 @@ public sealed partial class MainWindow : Window
         {
             if (!seen.Add(p))
                 continue;
+            // A manual add is a deliberate act: clear any watched-folder
+            // exclusion so the startup sync will not fight the user over it.
+            _settings.LibraryExclusions.Remove(p);
             var track = new Track(p);
             track.LyricPath = LyricBindingStore.Get(p);
             _library.Add(track);
             LoadMetadataFor(track);
             added = true;
         }
+
+        if (added && _settings.LibraryExclusions.Count > 0 && persist)
+            SettingsStore.Save(_settings);
 
         if (persist)
             PersistLibrary();
@@ -969,6 +1014,83 @@ public sealed partial class MainWindow : Window
 
     private void PersistRecent() =>
         PlaylistStore.SaveRecent(_recent);
+
+    // ---------- Watched-folder startup sync ----------
+
+    /// <summary>
+    /// Rescan every watched folder and reconcile the library with what is on
+    /// disk: audio files that appeared are added, files that vanished are
+    /// removed. Runs once per launch, right after the session restore.
+    /// </summary>
+    private async Task SyncWatchedFoldersAsync()
+    {
+        var watched = _settings.WatchedFolders
+            .Where(w => !string.IsNullOrWhiteSpace(w.Path))
+            .Where(w => Directory.Exists(w.Path))
+            .ToList();
+        if (watched.Count == 0)
+            return;
+
+        // Disk walk off the UI thread; the reconciliation below needs the
+        // library collection, so it stays on the dispatcher.
+        var scanned = await Task.Run(() => watched
+            .Select(w => (Root: w, Files: FolderScanner.Scan(w.Path, w.Recursive)))
+            .ToList());
+
+        var union = new HashSet<string>(
+            scanned.SelectMany(s => s.Files), StringComparer.OrdinalIgnoreCase);
+
+        // Files to add: in a watched folder, not already in the library, and
+        // not previously removed by the user on purpose.
+        var known = new HashSet<string>(_library.Select(t => t.Path), StringComparer.OrdinalIgnoreCase);
+        var excluded = new HashSet<string>(_settings.LibraryExclusions, StringComparer.OrdinalIgnoreCase);
+        var toAdd = union.Where(p => !known.Contains(p) && !excluded.Contains(p)).ToList();
+
+        // Tracks to drop: live under a watched root but no longer on disk.
+        var toRemove = new List<int>();
+        for (var i = 0; i < _library.Count; i++)
+        {
+            var p = _library[i].Path;
+            if (!union.Contains(p) && watched.Any(w => UnderRoot(p, w.Path)))
+                toRemove.Add(i);
+        }
+
+        if (toAdd.Count == 0 && toRemove.Count == 0)
+            return;
+
+        if (toRemove.Count > 0)
+        {
+            // Drop from the end downwards so the pending indices stay valid,
+            // then let the player resync (the queue may be _library itself).
+            foreach (var i in toRemove.AsEnumerable().Reverse())
+                _library.RemoveAt(i);
+            SyncAfterRemoval(_library, toRemove);
+        }
+
+        if (toAdd.Count > 0)
+            AddItemsToLibrary(toAdd, persist: false);
+
+        PersistLibrary();
+        ShowInfoBar($"文件夹监控同步完成：新增 {toAdd.Count}，移除 {toRemove.Count}");
+        AppLog.WriteLyricCompletion($"监控文件夹同步：新增 {toAdd.Count}，移除 {toRemove.Count}");
+    }
+
+    /// <summary>Is <paramref name="path"/> inside <paramref name="root"/> (or the root itself)?</summary>
+    private static bool UnderRoot(string path, string root)
+    {
+        if (string.IsNullOrWhiteSpace(root))
+            return false;
+        try
+        {
+            var fullRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                           + Path.DirectorySeparatorChar;
+            return path.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     private void PersistPlaylists() =>
         PlaylistStore.SavePlaylists(_playlists.Select(p => new PlaylistDto
@@ -1429,6 +1551,13 @@ public sealed partial class MainWindow : Window
             foreach (var i in indices)
                 _library.RemoveAt(i);
             PersistLibrary();
+
+            // The files still exist inside watched folders — remember the
+            // removal so the startup sync does not quietly re-add them.
+            foreach (var t in sel)
+                if (!_settings.LibraryExclusions.Contains(t.Path, StringComparer.OrdinalIgnoreCase))
+                    _settings.LibraryExclusions.Add(t.Path);
+            SettingsStore.Save(_settings);
 
             SyncAfterRemoval(_library, indices);
         }
@@ -3294,7 +3423,29 @@ public sealed partial class MainWindow : Window
         var searchBtn = new Button { Content = "搜索" };
         QQSong? selected = null;
 
+        // Source bar: which service the search (and the download) hits. The
+        // choice becomes the persisted LyricSource preference, so the batch
+        // auto-download follows the same provider unless "Auto" is set there.
+        var sourceCombo = new ComboBox { Width = 132, MinHeight = 30 };
+        var sourceNames = new[] { "QQ音乐", "网易云", "LRCLIB" };
+        foreach (var name in sourceNames)
+            sourceCombo.Items.Add(name);
+        sourceCombo.SelectedIndex = LyricPreferences.ParseSource(_settings.LyricSource) switch
+        {
+            LyricSourceKind.NetEase => 1,
+            LyricSourceKind.LRCLIB => 2,
+            _ => 0, // Auto and QQ both open on QQ Music
+        };
+
         ContentDialog? dialogRef = null;
+
+        // ComboBox index → concrete lyric service.
+        Task<List<QQSong>> SearchAsync(int source, string kw) => source switch
+        {
+            1 => NetEaseLyricService.SearchAsync(kw),
+            2 => LrclibService.SearchAsync(kw),
+            _ => QQLyricService.SearchAsync(kw),
+        };
 
         async void DoSearch()
         {
@@ -3303,8 +3454,18 @@ public sealed partial class MainWindow : Window
                 return;
 
             searchBtn.IsEnabled = false;
-            status.Text = "搜索中…";
-            var results = await QQLyricService.SearchAsync(kw);
+            status.Text = $"搜索中…（{sourceNames[sourceCombo.SelectedIndex]}）";
+            List<QQSong> results;
+            try
+            {
+                results = await SearchAsync(sourceCombo.SelectedIndex, kw);
+            }
+            catch (Exception ex)
+            {
+                status.Text = $"搜索失败：{ex.Message}";
+                searchBtn.IsEnabled = true;
+                return;
+            }
 
             list.Items.Clear();
             foreach (var r in results)
@@ -3333,6 +3494,16 @@ public sealed partial class MainWindow : Window
             searchBtn.IsEnabled = true;
         }
 
+        sourceCombo.SelectionChanged += (_, _) =>
+        {
+            _settings.LyricSource = sourceCombo.SelectedIndex switch
+            {
+                1 => "NetEase",
+                2 => "LRCLIB",
+                _ => "QQ",
+            };
+            SettingsStore.Save(_settings);
+        };
         searchBtn.Click += (_, _) => DoSearch();
         keywordBox.KeyDown += (_, ke) =>
         {
@@ -3364,6 +3535,16 @@ public sealed partial class MainWindow : Window
                     {
                         Orientation = Orientation.Horizontal,
                         Spacing = 8,
+                        Children =
+                        {
+                            new TextBlock { Text = "来源", FontSize = 12, VerticalAlignment = VerticalAlignment.Center },
+                            sourceCombo
+                        }
+                    },
+                    new StackPanel
+                    {
+                        Orientation = Orientation.Horizontal,
+                        Spacing = 8,
                         Children = { keywordBox, searchBtn }
                     },
                     status,
@@ -3378,8 +3559,14 @@ public sealed partial class MainWindow : Window
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || selected == null)
             return false;
 
-        ShowInfoBar($"正在下载歌词：{selected.Title} - {selected.Artist}");
-        var lyric = await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId);
+        ShowInfoBar($"正在下载歌词（{sourceNames[sourceCombo.SelectedIndex]}）：{selected.Title} - {selected.Artist}");
+        var source = sourceCombo.SelectedIndex;
+        var lyric = source switch
+        {
+            1 => await NetEaseLyricService.FetchLyricAsync(selected.SongMid),
+            2 => await LrclibService.FetchLyricAsync(selected.SongMid),
+            _ => await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId),
+        };
         if (string.IsNullOrEmpty(lyric?.Lyric))
         {
             ShowInfoBar("该歌曲没有可用歌词。");
@@ -3396,29 +3583,33 @@ public sealed partial class MainWindow : Window
             // QQ's QRC feed covers translation + romaji for many tracks, but not
             // all. When something is still missing, top it up from NetEase,
             // snapping those timestamps onto the saved main lyric so the three
-            // lines merge correctly.
-            var master = ParseLyricTimes(lyric.Value.Lyric!);
-            var neSong = await MatchNetEaseAsync(
-                $"{selected.Title} {selected.Artist}".Trim(),
-                selected.Title,
-                selected.DurationSec > 0 ? selected.DurationSec : null);
-            if (neSong != null)
+            // lines merge correctly. (NetEase / LRCLIB results already carry
+            // their own translation / romaji — no top-up needed.)
+            if (source == 0)
             {
-                var ne = await NetEaseLyricService.FetchLyricAsync(neSong.SongMid);
-                var trans = SnapToMaster(ne?.Trans, master);
-                var roma = SnapToMaster(ne?.Roma, master);
-                if (!string.IsNullOrEmpty(trans) || !string.IsNullOrEmpty(roma))
+                var master = ParseLyricTimes(lyric.Value.Lyric!);
+                var neSong = await MatchNetEaseAsync(
+                    $"{selected.Title} {selected.Artist}".Trim(),
+                    selected.Title,
+                    selected.DurationSec > 0 ? selected.DurationSec : null);
+                if (neSong != null)
                 {
-                    var basePath = Path.Combine(
-                        Path.GetDirectoryName(track.Path) ?? "",
-                        Path.GetFileNameWithoutExtension(track.Path));
-                    var utf8 = new System.Text.UTF8Encoding(false);
-                    if (!string.IsNullOrEmpty(trans))
-                        AtomicFile.WriteAllText(basePath + ".zh.lrc", trans!, utf8);
-                    if (!string.IsNullOrEmpty(roma))
-                        AtomicFile.WriteAllText(basePath + ".romaji.lrc", roma!, utf8);
-                    extraNote = trans != null && roma != null ? "（含翻译和罗马音）"
-                        : trans != null ? "（含翻译）" : "（含罗马音）";
+                    var ne = await NetEaseLyricService.FetchLyricAsync(neSong.SongMid);
+                    var trans = SnapToMaster(ne?.Trans, master);
+                    var roma = SnapToMaster(ne?.Roma, master);
+                    if (!string.IsNullOrEmpty(trans) || !string.IsNullOrEmpty(roma))
+                    {
+                        var basePath = Path.Combine(
+                            Path.GetDirectoryName(track.Path) ?? "",
+                            Path.GetFileNameWithoutExtension(track.Path));
+                        var utf8 = new System.Text.UTF8Encoding(false);
+                        if (!string.IsNullOrEmpty(trans))
+                            AtomicFile.WriteAllText(basePath + ".zh.lrc", trans!, utf8);
+                        if (!string.IsNullOrEmpty(roma))
+                            AtomicFile.WriteAllText(basePath + ".romaji.lrc", roma!, utf8);
+                        extraNote = trans != null && roma != null ? "（含翻译和罗马音）"
+                            : trans != null ? "（含翻译）" : "（含罗马音）";
+                    }
                 }
             }
         }
@@ -3946,6 +4137,21 @@ public sealed partial class MainWindow : Window
 
     private void ShowSettings()
     {
+        // Pushing persisted values into the controls must not echo back out
+        // as "changes" (see _suppressSettingEvents).
+        _suppressSettingEvents = true;
+        try
+        {
+            SettingsUiCore();
+        }
+        finally
+        {
+            _suppressSettingEvents = false;
+        }
+    }
+
+    private void SettingsUiCore()
+    {
         LyricFontSlider.Value = _settings.LyricFontSize;
         UpdateLyricSizePreview();
         LyricColorPicker.Color = ParseHex(_settings.LyricColor);
@@ -4372,8 +4578,18 @@ public sealed partial class MainWindow : Window
         CoverChevron.Glyph = _coverCollapsed ? "\uE74F" : "\uE74E"; // down to expand, up to fold
     }
 
+    /// <summary>
+    /// True while the settings UI is being initialized programmatically.
+    /// Assigning Slider.Minimum/Maximum or SelectedIndex fires the very
+    /// handlers that persist user changes — without this guard, initializing
+    /// the font slider clobbers the saved value with the coerced default.
+    /// </summary>
+    private bool _suppressSettingEvents;
+
     private void LyricFontSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
+        if (_suppressSettingEvents)
+            return;
         _settings.LyricFontSize = e.NewValue;
         SettingsStore.Save(_settings);
         UpdateLyricSizePreview();
