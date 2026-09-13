@@ -90,6 +90,14 @@ public sealed class PlaybackService
         set => _crossfadeDurationMs = Math.Max(0, value);
     }
 
+    /// <summary>
+    /// Dynamic volume (loudness normalization): when on, every track is routed
+    /// through FFmpeg's loudnorm filter (EBU R128, target -16 LUFS), which
+    /// lifts quiet songs and tames loud ones. Applies to the next load; the
+    /// UI reloads the current track when toggled so it is heard immediately.
+    /// </summary>
+    public bool LoudnessNormalization { get; set; }
+
     private SystemMediaTransportControls? _smtc;
     private bool _smtcBound;
     private DateTime _lastSmtcTimeline = DateTime.MinValue;
@@ -432,6 +440,10 @@ public sealed class PlaybackService
     /// <summary>
     /// Load the track at the current index. Native-MF formats go through
     /// StorageFile (fixes paths with '#'/'?'), everything else through FFmpeg.
+    /// With <see cref="LoudnessNormalization"/> on, EVERY format routes through
+    /// FFmpeg so the loudnorm filter can equalize loudness; if FFmpeg then
+    /// fails on a normally-native file, we silently fall back to the system
+    /// decoder (without the filter) instead of failing the track.
     /// Async: a superseded load (fast track switching) aborts silently.
     /// </summary>
     private async void LoadCurrent(TimeSpan? resume = null, bool play = false)
@@ -449,12 +461,13 @@ public sealed class PlaybackService
         IMediaPlaybackSource? source = null;
         MediaSource? nativeSource = null;
         FFmpegMediaSource? ffmpegSource = null;
+        var forceFfmpeg = LoudnessNormalization;
 
         try
         {
-            if (FfmpegExtensions.Contains(Path.GetExtension(path)))
+            if (forceFfmpeg || FfmpegExtensions.Contains(Path.GetExtension(path)))
             {
-                ffmpegSource = await FFmpegMediaSource.CreateFromUriAsync(path);
+                ffmpegSource = await CreateFfmpegSourceAsync(path);
                 if (token != _loadToken) { ffmpegSource.Dispose(); return; }
                 source = ffmpegSource.CreateMediaPlaybackItem();
             }
@@ -494,9 +507,62 @@ public sealed class PlaybackService
         {
             ffmpegSource?.Dispose();
             nativeSource?.Dispose();
+
+            // FFmpeg failed on a file the system decoder can play: retry
+            // natively (without loudness normalization) before giving up.
+            if (forceFfmpeg && !FfmpegExtensions.Contains(Path.GetExtension(path)) && token == _loadToken)
+            {
+                try
+                {
+                    var file = await StorageFile.GetFileFromPathAsync(path);
+                    var fallback = MediaSource.CreateFromStorageFile(file);
+                    if (token != _loadToken) { fallback.Dispose(); return; }
+
+                    _nativeSource = fallback;
+                    _player.Source = fallback;
+                    HookSession();
+                    UpdateSmtcDisplay();
+                    if (play)
+                        _player.Play();
+                    return;
+                }
+                catch
+                {
+                    // fall through to the normal failure path
+                }
+            }
+
             if (token == _loadToken)
                 _dispatcher.TryEnqueue(() => MediaFailed?.Invoke(ex.Message));
         }
+    }
+
+    /// <summary>Create the FFmpeg source, attaching the loudnorm filter when
+    /// dynamic volume is on. Target: -16 LUFS, true peak -1.5 dBTP.</summary>
+    private async Task<FFmpegMediaSource> CreateFfmpegSourceAsync(string path)
+    {
+        if (LoudnessNormalization)
+        {
+            var config = new MediaSourceConfig();
+            config.Audio.FFmpegAudioFilters = "loudnorm=I=-16:TP=-1.5:LRA=11";
+            return await FFmpegMediaSource.CreateFromUriAsync(path, config);
+        }
+        return await FFmpegMediaSource.CreateFromUriAsync(path);
+    }
+
+    /// <summary>
+    /// Reload the track at the current index without changing the queue —
+    /// used when a decoder-routing switch (dynamic volume) must be heard on
+    /// the current track. Resumes at the current position and play state.
+    /// </summary>
+    public void ReloadCurrent()
+    {
+        if (_queue == null || _index < 0 || _index >= _queue.Count)
+            return;
+
+        var pos = Position;
+        var wasPlaying = PlaybackState == MediaPlaybackState.Playing;
+        LoadCurrent(resume: pos > TimeSpan.Zero ? pos : null, play: wasPlaying);
     }
 
     // ---------- SMTC (system media controls) ----------
