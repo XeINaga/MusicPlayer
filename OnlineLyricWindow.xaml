@@ -4,9 +4,30 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="搜索歌词">
 
-    <Grid x:Name="Root" Padding="16,14">
+    <!-- Same design tokens as the main window (SukiTheme.xaml is merged at the
+         app level, so every {ThemeResource} here follows the window theme and
+         the accent brushes follow the saved accent color). -->
+    <Grid x:Name="Root" Background="{ThemeResource AppBackground}" Padding="16,14">
+        <Grid.Resources>
+            <DataTemplate x:Key="LyricSearchRowTemplate">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Title}" FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextPrimary}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding Subtitle}" FontSize="11"
+                                   Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="{Binding Duration}" FontSize="11"
+                               VerticalAlignment="Center" MinWidth="34" TextAlignment="Right"
+                               Foreground="{ThemeResource TextSecondary}" />
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -17,32 +38,50 @@
         <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
             <TextBlock Text="来源" FontSize="12" VerticalAlignment="Center"
                        Foreground="{ThemeResource TextSecondary}" />
-            <ComboBox x:Name="SourceCombo" Width="132" MinHeight="30"
+            <ComboBox x:Name="SourceCombo" Width="132" MinHeight="32" FontSize="12"
                       SelectionChanged="SourceCombo_SelectionChanged">
                 <ComboBoxItem Content="QQ音乐" />
                 <ComboBoxItem Content="网易云" />
                 <ComboBoxItem Content="LRCLIB" />
             </ComboBox>
-            <TextBox x:Name="KeywordBox" MinWidth="220" PlaceholderText="关键词" KeyDown="KeywordBox_KeyDown" />
-            <Button x:Name="SearchBtn" Content="搜索" Click="SearchBtn_Click" />
+            <TextBox x:Name="KeywordBox" MinWidth="220" MinHeight="32" FontSize="12"
+                     PlaceholderText="关键词" KeyDown="KeywordBox_KeyDown" />
+            <Button x:Name="SearchBtn" Content="搜索" Click="SearchBtn_Click" FontSize="12"
+                    Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                    Background="{ThemeResource ButtonBackground}"
+                    BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
         </StackPanel>
 
-        <TextBlock x:Name="StatusText" Grid.Row="1" FontSize="12" Margin="0,8,0,0"
+        <TextBlock x:Name="StatusText" Grid.Row="1" FontSize="12" Margin="2,8,2,0"
                    Foreground="{ThemeResource TextSecondary}" TextWrapping="Wrap"
                    Text="输入关键词搜索，选择结果后点击“下载”（双击结果直接下载）" />
 
-        <!-- Results: full width, stretches with the window; each row keeps the
-             duration in its own right-aligned column so it is never clipped. -->
-        <ListView x:Name="ResultsList" Grid.Row="2" Margin="0,8,0,0" MinHeight="160"
+        <!-- Results: stretches with the window; the duration lives in its own
+             right-aligned column so it is never clipped. -->
+        <ListView x:Name="ResultsList" Grid.Row="2" Margin="0,8,0,0"
                   SelectionMode="Single" IsItemClickEnabled="True"
-                  ItemClick="ResultsList_ItemClick" DoubleTapped="ResultsList_DoubleTapped" />
+                  ItemTemplate="{StaticResource LyricSearchRowTemplate}"
+                  ItemClick="ResultsList_ItemClick" DoubleTapped="ResultsList_DoubleTapped">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="CornerRadius" Value="{StaticResource RadiusSmall}" />
+                    <Setter Property="Padding" Value="10,7" />
+                    <Setter Property="MinHeight" Value="0" />
+                </Style>
+            </ListView.ItemContainerStyle>
+        </ListView>
 
-        <!-- Bottom buttons -->
-        <Grid Grid.Row="4" Margin="0,12,0,0">
+        <!-- Bottom buttons; 下载 uses the app accent color (set in code) -->
+        <Grid Grid.Row="3" Margin="0,12,0,0">
             <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right">
-                <Button x:Name="CancelBtn" Content="取消" Click="CancelBtn_Click" MinWidth="88" />
-                <Button x:Name="DownloadBtn" Content="下载" Click="DownloadBtn_Click" MinWidth="88"
-                        Style="{StaticResource AccentButtonStyle}" IsEnabled="False" />
+                <Button x:Name="CancelBtn" Content="取消" Click="CancelBtn_Click" MinWidth="88" FontSize="12"
+                        Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                        Background="{ThemeResource ButtonBackground}"
+                        BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+                <Button x:Name="DownloadBtn" Content="下载" Click="DownloadBtn_Click" MinWidth="88" FontSize="12"
+                        Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                        BorderThickness="0" IsEnabled="False" />
             </StackPanel>
         </Grid>
     </Grid>
