@@ -115,6 +115,10 @@ public sealed partial class MainWindow : Window
     // index: the same number means different tracks in different queues, and
     // comparing bare indices across a queue switch silently drops the entry.
     private Track? _lastRecentTrack;
+    // Guard for PlayCount: the track the last "Playing" state was counted for.
+    // Deliberately separate from _lastRecentTrack (recent-list dedup) — see
+    // the comment in OnStateChanged.
+    private Track? _lastCountedTrack;
     private bool _suppressNextRecent;
     // Consecutive playback failures (stop skipping when the whole queue is bad).
     private int _consecutiveFailures;
@@ -2796,13 +2800,25 @@ public sealed partial class MainWindow : Window
             {
                 var t = q[idx];
 
+                // Count a play exactly once per continuous playing session of
+                // this track: pause/resume must not re-count, switching tracks
+                // must. This guard is separate from _lastRecentTrack (which
+                // only dedups the 最近播放 list) — OnCurrentIndexChanged
+                // pre-fills _lastRecentTrack the moment a track is selected,
+                // BEFORE Playing fires, so reusing it here silently swallowed
+                // every in-session play count.
+                if (!ReferenceEquals(t, _lastCountedTrack))
+                {
+                    _lastCountedTrack = t;
+                    t.LastPlayed = DateTime.Now;
+                    t.PlayCount++;
+                    _libraryDirty = true;
+                }
+
                 // Recent-play bookkeeping (skip suppressed during session restore).
                 if (!ReferenceEquals(t, _lastRecentTrack) && !_suppressNextRecent)
                 {
                     _lastRecentTrack = t;
-                    t.LastPlayed = DateTime.Now;
-                    t.PlayCount++;
-                    _libraryDirty = true;
                     PushRecent(t);
                 }
                 _suppressNextRecent = false;
@@ -3096,6 +3112,7 @@ public sealed partial class MainWindow : Window
         // Nothing is playing, so the next play is a fresh entry even if it
         // happens to be the same track again.
         _lastRecentTrack = null;
+        _lastCountedTrack = null;
     }
 
     private void BuildLyricUI(LyricDocument doc)
