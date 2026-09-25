@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -32,6 +33,15 @@ public static class QQLyricService
 {
     private static readonly HttpClient Http = CreateClient();
 
+    // y.qq.com login cookie (optional). Since QQ closed keyword search and the
+    // plain LRC endpoint to logged-out clients (search returns code 2001, the
+    // plain endpoint retcode 1101), a pasted browser cookie restores them.
+    private static string? _cookie;
+
+    /// <summary>Set (or clear) the y.qq.com login cookie used by every request.</summary>
+    public static void SetCookie(string? cookie) =>
+        _cookie = string.IsNullOrWhiteSpace(cookie) ? null : cookie.Trim();
+
     private static HttpClient CreateClient()
     {
         var c = new HttpClient();
@@ -47,6 +57,8 @@ public static class QQLyricService
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.Referrer = new Uri(referer);
+            if (_cookie != null)
+                req.Headers.TryAddWithoutValidation("Cookie", _cookie);
             using var resp = await Http.SendAsync(req);
             if (!resp.IsSuccessStatusCode)
                 return null;
@@ -58,35 +70,76 @@ public static class QQLyricService
         }
     }
 
-    /// <summary>Search songs by keyword; returns candidates with songmid for lyrics.</summary>
+    private static async Task<string?> PostJsonAsync(string url, string jsonBody, string referer)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, url);
+            req.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+            req.Headers.Referrer = new Uri(referer);
+            if (_cookie != null)
+                req.Headers.TryAddWithoutValidation("Cookie", _cookie);
+            using var resp = await Http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+                return null;
+            return await resp.Content.ReadAsStringAsync();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Search songs by keyword; returns candidates with songmid for lyrics.
+    /// Uses the modern musicu.fcg endpoint (the legacy client_search_cp one
+    /// returns HTTP 500 since QQ retired it).</summary>
     public static async Task<List<QQSong>> SearchAsync(string keyword, int limit = 20)
     {
         var results = new List<QQSong>();
         if (string.IsNullOrWhiteSpace(keyword))
             return results;
 
-        var url = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp" +
-                  $"?w={Uri.EscapeDataString(keyword)}&format=json&cr=1&n={limit}";
+        var body = JsonSerializer.Serialize(new
+        {
+            comm = new { ct = 19, cv = 1873, uin = "0", format = "json", platform = "yqq" },
+            req = new
+            {
+                method = "DoSearchForQQMusicDesktop",
+                module = "music.search.SearchCgiService",
+                param = new { search_type = 0, query = keyword, page_num = 1, num_per_page = limit }
+            }
+        });
 
-        var json = await GetAsync(url, "https://y.qq.com/");
+        var json = await PostJsonAsync("https://u.y.qq.com/cgi-bin/musicu.fcg", body,
+            "https://y.qq.com/n/ryqq/search");
         if (json == null)
             return results;
 
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
-        if (!root.TryGetProperty("data", out var data) ||
-            !data.TryGetProperty("song", out var song) ||
+        if (!root.TryGetProperty("req", out var req))
+            return results;
+
+        // code 2001 = "login required": QQ gated keyword search behind a
+        // logged-in session. Surface that clearly instead of "no results".
+        if (req.TryGetProperty("code", out var rc) && rc.ValueKind == JsonValueKind.Number && rc.GetInt32() == 2001)
+            throw new InvalidOperationException(
+                "QQ音乐搜索要求登录（服务端已限制未登录访问）。可在 设置→歌词 粘贴 y.qq.com 的 Cookie 后继续使用，或改用网易云/LRCLIB 源。");
+
+        if (!req.TryGetProperty("data", out var data) ||
+            !data.TryGetProperty("body", out var bodyEl) ||
+            !bodyEl.TryGetProperty("song", out var song) ||
             !song.TryGetProperty("list", out var list) ||
             list.ValueKind != JsonValueKind.Array)
             return results;
 
         foreach (var s in list.EnumerateArray())
         {
-            var mid = GetString(s, "songmid");
+            var mid = GetString(s, "mid");
             if (string.IsNullOrEmpty(mid))
                 continue;
 
-            var title = GetString(s, "songname") ?? "";
+            var title = GetString(s, "name") ?? "";
             var artist = "";
             if (s.TryGetProperty("singer", out var singers) && singers.ValueKind == JsonValueKind.Array)
             {
@@ -95,13 +148,15 @@ public static class QQLyricService
                     .Where(n => !string.IsNullOrEmpty(n));
                 artist = string.Join("/", names);
             }
-            var album = GetString(s, "albumname") ?? "";
+            var album = "";
+            if (s.TryGetProperty("album", out var alb) && alb.ValueKind == JsonValueKind.Object)
+                album = GetString(alb, "name") ?? "";
             var duration = 0;
             if (s.TryGetProperty("interval", out var iv) && iv.ValueKind == JsonValueKind.Number)
                 duration = iv.GetInt32();
 
-            // songid is a JSON number; the QRC endpoint needs this numeric id.
-            var songId = GetNumber(s, "songid") ?? "";
+            // "id" is the numeric songid the QRC endpoint needs.
+            var songId = GetNumber(s, "id") ?? "";
 
             results.Add(new QQSong(title, artist, album, mid, duration, songId));
         }

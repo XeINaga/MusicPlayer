@@ -635,6 +635,9 @@
                                         <ComboBoxItem Content="深色" />
                                         <ComboBoxItem Content="浅色" />
                                     </ComboBox>
+                                    <ToggleSwitch x:Name="TitlePreferFilenameToggle" Header="显示标题优先用文件名"
+                                                  Margin="0,8,0,0" Toggled="TitlePreferFilenameToggle_Toggled"
+                                                  ToolTipService.ToolTip="开启后列表显示音频文件名中的标题，而不是文件内嵌标签里的标题（内嵌标签有误时使用，切换后自动刷新曲库）。" />
                                     <TextBlock Text="主题色（用于高亮、按钮、进度条等）" Style="{StaticResource SettingsHint}" />
                                     <controls:ColorPicker x:Name="AccentColorPicker" ColorChanged="AccentColorPicker_ColorChanged" />
                                 </StackPanel>
@@ -677,6 +680,10 @@
                                         <ComboBoxItem Content="QQ 音乐" />
                                         <ComboBoxItem Content="LRCLIB" />
                                     </ComboBox>
+                                    <TextBlock Text="QQ音乐 Cookie（可选）— QQ 已限制未登录搜索，粘贴 Cookie 后 QQ 源可用："
+                                               Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
+                                    <TextBox x:Name="QqCookieBox" Width="480" PlaceholderText="浏览器登录 y.qq.com → F12 → 应用 → Cookie → 复制全部（含 qm_keyst/uin）"
+                                             TextChanged="QqCookieBox_TextChanged" TextWrapping="Wrap" AcceptsReturn="False" Height="52" />
                                     <TextBlock Text="一键补全歌词写入的内容"
                                                Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
                                     <ComboBox x:Name="LyricFillModeCombo" Width="220"

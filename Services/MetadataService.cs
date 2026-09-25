@@ -17,6 +17,13 @@ namespace MusicPlayer.Services;
 public static class MetadataService
 {
     /// <summary>
+    /// When true, track lists show the audio file name's title instead of the
+    /// embedded tag title. MainWindow keeps this in sync with the setting and
+    /// re-runs LoadAsync for every track when it flips.
+    /// </summary>
+    public static bool PreferFilenameTitles { get; set; }
+
+    /// <summary>
     /// Resolve metadata for <paramref name="track"/> asynchronously.
     /// </summary>
     public static async Task LoadAsync(Track track, DispatcherQueue dispatcher, CancellationToken ct = default)
@@ -93,7 +100,7 @@ public static class MetadataService
         }
 
         track.SetMetadata(
-            title ?? track.Title,
+            PreferFilenameTitles ? track.FileNameTitle : (title ?? track.FileNameTitle),
             artist ?? track.Artist,
             album ?? string.Empty,
             duration,

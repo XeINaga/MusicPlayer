@@ -39,9 +39,15 @@ public sealed class Track : INotifyPropertyChanged
             _title = fileName;
             _artist = "未知歌手";
         }
+        FileNameTitle = _title;
     }
 
     public string Path { get; }
+
+    /// <summary>Title derived from the file name (kept separately because
+    /// <see cref="Title"/> gets overwritten by the embedded tag). Used when
+    /// the user prefers filename titles over tag titles.</summary>
+    public string FileNameTitle { get; }
 
     public string Title
     {
