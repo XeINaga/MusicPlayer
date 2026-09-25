@@ -138,6 +138,12 @@
                 <Grid Width="164" Margin="10,10,10,8" RightTapped="TrackItem_RightTapped">
                     <Grid.ContextFlyout>
                         <MenuFlyout>
+                            <MenuFlyoutItem Text="打开所在文件夹" Click="OpenContainingFolder_Click">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE838;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutSeparator />
                             <MenuFlyoutItem Text="选择歌词文件..." Click="AssignLyric_Click" />
                             <MenuFlyoutItem Text="清除手动指定的歌词" Click="ClearLyric_Click" />
                         </MenuFlyout>
@@ -182,8 +188,15 @@
                     <TextBlock Grid.Row="1" Text="{Binding Title}" Margin="2,9,2,0" FontSize="14"
                                FontWeight="SemiBold" Foreground="{ThemeResource TextPrimary}"
                                TextTrimming="CharacterEllipsis" MaxLines="1" />
-                    <TextBlock Grid.Row="2" Text="{Binding Artist}" Margin="2,3,2,0" FontSize="12"
-                               Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="4" Margin="2,3,2,0">
+                        <TextBlock Text="{Binding Artist}" FontSize="12"
+                                   Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" MaxLines="1" />
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE768;" FontSize="10"
+                                  Foreground="{ThemeResource TextSecondary}" Opacity="0.7" Margin="6,1,0,0"
+                                  ToolTipService.ToolTip="播放次数" />
+                        <TextBlock Text="{Binding PlayCount}" FontSize="11"
+                                   Foreground="{ThemeResource TextSecondary}" VerticalAlignment="Center" />
+                    </StackPanel>
                 </Grid>
             </DataTemplate>
 
@@ -193,6 +206,12 @@
                       PointerEntered="TrackRow_PointerEntered" PointerExited="TrackRow_PointerExited">
                     <Grid.ContextFlyout>
                         <MenuFlyout>
+                            <MenuFlyoutItem Text="打开所在文件夹" Click="OpenContainingFolder_Click">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE838;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutSeparator />
                             <MenuFlyoutItem Text="选择歌词文件..." Click="AssignLyric_Click" />
                             <MenuFlyoutItem Text="清除手动指定的歌词" Click="ClearLyric_Click" />
                         </MenuFlyout>
@@ -200,6 +219,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="48" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
@@ -220,9 +240,15 @@
                     </StackPanel>
                     <TextBlock Grid.Column="2" Text="{Binding Album}" Foreground="{ThemeResource TextSecondary}" FontSize="12"
                                VerticalAlignment="Center" MaxWidth="170" TextTrimming="CharacterEllipsis" Margin="0,0,18,0" />
-                    <TextBlock Grid.Column="3" Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}"
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center" Margin="0,0,18,0"
+                                ToolTipService.ToolTip="播放次数">
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE768;" FontSize="11"
+                                  Foreground="{ThemeResource TextSecondary}" />
+                        <TextBlock Text="{Binding PlayCount}" Foreground="{ThemeResource TextSecondary}" FontSize="12" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="4" Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}"
                                Foreground="{ThemeResource TextSecondary}" FontSize="12" VerticalAlignment="Center" />
-                    <Button x:Name="RowPlayNextBtn" Grid.Column="4" Style="{StaticResource GhostIconButtonStyle}"
+                    <Button x:Name="RowPlayNextBtn" Grid.Column="5" Style="{StaticResource GhostIconButtonStyle}"
                             Width="34" Height="34" VerticalAlignment="Center" Opacity="0"
                             Click="TrackPlayNext_Click" ToolTipService.ToolTip="下一首播放">
                         <Button.OpacityTransition>
@@ -231,7 +257,7 @@
                         <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE101;" FontSize="14"
                                   Foreground="{ThemeResource TextPrimary}" />
                     </Button>
-                    <Button x:Name="RowFavBtn" Grid.Column="5" Style="{StaticResource GhostIconButtonStyle}"
+                    <Button x:Name="RowFavBtn" Grid.Column="6" Style="{StaticResource GhostIconButtonStyle}"
                             Width="34" Height="34" VerticalAlignment="Center"
                             Click="FavoriteToggle_Click">
                         <FontIcon x:Name="RowFavIcon" FontFamily="Segoe MDL2 Assets" FontSize="14"
