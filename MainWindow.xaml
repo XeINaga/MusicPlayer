@@ -682,8 +682,10 @@
                                     </ComboBox>
                                     <TextBlock Text="QQ音乐 Cookie（可选）— QQ 已限制未登录搜索，粘贴 Cookie 后 QQ 源可用："
                                                Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
-                                    <TextBox x:Name="QqCookieBox" Width="480" PlaceholderText="浏览器登录 y.qq.com → F12 → 应用 → Cookie → 复制全部（含 qm_keyst/uin）"
-                                             TextChanged="QqCookieBox_TextChanged" TextWrapping="Wrap" AcceptsReturn="False" Height="52" />
+                                    <TextBox x:Name="QqCookieBox" HorizontalAlignment="Stretch" MaxWidth="640"
+                                             PlaceholderText="浏览器登录 y.qq.com → F12 → 应用 → Cookie → 复制全部（含 qm_keyst/uin）"
+                                             TextChanged="QqCookieBox_TextChanged" TextWrapping="Wrap" AcceptsReturn="False"
+                                             MinHeight="52" MaxHeight="96" Margin="0,0,10,0" />
                                     <TextBlock Text="一键补全歌词写入的内容"
                                                Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
                                     <ComboBox x:Name="LyricFillModeCombo" Width="220"
