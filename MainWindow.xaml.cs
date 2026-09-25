@@ -1885,6 +1885,32 @@ public sealed partial class MainWindow : Window
 
     // ---------- Manual lyric assignment ----------
 
+    /// <summary>Zero one track's play count (fixes stale/wrong counts).</summary>
+    private void ClearPlayCount_Click(object sender, RoutedEventArgs e)
+    {
+        var track = _contextTrack ?? (sender as FrameworkElement)?.DataContext as Track;
+        if (track == null)
+            return;
+        track.PlayCount = 0;
+        PersistLibrary();
+        RefreshDisplay();
+    }
+
+    /// <summary>Zero the play counts of every selected track (multi-select).</summary>
+    private void BtnBatchClearCount_Click(object sender, RoutedEventArgs e)
+    {
+        var sel = (_viewMode == "Grid" ? TrackGrid.SelectedItems : TrackList.SelectedItems)
+            .Cast<Track>().ToList();
+        if (sel.Count == 0)
+            return;
+
+        foreach (var t in sel)
+            t.PlayCount = 0;
+        PersistLibrary();
+        RefreshDisplay();
+        ShowInfoBar($"已清零 {sel.Count} 首歌曲的播放次数");
+    }
+
     /// <summary>Open Explorer at (with) the track's file, so the user can jump
     /// straight to the audio / its companion lyric files.</summary>
     private void OpenContainingFolder_Click(object sender, RoutedEventArgs e)

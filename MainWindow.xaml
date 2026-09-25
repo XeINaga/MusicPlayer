@@ -144,6 +144,7 @@
                                 </MenuFlyoutItem.Icon>
                             </MenuFlyoutItem>
                             <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="播放次数清零" Click="ClearPlayCount_Click" />
                             <MenuFlyoutItem Text="选择歌词文件..." Click="AssignLyric_Click" />
                             <MenuFlyoutItem Text="清除手动指定的歌词" Click="ClearLyric_Click" />
                         </MenuFlyout>
@@ -212,6 +213,7 @@
                                 </MenuFlyoutItem.Icon>
                             </MenuFlyoutItem>
                             <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="播放次数清零" Click="ClearPlayCount_Click" />
                             <MenuFlyoutItem Text="选择歌词文件..." Click="AssignLyric_Click" />
                             <MenuFlyoutItem Text="清除手动指定的歌词" Click="ClearLyric_Click" />
                         </MenuFlyout>
@@ -527,6 +529,8 @@
                                     <MenuFlyoutItem x:Name="BtnBatchAdd" Text="添加到歌单" Click="BtnBatchAdd_Click" />
                                     <MenuFlyoutItem x:Name="BtnBatchExport" Text="导出选中" Click="BtnBatchExport_Click" />
                                     <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Name="BtnBatchClearCount" Text="播放次数清零" Click="BtnBatchClearCount_Click"
+                                                    ToolTipService.ToolTip="把选中歌曲的播放次数归零（用于修正错误计数）" />
                                     <MenuFlyoutItem x:Name="BtnBatchRemove" Text="从列表中移除" Click="BtnBatchRemove_Click" />
                                 </MenuFlyout>
                             </controls:DropDownButton.Flyout>
