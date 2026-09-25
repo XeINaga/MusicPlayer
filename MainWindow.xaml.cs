@@ -1877,6 +1877,26 @@ public sealed partial class MainWindow : Window
 
     // ---------- Manual lyric assignment ----------
 
+    /// <summary>Open Explorer at (with) the track's file, so the user can jump
+    /// straight to the audio / its companion lyric files.</summary>
+    private void OpenContainingFolder_Click(object sender, RoutedEventArgs e)
+    {
+        var track = _contextTrack ?? (sender as FrameworkElement)?.DataContext as Track;
+        if (track == null || string.IsNullOrEmpty(track.Path) || !File.Exists(track.Path))
+        {
+            ShowInfoBar("文件不存在或已被移动。");
+            return;
+        }
+
+        // /select reveals the file itself; explorer still works if the file
+        // vanished between the check above and the launch (it just opens the
+        // folder), so no exception handling theater here.
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{track.Path}\"")
+        {
+            UseShellExecute = true
+        });
+    }
+
     private void AssignLyric_Click(object sender, RoutedEventArgs e)
         => SafeRun(() => AssignLyricAsync(sender), "指定歌词");
 
