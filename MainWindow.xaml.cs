@@ -3665,156 +3665,19 @@ public sealed partial class MainWindow : Window
 
     private async Task<bool> ShowOnlineLyricDialogAsync(Track track)
     {
-        var keywordBox = new TextBox { Text = BuildSearchKeyword(track), Width = 290 };
-        var status = new TextBlock
-        {
-            Text = "输入关键词搜索，选择结果后点击“下载”",
-            FontSize = 12,
-            Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray),
-            TextWrapping = TextWrapping.Wrap
-        };
-        var list = new ListView { Height = 320, SelectionMode = ListViewSelectionMode.Single };
-        var searchBtn = new Button { Content = "搜索" };
-        QQSong? selected = null;
-
-        // Source bar: which service the search (and the download) hits. The
-        // choice becomes the persisted LyricSource preference, so the batch
-        // auto-download follows the same provider unless "Auto" is set there.
-        var sourceCombo = new ComboBox { Width = 132, MinHeight = 30 };
-        var sourceNames = new[] { "QQ音乐", "网易云", "LRCLIB" };
-        foreach (var name in sourceNames)
-            sourceCombo.Items.Add(name);
-        sourceCombo.SelectedIndex = LyricPreferences.ParseSource(_settings.LyricSource) switch
-        {
-            LyricSourceKind.NetEase => 1,
-            LyricSourceKind.LRCLIB => 2,
-            _ => 0, // Auto and QQ both open on QQ Music
-        };
-
-        ContentDialog? dialogRef = null;
-
-        // ComboBox index → concrete lyric service.
-        Task<List<QQSong>> SearchAsync(int source, string kw) => source switch
-        {
-            1 => NetEaseLyricService.SearchAsync(kw),
-            2 => LrclibService.SearchAsync(kw),
-            _ => QQLyricService.SearchAsync(kw),
-        };
-
-        async void DoSearch()
-        {
-            var kw = (keywordBox.Text ?? "").Trim();
-            if (kw.Length == 0)
-                return;
-
-            searchBtn.IsEnabled = false;
-            status.Text = $"搜索中…（{sourceNames[sourceCombo.SelectedIndex]}）";
-            List<QQSong> results;
-            try
-            {
-                results = await SearchAsync(sourceCombo.SelectedIndex, kw);
-            }
-            catch (Exception ex)
-            {
-                status.Text = $"搜索失败：{ex.Message}";
-                searchBtn.IsEnabled = true;
-                return;
-            }
-
-            list.Items.Clear();
-            foreach (var r in results)
-            {
-                var dur = r.DurationSec > 0 ? $"{r.DurationSec / 60}:{r.DurationSec % 60:D2}" : "";
-                var item = new StackPanel { Spacing = 2, Tag = r, Margin = new Thickness(0, 4, 0, 4) };
-                item.Children.Add(new TextBlock
-                {
-                    Text = r.Title,
-                    FontSize = 14,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.White)
-                });
-                item.Children.Add(new TextBlock
-                {
-                    Text = string.Join(" · ", new[] { r.Artist, r.Album, dur }.Where(x => x.Length > 0)),
-                    FontSize = 12,
-                    Foreground = new SolidColorBrush(Microsoft.UI.Colors.Gray)
-                });
-                list.Items.Add(item);
-            }
-
-            status.Text = results.Count == 0
-                ? "无结果，试试只输入歌曲名"
-                : $"共 {results.Count} 条结果";
-            searchBtn.IsEnabled = true;
-        }
-
-        sourceCombo.SelectionChanged += (_, _) =>
-        {
-            _settings.LyricSource = sourceCombo.SelectedIndex switch
-            {
-                1 => "NetEase",
-                2 => "LRCLIB",
-                _ => "QQ",
-            };
-            SettingsStore.Save(_settings);
-        };
-        searchBtn.Click += (_, _) => DoSearch();
-        keywordBox.KeyDown += (_, ke) =>
-        {
-            if (ke.Key == Windows.System.VirtualKey.Enter)
-                DoSearch();
-        };
-        list.SelectionChanged += (_, _) =>
-        {
-            selected = (list.SelectedItem as FrameworkElement)?.Tag as QQSong;
-            if (dialogRef != null)
-                dialogRef.IsPrimaryButtonEnabled = selected != null;
-        };
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = this.Content.XamlRoot,
-            Title = $"搜索歌词 — {track.Title}",
-            PrimaryButtonText = "下载",
-            IsPrimaryButtonEnabled = false,
-            CloseButtonText = "取消",
-            DefaultButton = ContentDialogButton.Primary,
-            Content = new StackPanel
-            {
-                Spacing = 8,
-                Width = 380,
-                Children =
-                {
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 8,
-                        Children =
-                        {
-                            new TextBlock { Text = "来源", FontSize = 12, VerticalAlignment = VerticalAlignment.Center },
-                            sourceCombo
-                        }
-                    },
-                    new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 8,
-                        Children = { keywordBox, searchBtn }
-                    },
-                    status,
-                    list
-                }
-            }
-        };
-        dialogRef = dialog;
-
-        DoSearch(); // fire the initial search while the dialog opens
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || selected == null)
+        // Resizable standalone window (the old fixed-width ContentDialog clipped
+        // result rows). It searches with the persisted source preference and
+        // returns the confirmed pick, or null when cancelled.
+        var win = new OnlineLyricWindow(_settings, BuildSearchKeyword(track));
+        win.Activate();
+        var picked = await win.Completion;
+        if (picked == null)
             return false;
+        var selected = picked.Value.Song;
+        var source = picked.Value.SourceIndex;
+        var sourceName = source switch { 1 => "网易云", 2 => "LRCLIB", _ => "QQ音乐" };
 
-        ShowInfoBar($"正在下载歌词（{sourceNames[sourceCombo.SelectedIndex]}）：{selected.Title} - {selected.Artist}");
-        var source = sourceCombo.SelectedIndex;
+        ShowInfoBar($"正在下载歌词（{sourceName}）：{selected.Title} - {selected.Artist}");
         var lyric = source switch
         {
             1 => await NetEaseLyricService.FetchLyricAsync(selected.SongMid),

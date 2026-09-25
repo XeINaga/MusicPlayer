@@ -102,6 +102,10 @@ public sealed class AppSettings
     public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;
 
+    /// <summary>Online lyric search window size (resizable; remembered).</summary>
+    public int LyricSearchW { get; set; } = 560;
+    public int LyricSearchH { get; set; } = 640;
+
     // Last.fm scrobbling.
     public string LastFmApiKey { get; set; } = "";
     public string LastFmApiSecret { get; set; } = "";
