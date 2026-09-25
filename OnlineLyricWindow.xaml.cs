@@ -108,7 +108,25 @@ public sealed partial class OnlineLyricWindow : Window
             p.PreferredMinimumWidth = 420;
             p.PreferredMinimumHeight = 380;
         }
+
+        // The default titlebar stays light regardless of the content theme —
+        // paint it with the same values SukiTheme.xaml uses so the window reads
+        // like the main window. (Constants mirrored from the theme dictionary;
+        // AppWindow.TitleBar takes colors, not brushes.)
+        var dark = Root.RequestedTheme != ElementTheme.Light;
+        var tb = AppWindow.TitleBar;
+        var bg = dark ? 0x0b0b11u : 0xf3f3f6u;
+        var fg = dark ? 0xf2f2f5u : 0x16161cu;
+        var hover = dark ? 0x23232fu : 0xe8e8efu;
+        var press = dark ? 0x17171fu : 0xdcdce5u;
+        tb.BackgroundColor = tb.ButtonBackgroundColor = tb.ButtonInactiveBackgroundColor = Rgb(bg);
+        tb.ForegroundColor = tb.ButtonForegroundColor = tb.ButtonInactiveForegroundColor = Rgb(fg);
+        tb.ButtonHoverBackgroundColor = Rgb(hover);
+        tb.ButtonPressedBackgroundColor = Rgb(press);
     }
+
+    private static Windows.UI.Color Rgb(uint v) => Windows.UI.Color.FromArgb(
+        255, (byte)(v >> 16), (byte)(v >> 8), (byte)v);
 
     /// <summary>Parse "#RRGGBB"/"#AARRGGBB", falling back to the default accent.</summary>
     private static Windows.UI.Color ParseAccent(string? hex)
