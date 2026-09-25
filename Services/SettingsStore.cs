@@ -68,6 +68,19 @@ public sealed class AppSettings
     /// </summary>
     public bool DynamicVolume { get; set; }
 
+    /// <summary>
+    /// Show the audio FILE NAME's title instead of the embedded tag title in
+    /// track lists (useful when tags are wrong, e.g. katakana conversions).
+    /// </summary>
+    public bool TitlePreferFilename { get; set; }
+
+    /// <summary>
+    /// Optional y.qq.com login cookie (uin + qm_keyst / qqmusic_key…). QQ
+    /// closed keyword search and the plain LRC endpoint to logged-out clients;
+    /// with a cookie pasted here the QQ lyric source works again.
+    /// </summary>
+    public string QqCookie { get; set; } = "";
+
     // Player state persisted across launches.
     public double Volume { get; set; } = 0.8;          // 0..1
     public double PlaybackRate { get; set; } = 1.0;     // 0.5–2.0

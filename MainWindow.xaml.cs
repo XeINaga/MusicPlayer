@@ -180,6 +180,10 @@ public sealed partial class MainWindow : Window
         // Dynamic volume (loudness normalization) routing.
         _playback.LoudnessNormalization = _settings.DynamicVolume;
 
+        // Filename-vs-tag title display + QQ login cookie for the lyric source.
+        MetadataService.PreferFilenameTitles = _settings.TitlePreferFilename;
+        QQLyricService.SetCookie(_settings.QqCookie);
+
         // Restore persisted playback rate.
         _playback.Rate = _settings.PlaybackRate;
         UpdateSpeedText();
@@ -4426,6 +4430,8 @@ public sealed partial class MainWindow : Window
         SyncLyricOptionChecks();
         CoverSpinToggle.IsOn = _settings.CoverSpin;
         DynamicVolumeToggle.IsOn = _settings.DynamicVolume;
+        TitlePreferFilenameToggle.IsOn = _settings.TitlePreferFilename;
+        QqCookieBox.Text = _settings.QqCookie;
         CloseActionCombo.SelectedIndex = _settings.CloseAction == "Tray" ? 1 : 0;
 
         // Sync auto-start from registry (source of truth).
@@ -4900,6 +4906,29 @@ public sealed partial class MainWindow : Window
         _settings.CoverSpin = ((ToggleSwitch)sender).IsOn;
         SettingsStore.Save(_settings);
         UpdateDiscTimer();
+    }
+
+    private void TitlePreferFilenameToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.TitlePreferFilename = TitlePreferFilenameToggle.IsOn;
+        SettingsStore.Save(_settings);
+        MetadataService.PreferFilenameTitles = _settings.TitlePreferFilename;
+
+        // Re-read tags for every track so titles flip immediately, then the
+        // INotifyPropertyChanged updates repaint whatever is on screen.
+        foreach (var t in _library)
+            LoadMetadataFor(t);
+    }
+
+    private void QqCookieBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.QqCookie = QqCookieBox.Text.Trim();
+        SettingsStore.Save(_settings);
+        QQLyricService.SetCookie(_settings.QqCookie);
     }
 
     private void DynamicVolumeToggle_Toggled(object sender, RoutedEventArgs e)
