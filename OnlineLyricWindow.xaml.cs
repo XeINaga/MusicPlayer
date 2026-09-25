@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -12,19 +11,25 @@ using Windows.Graphics;
 
 namespace MusicPlayer;
 
+/// <summary>One result row shown in the search window.</summary>
+/// <param name="Song">The underlying search hit.</param>
+/// <param name="Subtitle">"artist · album" line.</param>
+/// <param name="Duration">Preformatted "m:ss", empty when unknown.</param>
+public sealed record LyricSearchRow(QQSong Song, string Subtitle, string Duration)
+{
+    public string Title => Song.Title;
+}
+
 /// <summary>
 /// Resizable online-lyric search window (replaces the old fixed-width
-/// ContentDialog, whose narrow rows clipped the song duration). Size is
-/// remembered in settings; rows keep duration in its own right-aligned
-/// column so it stays visible at any width.
+/// ContentDialog, whose narrow rows clipped the song duration). Styled with
+/// the main window's theme tokens; the download button follows the saved
+/// accent color. Size is remembered in settings.
 /// </summary>
 public sealed partial class OnlineLyricWindow : Window
 {
-    private static readonly (string Name, int Index)[] Sources =
-        { ("QQ音乐", 0), ("网易云", 1), ("LRCLIB", 2) };
-
     private readonly AppSettings _settings;
-    private QQSong? _selected;
+    private LyricSearchRow? _selected;
     private bool _suppressSourceEvents;
 
     /// <summary>The confirmed pick, or null when the window was cancelled.</summary>
@@ -43,6 +48,11 @@ public sealed partial class OnlineLyricWindow : Window
 
         InitializeComponent();
         Root.RequestedTheme = settings.ThemeMode == "Light" ? ElementTheme.Light : ElementTheme.Dark;
+
+        // The 下载 button reads the app accent (same source ApplyAccentColor uses).
+        var accent = new SolidColorBrush(ParseAccent(settings.AccentColor));
+        DownloadBtn.Background = accent;
+        DownloadBtn.Foreground = new SolidColorBrush(Microsoft.UI.Colors.White);
 
         _suppressSourceEvents = true;
         SourceCombo.SelectedIndex = LyricPreferences.ParseSource(settings.LyricSource) switch
@@ -100,6 +110,28 @@ public sealed partial class OnlineLyricWindow : Window
         }
     }
 
+    /// <summary>Parse "#RRGGBB"/"#AARRGGBB", falling back to the default accent.</summary>
+    private static Windows.UI.Color ParseAccent(string? hex)
+    {
+        try
+        {
+            var s = (hex ?? "").TrimStart('#');
+            if (s.Length == 8)
+                return Microsoft.UI.ColorHelper.FromArgb(
+                    Convert.ToByte(s[..2], 16), Convert.ToByte(s.Substring(2, 2), 16),
+                    Convert.ToByte(s.Substring(4, 2), 16), Convert.ToByte(s.Substring(6, 2), 16));
+            if (s.Length == 6)
+                return Microsoft.UI.ColorHelper.FromArgb(255,
+                    Convert.ToByte(s[..2], 16), Convert.ToByte(s.Substring(2, 2), 16),
+                    Convert.ToByte(s.Substring(4, 2), 16));
+        }
+        catch
+        {
+            // fall through to default
+        }
+        return Microsoft.UI.ColorHelper.FromArgb(255, 0x31, 0xc2, 0x7c);
+    }
+
     private int SourceIndex => SourceCombo.SelectedIndex switch
     {
         1 => 1,
@@ -134,7 +166,7 @@ public sealed partial class OnlineLyricWindow : Window
             return;
 
         SearchBtn.IsEnabled = false;
-        StatusText.Text = $"搜索中…（{Sources[SourceIndex].Name}）";
+        StatusText.Text = $"搜索中…（{SourceCombo.SelectedIndex switch { 1 => "网易云", 2 => "LRCLIB", _ => "QQ音乐" }}）";
         List<QQSong> results;
         try
         {
@@ -156,47 +188,9 @@ public sealed partial class OnlineLyricWindow : Window
         foreach (var r in results)
         {
             var dur = r.DurationSec > 0 ? $"{r.DurationSec / 60}:{r.DurationSec % 60:D2}" : "";
-            var item = new Grid
-            {
-                Tag = r,
-                Margin = new Microsoft.UI.Xaml.Thickness(0, 3, 0, 3),
-                ColumnSpacing = 10,
-            };
-            item.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            item.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            var texts = new StackPanel { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
-            texts.Children.Add(new TextBlock
-            {
-                Text = r.Title,
-                FontSize = 14,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = (Brush)Application.Current.Resources["TextPrimary"],
-            });
-            texts.Children.Add(new TextBlock
-            {
-                Text = string.Join(" · ", new[] { r.Artist, r.Album }.Where(x => !string.IsNullOrEmpty(x))),
-                FontSize = 12,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Foreground = (Brush)Application.Current.Resources["TextSecondary"],
-            });
-            Grid.SetColumn(texts, 0);
-            item.Children.Add(texts);
-
-            var duration = new TextBlock
-            {
-                Text = dur,
-                FontSize = 12,
-                VerticalAlignment = VerticalAlignment.Center,
-                MinWidth = 34,
-                TextAlignment = Microsoft.UI.Xaml.TextAlignment.Right,
-                Foreground = (Brush)Application.Current.Resources["TextSecondary"],
-            };
-            Grid.SetColumn(duration, 1);
-            item.Children.Add(duration);
-
-            ResultsList.Items.Add(item);
+            var subtitle = string.Join(" · ",
+                new[] { r.Artist, r.Album }.Where(x => !string.IsNullOrEmpty(x)));
+            ResultsList.Items.Add(new LyricSearchRow(r, subtitle, dur));
         }
 
         StatusText.Text = results.Count == 0
@@ -221,27 +215,18 @@ public sealed partial class OnlineLyricWindow : Window
 
     private void ResultsList_ItemClick(object sender, ItemClickEventArgs e)
     {
-        _selected = (e.ClickedItem as FrameworkElement)?.Tag as QQSong;
+        _selected = e.ClickedItem as LyricSearchRow;
         DownloadBtn.IsEnabled = _selected != null;
     }
 
     private void ResultsList_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
     {
-        // Resolve the row under the cursor (DoubleClick works on any part of it).
-        if (e.OriginalSource is DependencyObject d &&
-            FindAncestor<Grid>(d) is Grid { Tag: QQSong song })
+        // The double tap first selects the row — take the selection.
+        if (ResultsList.SelectedItem is LyricSearchRow row)
         {
-            _selected = song;
+            _selected = row;
             Confirm();
         }
-    }
-
-    private static T? FindAncestor<T>(DependencyObject start) where T : DependencyObject
-    {
-        var d = start;
-        while (d != null && d is not T)
-            d = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(d);
-        return d as T;
     }
 
     private void DownloadBtn_Click(object sender, RoutedEventArgs e) => Confirm();
@@ -252,7 +237,7 @@ public sealed partial class OnlineLyricWindow : Window
     {
         if (_selected == null)
             return;
-        Result = (_selected, SourceIndex);
+        Result = (_selected.Song, SourceIndex);
         Close();
     }
 }
