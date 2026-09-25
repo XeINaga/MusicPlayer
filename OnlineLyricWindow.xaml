@@ -1,0 +1,49 @@
+<Window
+    x:Class="MusicPlayer.OnlineLyricWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="搜索歌词">
+
+    <Grid x:Name="Root" Padding="16,14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Source bar + keyword row -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="来源" FontSize="12" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextSecondary}" />
+            <ComboBox x:Name="SourceCombo" Width="132" MinHeight="30"
+                      SelectionChanged="SourceCombo_SelectionChanged">
+                <ComboBoxItem Content="QQ音乐" />
+                <ComboBoxItem Content="网易云" />
+                <ComboBoxItem Content="LRCLIB" />
+            </ComboBox>
+            <TextBox x:Name="KeywordBox" MinWidth="220" PlaceholderText="关键词" KeyDown="KeywordBox_KeyDown" />
+            <Button x:Name="SearchBtn" Content="搜索" Click="SearchBtn_Click" />
+        </StackPanel>
+
+        <TextBlock x:Name="StatusText" Grid.Row="1" FontSize="12" Margin="0,8,0,0"
+                   Foreground="{ThemeResource TextSecondary}" TextWrapping="Wrap"
+                   Text="输入关键词搜索，选择结果后点击“下载”（双击结果直接下载）" />
+
+        <!-- Results: full width, stretches with the window; each row keeps the
+             duration in its own right-aligned column so it is never clipped. -->
+        <ListView x:Name="ResultsList" Grid.Row="2" Margin="0,8,0,0" MinHeight="160"
+                  SelectionMode="Single" IsItemClickEnabled="True"
+                  ItemClick="ResultsList_ItemClick" DoubleTapped="ResultsList_DoubleTapped" />
+
+        <!-- Bottom buttons -->
+        <Grid Grid.Row="4" Margin="0,12,0,0">
+            <StackPanel Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right">
+                <Button x:Name="CancelBtn" Content="取消" Click="CancelBtn_Click" MinWidth="88" />
+                <Button x:Name="DownloadBtn" Content="下载" Click="DownloadBtn_Click" MinWidth="88"
+                        Style="{StaticResource AccentButtonStyle}" IsEnabled="False" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
