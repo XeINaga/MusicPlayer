@@ -2758,6 +2758,25 @@ public sealed partial class MainWindow : Window
             var l = _lyrics.Lines[_currentLineIndex];
             _desktopLyrics.UpdateLyric(_currentTrack, l.Original ?? string.Empty, l.Romaji, l.Translation);
         }
+        else if (_currentTrack != null && _lyrics == null)
+        {
+            // Turning the overlay on while a track without lyrics is loaded.
+            PushDesktopNoLyric(_currentTrack);
+        }
+    }
+
+    /// <summary>Show "暂无歌词" on the desktop overlay for a track whose lyrics
+    /// are missing. Updates the push-dedup snapshot so a later real line push
+    /// still flows through normally.</summary>
+    private void PushDesktopNoLyric(Track track)
+    {
+        if (_desktopLyrics == null)
+            return;
+        _pushedTrack = track;
+        _pushedOriginal = "暂无歌词";
+        _pushedRoma = null;
+        _pushedTrans = null;
+        _desktopLyrics.UpdateLyric(track, "暂无歌词", null, null);
     }
 
     private void BtnDesktopLyrics_Unchecked(object sender, RoutedEventArgs e)
@@ -3087,6 +3106,8 @@ public sealed partial class MainWindow : Window
                 Margin = new Thickness(0, 20, 0, 0)
             });
             _lyrics = null;
+            // Mirror the state on the desktop overlay.
+            PushDesktopNoLyric(track);
             return;
         }
 
