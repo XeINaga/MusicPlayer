@@ -554,6 +554,11 @@ public sealed class PlaybackService
         if (LoudnessNormalization)
         {
             var config = new MediaSourceConfig();
+            // FFmpeg sources report the CONTAINER's duration, which for many
+            // mp3/flac files is a few seconds shorter than the actual audio —
+            // playback then ended early ("last seconds cut"). This makes the
+            // MediaStreamSource cover the extra decoded data.
+            config.General.AutoExtendDuration = true;
             config.Audio.FFmpegAudioFilters = "apad=pad_dur=3,loudnorm=I=-16:TP=-1.5:LRA=11";
             return await FFmpegMediaSource.CreateFromUriAsync(path, config);
         }

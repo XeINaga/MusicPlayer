@@ -172,7 +172,7 @@
                                 HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8,8,0,0"
                                 Width="30" Height="30" Click="FavoriteToggle_Click">
                             <FontIcon x:Name="CardFavIcon" FontFamily="Segoe MDL2 Assets" FontSize="14"
-                                      Foreground="{ThemeResource TextSecondary}" Loaded="FavIcon_Loaded" />
+                                      Foreground="{ThemeResource TextSecondary}" Loaded="FavIcon_Loaded" DataContextChanged="FavIcon_DataContextChanged" />
                         </Button>
 
                         <Button x:Name="PlayBtn" Style="{StaticResource CirclePlayStyle}"
@@ -263,7 +263,7 @@
                             Width="34" Height="34" VerticalAlignment="Center"
                             Click="FavoriteToggle_Click">
                         <FontIcon x:Name="RowFavIcon" FontFamily="Segoe MDL2 Assets" FontSize="14"
-                                  Foreground="{ThemeResource TextSecondary}" Loaded="FavIcon_Loaded" />
+                                  Foreground="{ThemeResource TextSecondary}" Loaded="FavIcon_Loaded" DataContextChanged="FavIcon_DataContextChanged" />
                     </Button>
                 </Grid>
             </DataTemplate>
