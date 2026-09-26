@@ -545,11 +545,6 @@
                               ItemTemplate="{StaticResource TrackCardTemplate}"
                               DoubleTapped="TrackGrid_DoubleTapped"
                               AllowDrop="True" DragOver="TrackGrid_DragOver" Drop="TrackGrid_Drop">
-                        <GridView.ItemContainerTransitions>
-                            <TransitionCollection>
-                                <AddDeleteThemeTransition />
-                            </TransitionCollection>
-                        </GridView.ItemContainerTransitions>
                     </GridView>
 
                     <ListView x:Name="TrackList" Background="Transparent" BorderThickness="0" Margin="12,4,12,12"
@@ -558,11 +553,6 @@
                               DoubleTapped="TrackList_DoubleTapped"
                               DragItemsCompleted="TrackList_DragItemsCompleted"
                               AllowDrop="True" DragOver="TrackGrid_DragOver" Drop="TrackGrid_Drop">
-                        <ListView.ItemContainerTransitions>
-                            <TransitionCollection>
-                                <AddDeleteThemeTransition />
-                            </TransitionCollection>
-                        </ListView.ItemContainerTransitions>
                     </ListView>
 
                     <GridView x:Name="AlbumGrid" Background="Transparent" BorderThickness="0" Margin="12,4,12,12"
@@ -876,11 +866,6 @@
                                 BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
                             <ListView x:Name="LyricTaskList" Background="Transparent" BorderThickness="0"
                                       SelectionMode="None" Padding="6">
-                                <ListView.ItemContainerTransitions>
-                                    <TransitionCollection>
-                                        <AddDeleteThemeTransition />
-                                    </TransitionCollection>
-                                </ListView.ItemContainerTransitions>
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
                                         <Grid Padding="4,7" RightTapped="LyricTask_RightTapped">

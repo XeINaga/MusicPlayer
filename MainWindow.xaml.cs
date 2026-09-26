@@ -177,6 +177,7 @@ public sealed partial class MainWindow : Window
             _searchDebounceTimer.Stop();
             _searchText = SearchBox.Text.Trim();
             RefreshDisplay();
+            ScrollTrackListToTop(); // new result set — start from the top
         };
 
         // Restore persisted volume (so it matches the last session).
@@ -526,6 +527,24 @@ public sealed partial class MainWindow : Window
         RefreshDisplay();
         UpdateViewVisibility();
         SetNavSelected(view);
+
+        // All library views share one collection and RefreshDisplay resets it
+        // in place — the ScrollViewer keeps its old pixel offset, which made
+        // every view switch land at a seemingly random position. Start at the
+        // top instead.
+        ScrollTrackListToTop();
+    }
+
+    /// <summary>Scroll whichever track list is visible back to the top.</summary>
+    private void ScrollTrackListToTop()
+    {
+        if (TrackGrid.Visibility != Visibility.Visible && TrackList.Visibility != Visibility.Visible)
+            return;
+        var sv = FindScrollViewerDescendant(TrackGrid.Visibility == Visibility.Visible ? TrackGrid : TrackList);
+        if (sv == null)
+            return;
+        sv.UpdateLayout();
+        sv.ChangeView(null, 0, null, disableAnimation: true);
     }
 
     /// <summary>
