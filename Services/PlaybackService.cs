@@ -475,19 +475,7 @@ public sealed class PlaybackService
             {
                 ffmpegSource = await CreateFfmpegSourceAsync(path);
                 if (token != _loadToken) { ffmpegSource.Dispose(); return; }
-                var item = ffmpegSource.CreateMediaPlaybackItem();
-                if (LoudnessNormalization)
-                {
-                    // The apad tail extends the decoded stream ~3s beyond the
-                    // CONTAINER duration this source declared at open — without
-                    // this the player stopped at the old duration and the tail
-                    // was cut. Lengthen the MediaStreamSource timeline so the
-                    // flushed tail actually plays.
-                    var mss = ffmpegSource.GetMediaStreamSource();
-                    if (mss != null)
-                        mss.Duration = mss.Duration + TimeSpan.FromSeconds(3.5);
-                }
-                source = item;
+                source = ffmpegSource.CreateMediaPlaybackItem();
             }
             else
             {
@@ -555,15 +543,12 @@ public sealed class PlaybackService
         }
     }
 
-    /// <summary>Create the FFmpeg source, attaching the loudnorm filter when
-    /// dynamic volume is on. Target: -16 LUFS, true peak -1.5 dBTP.
-    /// apad BEFORE loudnorm: loudnorm's dynamic mode buffers ~3s of audio
-    /// internally and the host may not drain the filter chain at EOS — the
-    /// silence padding pushes the real tail out as regular output.
-    /// asetpts AFTER loudnorm: loudnorm emits its buffered frames with
-    /// timestamps shifted +3s (position jumped to 0:03 at start, and the
-    /// declared duration clipped the last 3s). Re-stamping from the sample
-    /// count restores a continuous timeline starting at zero.</summary>
+    /// <summary>Create the FFmpeg source, attaching the dynamic audio
+    /// normalizer when dynamic volume is on (target peak 0.95, max gain 10,
+    /// ~15s Gaussian window). dynaudnorm maps frames 1:1 with untouched
+    /// timestamps — loudnorm was rejected because its 3s lookahead buffer
+    /// both shifted the timeline +3s (position jumped at start) and lost the
+    /// last seconds (the host does not drain the filter chain at EOS).</summary>
     private async Task<FFmpegMediaSource> CreateFfmpegSourceAsync(string path)
     {
         if (LoudnessNormalization)
@@ -574,8 +559,7 @@ public sealed class PlaybackService
             // playback then ended early ("last seconds cut"). This makes the
             // MediaStreamSource cover the extra decoded data.
             config.General.AutoExtendDuration = true;
-            config.Audio.FFmpegAudioFilters =
-                "apad=pad_dur=3,loudnorm=I=-16:TP=-1.5:LRA=11,asetpts=N/SR/TB";
+            config.Audio.FFmpegAudioFilters = "dynaudnorm:p=0.95:m=10:g=31";
             return await FFmpegMediaSource.CreateFromUriAsync(path, config);
         }
         return await FFmpegMediaSource.CreateFromUriAsync(path);
