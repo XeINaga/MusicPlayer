@@ -38,6 +38,14 @@ public sealed class AppSettings
     public bool LyricShowTranslation { get; set; } = true;
 
     /// <summary>
+    /// Vertical order of the three lyric lines, as a permutation of the letters
+    /// O(原文) R(罗马音) T(翻译) — e.g. "OTR" = original, translation, romaji.
+    /// Applied to the in-app lyrics panel and the desktop overlay alike.
+    /// Invalid values fall back to "ORT".
+    /// </summary>
+    public string LyricLineOrder { get; set; } = "ORT";
+
+    /// <summary>
     /// Preferred lyric source when downloading lyrics.
     /// "Auto" (try NetEase → QQ → LRCLIB, first hit wins)
     /// | "NetEase" | "QQ" | "LRCLIB".
@@ -158,6 +166,17 @@ public enum LyricFillModeKind
 /// <summary>Helpers mapping the persisted string settings to their enums.</summary>
 public static class LyricPreferences
 {
+    /// <summary>Validate a lyric line order string: must be a permutation of
+    /// O/R/T; anything else falls back to the default "ORT".</summary>
+    public static string ParseLineOrder(string? raw)
+    {
+        var s = (raw ?? "").Trim().ToUpperInvariant();
+        if (s.Length == 3 && s.Contains('O') && s.Contains('R') && s.Contains('T')
+            && s.Distinct().Count() == 3)
+            return s;
+        return "ORT";
+    }
+
     public static LyricSourceKind ParseSource(string? raw) => raw?.Trim().ToLowerInvariant() switch
     {
         "netease" => LyricSourceKind.NetEase,

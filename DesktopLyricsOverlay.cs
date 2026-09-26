@@ -248,7 +248,7 @@ public sealed class DesktopLyricsOverlay : IDisposable
         }
     }
 
-    /// <summary>Apply the desktop-lyrics visual style (font / color / opacity / alignment).</summary>
+    /// <summary>Apply the desktop-lyrics visual style (font / color / opacity / alignment / line order).</summary>
     public void ApplyStyle(AppSettings s)
     {
         var payload = new
@@ -259,6 +259,7 @@ public sealed class DesktopLyricsOverlay : IDisposable
             bg = s.LyricBgOpacity,
             bold = s.LyricBold ? 1 : 0,
             align = s.LyricAlign ?? "Center",
+            order = LyricPreferences.ParseLineOrder(s.LyricLineOrder),
         };
         Send(JsonSerializer.Serialize(payload, JsonOptions));
     }

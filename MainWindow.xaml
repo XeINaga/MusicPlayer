@@ -436,6 +436,7 @@
                                 <ComboBoxItem Content="专辑" />
                                 <ComboBoxItem Content="添加时间" />
                                 <ComboBoxItem Content="时长" />
+                                <ComboBoxItem Content="播放次数" />
                             </ComboBox>
                             <TextBox x:Name="SearchBox" Width="220" Height="34" PlaceholderText="搜索歌曲、歌手、专辑"
                                      Background="{ThemeResource Surface2}" Foreground="{ThemeResource TextPrimary}"
@@ -709,6 +710,17 @@
                                             <ComboBox x:Name="LyricAlignCombo" SelectionChanged="LyricAlignCombo_SelectionChanged">
                                                 <ComboBoxItem Content="居中" />
                                                 <ComboBoxItem Content="居左" />
+                                            </ComboBox>
+                                        </StackPanel>
+                                        <StackPanel Spacing="8">
+                                            <TextBlock Text="歌词行顺序（同步桌面歌词）" Style="{StaticResource SettingsHint}" />
+                                            <ComboBox x:Name="LyricLineOrderCombo" SelectionChanged="LyricLineOrderCombo_SelectionChanged">
+                                                <ComboBoxItem Content="原文 / 罗马音 / 翻译" />
+                                                <ComboBoxItem Content="原文 / 翻译 / 罗马音" />
+                                                <ComboBoxItem Content="罗马音 / 原文 / 翻译" />
+                                                <ComboBoxItem Content="翻译 / 原文 / 罗马音" />
+                                                <ComboBoxItem Content="罗马音 / 翻译 / 原文" />
+                                                <ComboBoxItem Content="翻译 / 罗马音 / 原文" />
                                             </ComboBox>
                                         </StackPanel>
                                     </StackPanel>
