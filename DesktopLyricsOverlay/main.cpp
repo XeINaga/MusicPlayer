@@ -181,7 +181,7 @@ static D2D1_COLOR_F ParseColor(const std::string& hex) {
 // ---------- globals ----------
 struct State {
     std::wstring orig, roma, trans;
-    std::wstring order = L"ORT";   // vertical line order: O=原文 R=罗马音 T=翻译
+    std::string order = "ORT";     // vertical line order: O=原文 R=罗马音 T=翻译
     float font = 24.0f;
     D2D1_COLOR_F color = D2D1::ColorF(1, 1, 1, 1);
     float bg = 0.0f;
@@ -243,10 +243,10 @@ static void Render() {
     auto addLine = [&](const std::wstring& text, float size) {
         if (!text.empty()) lines.push_back({ text, size });
     };
-    for (wchar_t role : st.order) {
-        if (role == L'O')      addLine(st.orig,  st.font);
-        else if (role == L'R') addLine(st.roma,  std::max(10.0f, st.font * 0.55f));
-        else if (role == L'T') addLine(st.trans, std::max(11.0f, st.font * 0.65f));
+    for (char role : st.order) {
+        if (role == 'O')      addLine(st.orig,  st.font);
+        else if (role == 'R') addLine(st.roma,  std::max(10.0f, st.font * 0.55f));
+        else if (role == 'T') addLine(st.trans, std::max(11.0f, st.font * 0.65f));
     }
 
     const float gap = 6.0f;
@@ -434,9 +434,9 @@ static void ApplyCommand(const std::string& line) {
         if (bo && bo->type == JsonVal::BOOL) g_state.bold = bo->boolean;
         if (al && al->type == JsonVal::STR) g_state.alignLeft = (al->str == "Left");
         if (or_ && or_->type == JsonVal::STR && or_->str.size() == 3
-            && or_->str.find(L'O') != std::wstring::npos
-            && or_->str.find(L'R') != std::wstring::npos
-            && or_->str.find(L'T') != std::wstring::npos)
+            && or_->str.find('O') != std::string::npos
+            && or_->str.find('R') != std::string::npos
+            && or_->str.find('T') != std::string::npos)
             g_state.order = or_->str;
         LeaveCriticalSection(&g_cs);
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
