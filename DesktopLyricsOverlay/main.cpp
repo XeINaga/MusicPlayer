@@ -181,6 +181,7 @@ static D2D1_COLOR_F ParseColor(const std::string& hex) {
 // ---------- globals ----------
 struct State {
     std::wstring orig, roma, trans;
+    std::wstring order = L"ORT";   // vertical line order: O=原文 R=罗马音 T=翻译
     float font = 24.0f;
     D2D1_COLOR_F color = D2D1::ColorF(1, 1, 1, 1);
     float bg = 0.0f;
@@ -239,9 +240,14 @@ static void Render() {
 
     struct Line { std::wstring text; float size; float w = 0, h = 0; };
     std::vector<Line> lines;
-    if (!st.orig.empty())  lines.push_back({ st.orig,  st.font });
-    if (!st.roma.empty())  lines.push_back({ st.roma,  std::max(10.0f, st.font * 0.55f) });
-    if (!st.trans.empty()) lines.push_back({ st.trans, std::max(11.0f, st.font * 0.65f) });
+    auto addLine = [&](const std::wstring& text, float size) {
+        if (!text.empty()) lines.push_back({ text, size });
+    };
+    for (wchar_t role : st.order) {
+        if (role == L'O')      addLine(st.orig,  st.font);
+        else if (role == L'R') addLine(st.roma,  std::max(10.0f, st.font * 0.55f));
+        else if (role == L'T') addLine(st.trans, std::max(11.0f, st.font * 0.65f));
+    }
 
     const float gap = 6.0f;
     const float pad = 16.0f;
@@ -420,12 +426,18 @@ static void ApplyCommand(const std::string& line) {
         auto* b = FindMember(root, "bg");
         auto* bo = FindMember(root, "bold");
         auto* al = FindMember(root, "align");
+        auto* or_ = FindMember(root, "order");
         EnterCriticalSection(&g_cs);
         if (f && f->type == JsonVal::NUM)  g_state.font = (float)f->num;
         if (c && c->type == JsonVal::STR)  g_state.color = ParseColor(c->str);
         if (b && b->type == JsonVal::NUM)  g_state.bg = (float)b->num;
         if (bo && bo->type == JsonVal::BOOL) g_state.bold = bo->boolean;
         if (al && al->type == JsonVal::STR) g_state.alignLeft = (al->str == "Left");
+        if (or_ && or_->type == JsonVal::STR && or_->str.size() == 3
+            && or_->str.find(L'O') != std::wstring::npos
+            && or_->str.find(L'R') != std::wstring::npos
+            && or_->str.find(L'T') != std::wstring::npos)
+            g_state.order = or_->str;
         LeaveCriticalSection(&g_cs);
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
     } else if (type == "click") {

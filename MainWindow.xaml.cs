@@ -74,7 +74,7 @@ public sealed partial class MainWindow : Window
     private string _artistFilter = string.Empty;  // non-empty = show tracks from this artist
 
     private string _viewMode = "Grid";   // "Grid" | "List"
-    private string _sortBy = "Default";   // Default|Title|Artist|Album|DateAdded|Duration
+    private string _sortBy = "Default";   // Default|Title|Artist|Album|DateAdded|Duration|PlayCount
 
     // Last.fm scrobbling.
     private readonly LastFmService _lastFm;
@@ -773,6 +773,7 @@ public sealed partial class MainWindow : Window
             "Album" => 3,
             "DateAdded" => 4,
             "Duration" => 5,
+            "PlayCount" => 6,
             _ => 0
         };
     }
@@ -794,6 +795,7 @@ public sealed partial class MainWindow : Window
             3 => "Album",
             4 => "DateAdded",
             5 => "Duration",
+            6 => "PlayCount",
             _ => "Default"
         };
         _settings.SortBy = _sortBy;
@@ -2114,6 +2116,8 @@ public sealed partial class MainWindow : Window
                                  .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
             "DateAdded" => filtered.OrderByDescending(t => t.DateAdded).ToList(),
             "Duration" => filtered.OrderBy(t => t.Duration).ToList(),
+            "PlayCount" => filtered.OrderByDescending(t => t.PlayCount)
+                                    .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
             _ => filtered
         };
 
@@ -3161,6 +3165,7 @@ public sealed partial class MainWindow : Window
     {
         var showRoma = _settings.LyricShowRomaji;
         var showTrans = _settings.LyricShowTranslation;
+        var order = LyricPreferences.ParseLineOrder(_settings.LyricLineOrder);
 
         foreach (var line in doc.Lines)
         {
@@ -3171,12 +3176,22 @@ public sealed partial class MainWindow : Window
                 HorizontalAlignment = HorizontalAlignment.Center
             };
 
+            // Build each available line with its role, then append them in the
+            // user's chosen order (same order the desktop overlay uses).
+            var parts = new List<(char Role, string Text, double Size, Windows.UI.Color Color)>();
             if (!string.IsNullOrWhiteSpace(line.Original))
-                panel.Children.Add(MakeTextBlock(line.Original, 22, Microsoft.UI.Colors.White));
+                parts.Add(('O', line.Original, 22, Microsoft.UI.Colors.White));
             if (showRoma && !string.IsNullOrWhiteSpace(line.Romaji))
-                panel.Children.Add(MakeTextBlock(line.Romaji, 14, Microsoft.UI.Colors.SkyBlue));
+                parts.Add(('R', line.Romaji, 14, Microsoft.UI.Colors.SkyBlue));
             if (showTrans && !string.IsNullOrWhiteSpace(line.Translation))
-                panel.Children.Add(MakeTextBlock(line.Translation, 16, Microsoft.UI.Colors.LightGreen));
+                parts.Add(('T', line.Translation, 16, Microsoft.UI.Colors.LightGreen));
+
+            foreach (var role in order)
+            {
+                var part = parts.FirstOrDefault(p => p.Role == role);
+                if (part.Text != null)
+                    panel.Children.Add(MakeTextBlock(part.Text, part.Size, part.Color));
+            }
 
             if (panel.Children.Count == 0)
                 panel.Children.Add(MakeTextBlock("♪", 18, Microsoft.UI.Colors.Gray));
@@ -4339,6 +4354,15 @@ public sealed partial class MainWindow : Window
         LyricOpacitySlider.Value = _settings.LyricBgOpacity * 100;
         LyricBoldToggle.IsOn = _settings.LyricBold;
         LyricAlignCombo.SelectedIndex = _settings.LyricAlign == "Left" ? 1 : 0;
+        LyricLineOrderCombo.SelectedIndex = LyricPreferences.ParseLineOrder(_settings.LyricLineOrder) switch
+        {
+            "OTR" => 1,
+            "ROT" => 2,
+            "TOR" => 3,
+            "RTO" => 4,
+            "TRO" => 5,
+            _ => 0,
+        };
         LyricClickThroughToggle.IsOn = _settings.LyricClickThroughDefault;
         LyricEncodingCombo.SelectedIndex = _settings.LyricEncoding switch
         {
@@ -4812,8 +4836,29 @@ public sealed partial class MainWindow : Window
 
     private void LyricAlignCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressSettingEvents)
+            return;
         _settings.LyricAlign = LyricAlignCombo.SelectedIndex == 1 ? "Left" : "Center";
         SettingsStore.Save(_settings);
+        ApplyStyleLive();
+    }
+
+    private void LyricLineOrderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.LyricLineOrder = LyricLineOrderCombo.SelectedIndex switch
+        {
+            1 => "OTR",
+            2 => "ROT",
+            3 => "TOR",
+            4 => "RTO",
+            5 => "TRO",
+            _ => "ORT",
+        };
+        SettingsStore.Save(_settings);
+        // Reorder the in-app lyrics panel and push the new order to the overlay.
+        RebuildLyricUi();
         ApplyStyleLive();
     }
 
