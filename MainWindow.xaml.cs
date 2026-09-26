@@ -1206,18 +1206,16 @@ public sealed partial class MainWindow : Window
 
     private void LoadRecentFromStore()
     {
+        // recent.json drives the ORDER and MEMBERSHIP of the 最近播放 list
+        // only. Its per-track fields are a stale snapshot (saved at whatever
+        // point PersistRecent last ran) — applying them here resurrected
+        // zeroed play counts / un-favorited tracks on every launch. The
+        // library (自动歌单) is the single authority for those values.
         foreach (var entry in PlaylistStore.LoadRecent())
         {
             var t = ResolveTrack(entry.Path);
-            if (t != null)
-            {
-                // Apply persisted DateAdded/PlayCount/Favorite from store.
-                t.DateAdded = entry.DateAdded;
-                t.PlayCount = entry.PlayCount;
-                t.Favorite = entry.Favorite;
-                if (!_recent.Contains(t))
-                    _recent.Add(t);
-            }
+            if (t != null && !_recent.Contains(t))
+                _recent.Add(t);
         }
     }
 
@@ -1898,6 +1896,7 @@ public sealed partial class MainWindow : Window
             return;
         track.PlayCount = 0;
         PersistLibrary();
+        PersistRecent(); // flush the zeroed count into recent.json too
         RefreshDisplay();
     }
 
@@ -1912,6 +1911,7 @@ public sealed partial class MainWindow : Window
         foreach (var t in sel)
             t.PlayCount = 0;
         PersistLibrary();
+        PersistRecent(); // flush the zeroed counts into recent.json too
         RefreshDisplay();
         ShowInfoBar($"已清零 {sel.Count} 首歌曲的播放次数");
     }
