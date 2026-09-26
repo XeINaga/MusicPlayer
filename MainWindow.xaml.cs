@@ -2366,7 +2366,17 @@ public sealed partial class MainWindow : Window
 
         var idx = _activeTracks.IndexOf(t);
         if (idx >= 0)
-            StartPlay(_activeTracks, idx);
+        {
+            // 最近播放 hands the LIVE _recent list to the player. SetQueue's
+            // index event immediately PushRecent()s the clicked track — which
+            // INSERTS it at position 0 and shifts every index, so the player
+            // loaded the PREVIOUS track (double-click row N played row N-1).
+            // Snapshot it, same as the reordered branch above.
+            if (ReferenceEquals(_activeTracks, _recent))
+                StartPlay(_recent.ToList(), idx);
+            else
+                StartPlay(_activeTracks, idx);
+        }
     }
 
     /// <summary>

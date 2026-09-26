@@ -475,7 +475,19 @@ public sealed class PlaybackService
             {
                 ffmpegSource = await CreateFfmpegSourceAsync(path);
                 if (token != _loadToken) { ffmpegSource.Dispose(); return; }
-                source = ffmpegSource.CreateMediaPlaybackItem();
+                var item = ffmpegSource.CreateMediaPlaybackItem();
+                if (LoudnessNormalization)
+                {
+                    // The apad tail extends the decoded stream ~3s beyond the
+                    // CONTAINER duration this source declared at open — without
+                    // this the player stopped at the old duration and the tail
+                    // was cut. Lengthen the MediaStreamSource timeline so the
+                    // flushed tail actually plays.
+                    var mss = ffmpegSource.GetMediaStreamSource();
+                    if (mss != null)
+                        mss.Duration = mss.Duration + TimeSpan.FromSeconds(3.5);
+                }
+                source = item;
             }
             else
             {
