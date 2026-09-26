@@ -2048,6 +2048,16 @@ public sealed partial class MainWindow : Window
             UpdateFavIcon(icon, t.Favorite);
     }
 
+    // ListView containers are RECYCLED by default: as you scroll, the same
+    // FontIcon gets rebound to different tracks and Loaded never re-fires.
+    // When Loaded ran before the binding landed (fast scroll / bulk refresh),
+    // the glyph stayed empty forever — the "missing favorite star" bug.
+    private void FavIcon_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
+    {
+        if (sender is FontIcon icon && icon.DataContext is Track t)
+            UpdateFavIcon(icon, t.Favorite);
+    }
+
     private void UpdateFavIcon(FrameworkElement el, bool favorite)
     {
         if (el is not FontIcon icon) return;
