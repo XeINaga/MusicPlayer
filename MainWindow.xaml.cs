@@ -115,10 +115,13 @@ public sealed partial class MainWindow : Window
     // index: the same number means different tracks in different queues, and
     // comparing bare indices across a queue switch silently drops the entry.
     private Track? _lastRecentTrack;
-    // Guard for PlayCount: the track the last "Playing" state was counted for.
-    // Deliberately separate from _lastRecentTrack (recent-list dedup) — see
-    // the comment in OnStateChanged.
-    private Track? _lastCountedTrack;
+    // Play counting: the track currently armed for a count, and where its
+    // playback started (seconds). A play is counted in OnPositionTick when the
+    // track survives past the listen threshold (30s, or half its duration for
+    // very short files) AND started before it — so random-mode skips and
+    // launch-resumes (which start past the threshold) never inflate counts.
+    private Track? _pendingCountTrack;
+    private double _pendingCountStartSec;
     private bool _suppressNextRecent;
     // Consecutive playback failures (stop skipping when the whole queue is bad).
     private int _consecutiveFailures;
@@ -2826,19 +2829,15 @@ public sealed partial class MainWindow : Window
             {
                 var t = q[idx];
 
-                // Count a play exactly once per continuous playing session of
-                // this track: pause/resume must not re-count, switching tracks
-                // must. This guard is separate from _lastRecentTrack (which
-                // only dedups the 最近播放 list) — OnCurrentIndexChanged
-                // pre-fills _lastRecentTrack the moment a track is selected,
-                // BEFORE Playing fires, so reusing it here silently swallowed
-                // every in-session play count.
-                if (!ReferenceEquals(t, _lastCountedTrack))
+                // Arm the play counter for this track, remembering where the
+                // play STARTED. The count itself happens in OnPositionTick
+                // once the track survives past the listen threshold — counting
+                // at play-start made every random-mode skip and every
+                // launch-resume inflate counts.
+                if (!ReferenceEquals(t, _pendingCountTrack))
                 {
-                    _lastCountedTrack = t;
-                    t.LastPlayed = DateTime.Now;
-                    t.PlayCount++;
-                    _libraryDirty = true;
+                    _pendingCountTrack = t;
+                    _pendingCountStartSec = _playback.Position.TotalSeconds;
                 }
 
                 // Recent-play bookkeeping (skip suppressed during session restore).
@@ -2942,6 +2941,23 @@ public sealed partial class MainWindow : Window
             TimeTotal.Text = FormatTime(dur);
 
         UpdateLyricHighlight(pos);
+
+        // Play counting: a play happens when the track survives past the
+        // listen threshold during THIS play session and the session started
+        // before the threshold. Skips (a few seconds each) never get there;
+        // resuming a session (starting past the threshold) never qualifies.
+        // Threshold = 30s, capped at half the duration for very short files.
+        if (_isPlaying && _pendingCountTrack != null)
+        {
+            var threshold = dur.TotalSeconds > 0 ? Math.Min(30, dur.TotalSeconds / 2) : 30;
+            if (pos.TotalSeconds >= threshold && _pendingCountStartSec < threshold)
+            {
+                _pendingCountTrack.LastPlayed = DateTime.Now;
+                _pendingCountTrack.PlayCount++;
+                _libraryDirty = true;
+                _pendingCountTrack = null; // counted — no re-count on pause/resume
+            }
+        }
 
         // Scrobble: if the track crosses the halfway point during playback,
         // scrobble it (covers seeks past the half-point too).
@@ -3138,7 +3154,7 @@ public sealed partial class MainWindow : Window
         // Nothing is playing, so the next play is a fresh entry even if it
         // happens to be the same track again.
         _lastRecentTrack = null;
-        _lastCountedTrack = null;
+        _pendingCountTrack = null;
     }
 
     private void BuildLyricUI(LyricDocument doc)
