@@ -544,13 +544,17 @@ public sealed class PlaybackService
     }
 
     /// <summary>Create the FFmpeg source, attaching the loudnorm filter when
-    /// dynamic volume is on. Target: -16 LUFS, true peak -1.5 dBTP.</summary>
+    /// dynamic volume is on. Target: -16 LUFS, true peak -1.5 dBTP.
+    /// apad BEFORE loudnorm: loudnorm's dynamic mode buffers ~3s of audio
+    /// internally and the host does not drain the filter chain at EOS, which
+    /// cut the last seconds of every track. The silence padding pushes the
+    /// real tail through; it ends up as inaudible trailing silence.</summary>
     private async Task<FFmpegMediaSource> CreateFfmpegSourceAsync(string path)
     {
         if (LoudnessNormalization)
         {
             var config = new MediaSourceConfig();
-            config.Audio.FFmpegAudioFilters = "loudnorm=I=-16:TP=-1.5:LRA=11";
+            config.Audio.FFmpegAudioFilters = "apad=pad_dur=3,loudnorm=I=-16:TP=-1.5:LRA=11";
             return await FFmpegMediaSource.CreateFromUriAsync(path, config);
         }
         return await FFmpegMediaSource.CreateFromUriAsync(path);

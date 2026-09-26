@@ -202,7 +202,7 @@
             </DataTemplate>
 
             <DataTemplate x:Key="TrackRowTemplate">
-                <Grid Height="56" Margin="4,3" CornerRadius="{StaticResource RadiusSmall}" ColumnSpacing="14"
+                <Grid Height="56" Margin="4,3,16,3" CornerRadius="{StaticResource RadiusSmall}" ColumnSpacing="14"
                       RightTapped="TrackItem_RightTapped"
                       PointerEntered="TrackRow_PointerEntered" PointerExited="TrackRow_PointerExited">
                     <Grid.ContextFlyout>
