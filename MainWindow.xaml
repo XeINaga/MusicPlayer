@@ -727,6 +727,30 @@
                                     <ToggleSwitch x:Name="DynamicVolumeToggle" Header="动态音量（自动均衡歌曲响度）" OffContent="关" OnContent="开"
                                                   Margin="0,8,0,0" Toggled="DynamicVolumeToggle_Toggled"
                                                   ToolTipService.ToolTip="播放时自动把声音偏小的段落调大、偏大的段落压低（动态音频归一化）。切换后立即重载当前曲目生效。" />
+                                    <StackPanel Spacing="6" Margin="18,6,0,0">
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock Text="目标峰值" Style="{StaticResource SettingsHint}" Width="80" VerticalAlignment="Center" />
+                                            <Slider x:Name="DynNormPeakSlider" Minimum="0.1" Maximum="0.95" StepFrequency="0.05" Width="260"
+                                                    Foreground="{StaticResource QqGreen}" ValueChanged="DynNormSlider_ValueChanged"
+                                                    ToolTipService.ToolTip="归一化后允许达到的最大音量比例（0.1–0.95）" />
+                                            <TextBlock x:Name="DynNormPeakText" Style="{StaticResource SettingsHint}" Width="70" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock Text="最大增益" Style="{StaticResource SettingsHint}" Width="80" VerticalAlignment="Center" />
+                                            <Slider x:Name="DynNormGainSlider" Minimum="1" Maximum="10" StepFrequency="0.5" Width="260"
+                                                    Foreground="{StaticResource QqGreen}" ValueChanged="DynNormSlider_ValueChanged"
+                                                    ToolTipService.ToolTip="小声段落最多被放大的倍数（1–10）" />
+                                            <TextBlock x:Name="DynNormGainText" Style="{StaticResource SettingsHint}" Width="70" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <TextBlock Text="平滑窗口" Style="{StaticResource SettingsHint}" Width="80" VerticalAlignment="Center" />
+                                            <Slider x:Name="DynNormWindowSlider" Minimum="3" Maximum="31" StepFrequency="2" Width="260"
+                                                    Foreground="{StaticResource QqGreen}" ValueChanged="DynNormSlider_ValueChanged"
+                                                    ToolTipService.ToolTip="增益调整的平滑跨度，越大越平缓（3–31 帧，1 帧 = 0.5 秒）" />
+                                            <TextBlock x:Name="DynNormWindowText" Style="{StaticResource SettingsHint}" Width="70" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                        <TextBlock Text="改动后约 1 秒自动重载当前曲目（需开启动态音量）。" Style="{StaticResource SettingsHint}" />
+                                    </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <TextBlock Text="定时停止播放" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />
                                         <ComboBox x:Name="SleepTimerCombo" Width="130"

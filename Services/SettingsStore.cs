@@ -70,11 +70,23 @@ public sealed class AppSettings
     public string CloseAction { get; set; } = "Exit";
 
     /// <summary>
-    /// Dynamic volume: route all playback through FFmpeg's loudnorm filter so
-    /// quiet songs are amplified and loud ones attenuated (EBU R128, target
-    /// -16 LUFS). Takes effect on the current track via a seamless reload.
+    /// Dynamic volume: route all playback through FFmpeg's dynaudnorm filter so
+    /// quiet songs are amplified and loud ones attenuated. Takes effect on the
+    /// current track via a seamless reload.
     /// </summary>
     public bool DynamicVolume { get; set; }
+
+    /// <summary>dynaudnorm target peak (0.1–0.95): the loudest level the
+    /// normalizer may reach.</summary>
+    public double DynNormPeak { get; set; } = 0.95;
+
+    /// <summary>dynaudnorm maximum gain (1–10): how far quiet passages may be
+    /// amplified.</summary>
+    public double DynNormMaxGain { get; set; } = 10.0;
+
+    /// <summary>dynaudnorm Gaussian window in frames (3–31, odd; 1 frame =
+    /// 0.5 s): larger = smoother, slower gain changes.</summary>
+    public int DynNormWindow { get; set; } = 31;
 
     /// <summary>
     /// Show the audio FILE NAME's title instead of the embedded tag title in

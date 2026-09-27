@@ -92,11 +92,20 @@ public sealed class PlaybackService
 
     /// <summary>
     /// Dynamic volume (loudness normalization): when on, every track is routed
-    /// through FFmpeg's loudnorm filter (EBU R128, target -16 LUFS), which
-    /// lifts quiet songs and tames loud ones. Applies to the next load; the
-    /// UI reloads the current track when toggled so it is heard immediately.
+    /// through FFmpeg's dynaudnorm filter, which lifts quiet passages and tames
+    /// loud ones. Applies to the next load; the UI reloads the current track
+    /// when toggled so it is heard immediately.
     /// </summary>
     public bool LoudnessNormalization { get; set; }
+
+    /// <summary>dynaudnorm target peak (0.1–0.95).</summary>
+    public double DynNormPeak { get; set; } = 0.95;
+
+    /// <summary>dynaudnorm maximum gain (1–10).</summary>
+    public double DynNormMaxGain { get; set; } = 10.0;
+
+    /// <summary>dynaudnorm Gaussian window in frames (3–31, odd).</summary>
+    public int DynNormWindow { get; set; } = 31;
 
     private SystemMediaTransportControls? _smtc;
     private bool _smtcBound;
@@ -559,7 +568,12 @@ public sealed class PlaybackService
             // playback then ended early ("last seconds cut"). This makes the
             // MediaStreamSource cover the extra decoded data.
             config.General.AutoExtendDuration = true;
-            config.Audio.FFmpegAudioFilters = "dynaudnorm:p=0.95:m=10:g=31";
+
+            // InvariantCulture: dynaudnorm rejects "0,95".
+            var peak = DynNormPeak.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+            var gain = DynNormMaxGain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+            var window = Math.Clamp(DynNormWindow | 1, 3, 31); // force odd
+            config.Audio.FFmpegAudioFilters = $"dynaudnorm:p={peak}:m={gain}:g={window}";
             return await FFmpegMediaSource.CreateFromUriAsync(path, config);
         }
         return await FFmpegMediaSource.CreateFromUriAsync(path);
