@@ -30,6 +30,7 @@ public sealed partial class OnlineLyricWindow : Window
 {
     private readonly AppSettings _settings;
     private LyricSearchRow? _selected;
+    private int _frameW, _frameH; // non-client overhead of the OS frame
     private bool _suppressSourceEvents;
 
     /// <summary>The confirmed pick, or null when the window was cancelled.</summary>
@@ -69,12 +70,17 @@ public sealed partial class OnlineLyricWindow : Window
         Activated += (_, e) => { if (e.WindowActivationState != WindowActivationState.Deactivated) KeywordBox.Focus(FocusState.Programmatic); };
         Closed += (_, _) =>
         {
-            // Remember the size the user resized to.
+            // Remember the CLIENT size the user resized to. AppWindow.Size
+            // includes the non-client frame (title bar), while restore goes
+            // through ResizeClient — saving the raw window size here grew the
+            // window by the title-bar height on every open.
             var size = AppWindow.Size;
-            if (size.Width >= 420 && size.Height >= 380)
+            var cw = size.Width - _frameW;
+            var ch = size.Height - _frameH;
+            if (cw >= 420 && ch >= 380)
             {
-                _settings.LyricSearchW = size.Width;
-                _settings.LyricSearchH = size.Height;
+                _settings.LyricSearchW = cw;
+                _settings.LyricSearchH = ch;
                 SettingsStore.Save(_settings);
             }
             _completion.TrySetResult(Result);
@@ -102,6 +108,10 @@ public sealed partial class OnlineLyricWindow : Window
         var w = _settings.LyricSearchW is >= 420 and <= 4000 ? _settings.LyricSearchW : 560;
         var h = _settings.LyricSearchH is >= 380 and <= 4000 ? _settings.LyricSearchH : 640;
         AppWindow.ResizeClient(new SizeInt32(w, h));
+        // Frame overhead (title bar + borders) = window size minus the client
+        // area we just requested; used to convert back on save.
+        _frameW = AppWindow.Size.Width - w;
+        _frameH = AppWindow.Size.Height - h;
 
         if (AppWindow.Presenter is OverlappedPresenter p)
         {
