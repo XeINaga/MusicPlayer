@@ -3830,7 +3830,8 @@ public sealed partial class MainWindow : Window
         // Resizable standalone window (the old fixed-width ContentDialog clipped
         // result rows). It searches with the persisted source preference and
         // returns the confirmed pick, or null when cancelled.
-        var win = new OnlineLyricWindow(_settings, BuildSearchKeyword(track));
+        var win = new OnlineLyricWindow(_settings, BuildSearchKeyword(track),
+            WinRT.Interop.WindowNative.GetWindowHandle(this));
         win.Activate();
         var picked = await win.Completion;
         if (picked == null)
