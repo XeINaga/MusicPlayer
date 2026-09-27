@@ -77,7 +77,12 @@ public static class LrclibService
             var album = GetString(s, "albumName") ?? "";
             var duration = 0;
             if (s.TryGetProperty("duration", out var dur) && dur.ValueKind == JsonValueKind.Number)
-                duration = (int)(dur.GetInt64() / 1000); // LRCLIB returns ms
+            {
+                // LRCLIB "duration" is SECONDS and frequently fractional
+                // (e.g. 230.736) — GetInt64() on it throws FormatException
+                // ("One of the identified items was in an invalid format.").
+                duration = (int)Math.Round(dur.GetDouble());
+            }
 
             results.Add(new QQSong(title, artist, album, id!, duration));
             count++;
