@@ -714,8 +714,13 @@
                                             </ComboBox>
                                         </StackPanel>
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="LyricClickThroughToggle" Header="默认开启鼠标穿透" OffContent="关" OnContent="开"
-                                                  Toggled="LyricClickThroughToggle_Toggled" />
+                                    <StackPanel Orientation="Horizontal" Spacing="20">
+                                        <ToggleSwitch x:Name="LyricClickThroughToggle" Header="默认开启鼠标穿透" OffContent="关" OnContent="开"
+                                                      Toggled="LyricClickThroughToggle_Toggled" />
+                                        <ToggleSwitch x:Name="LyricVerticalToggle" Header="竖排显示" OffContent="关" OnContent="开"
+                                                      Toggled="LyricVerticalToggle_Toggled"
+                                                      ToolTipService.ToolTip="桌面歌词改为竖排（逐字纵向排列）。鼠标悬停在歌词上会出现边框，拖动右边缘可调整宽度；鼠标离开后边框自动隐藏；鼠标穿透模式下不显示边框；全屏应用（如游戏）运行时自动隐藏桌面歌词。" />
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
 

@@ -2806,6 +2806,11 @@ public sealed partial class MainWindow : Window
             _settings.LyricPosY = y;
             SettingsStore.Save(_settings);
         });
+        _desktopLyrics.SizeReported += (w) => _dispatcher.TryEnqueue(() =>
+        {
+            _settings.LyricBoxWidth = w;
+            SettingsStore.Save(_settings);
+        });
         _desktopLyrics.ApplyStyle(_settings);
         _desktopLyrics.SetClickThrough(_settings.LyricClickThroughDefault);
         // Restore the position the user dragged it to last time (if any).
@@ -4447,6 +4452,7 @@ public sealed partial class MainWindow : Window
             _ => 0,
         };
         LyricClickThroughToggle.IsOn = _settings.LyricClickThroughDefault;
+        LyricVerticalToggle.IsOn = _settings.LyricVertical;
         LyricEncodingCombo.SelectedIndex = _settings.LyricEncoding switch
         {
             "gbk" => 1,
@@ -4953,6 +4959,15 @@ public sealed partial class MainWindow : Window
     {
         _settings.LyricClickThroughDefault = ((ToggleSwitch)sender).IsOn;
         SettingsStore.Save(_settings);
+    }
+
+    private void LyricVerticalToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.LyricVertical = LyricVerticalToggle.IsOn;
+        SettingsStore.Save(_settings);
+        ApplyStyleLive();
     }
 
     private void CoverSpinToggle_Toggled(object sender, RoutedEventArgs e)
