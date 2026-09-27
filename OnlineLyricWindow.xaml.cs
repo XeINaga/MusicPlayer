@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using MusicPlayer.Services;
 using Windows.Graphics;
+using System.Runtime.InteropServices;
 
 namespace MusicPlayer;
 
@@ -29,6 +30,7 @@ public sealed record LyricSearchRow(QQSong Song, string Subtitle, string Duratio
 public sealed partial class OnlineLyricWindow : Window
 {
     private readonly AppSettings _settings;
+    private readonly IntPtr _ownerHwnd;
     private LyricSearchRow? _selected;
     private int _frameW, _frameH; // non-client overhead of the OS frame
     private bool _suppressSourceEvents;
@@ -42,8 +44,16 @@ public sealed partial class OnlineLyricWindow : Window
     private readonly TaskCompletionSource<(QQSong Song, int SourceIndex)?> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    public OnlineLyricWindow(AppSettings settings, string initialKeyword)
+    [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr h, ref RECT r);
+    [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
+    [DllImport("user32.dll")] private static extern bool GetMonitorInfoW(IntPtr h, ref MONITORINFO mi);
+    [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
+    private struct RECT { public int L, T, R, B; }
+    private struct MONITORINFO { public int cbSize; public RECT Monitor, Work; public uint Flags; }
+
+    public OnlineLyricWindow(AppSettings settings, string initialKeyword, IntPtr ownerHwnd)
     {
+        _ownerHwnd = ownerHwnd;
         _settings = settings;
         Completion = _completion.Task;
 
@@ -112,6 +122,7 @@ public sealed partial class OnlineLyricWindow : Window
         // area we just requested; used to convert back on save.
         _frameW = AppWindow.Size.Width - w;
         _frameH = AppWindow.Size.Height - h;
+        CenterOnOwner(w + _frameW, h + _frameH);
 
         if (AppWindow.Presenter is OverlappedPresenter p)
         {
@@ -137,6 +148,34 @@ public sealed partial class OnlineLyricWindow : Window
 
     private static Windows.UI.Color Rgb(uint v) => Windows.UI.Color.FromArgb(
         255, (byte)(v >> 16), (byte)(v >> 8), (byte)v);
+
+    /// <summary>Place the window centered on the owner (main) window, clamped
+    /// to the owner's monitor work area. Falls back to the primary screen
+    /// center when the owner is minimized (its rect goes far off-screen).</summary>
+    private void CenterOnOwner(int windowW, int windowH)
+    {
+        var or = new RECT();
+        var ok = _ownerHwnd != IntPtr.Zero && GetWindowRect(_ownerHwnd, ref or);
+        if (!ok || or.L < -30000 || or.R - or.L <= 0)
+        {
+            int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1); // SM_CXSCREEN / CYSCREEN
+            AppWindow.Move(new PointInt32((sw - windowW) / 2, (sh - windowH) / 2));
+            return;
+        }
+
+        int cx = or.L + (or.R - or.L) / 2 - windowW / 2;
+        int cy = or.T + (or.B - or.T) / 2 - windowH / 2;
+
+        // Clamp into the owner's monitor work area.
+        var mon = MonitorFromWindow(_ownerHwnd, 1 /* MONITOR_DEFAULTTONEAREST */);
+        var mi = new MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<MONITORINFO>() };
+        if (GetMonitorInfoW(mon, ref mi))
+        {
+            cx = Math.Clamp(cx, mi.Work.L, Math.Max(mi.Work.L, mi.Work.R - windowW));
+            cy = Math.Clamp(cy, mi.Work.T, Math.Max(mi.Work.T, mi.Work.B - windowH));
+        }
+        AppWindow.Move(new PointInt32(cx, cy));
+    }
 
     /// <summary>Parse "#RRGGBB"/"#AARRGGBB", falling back to the default accent.</summary>
     private static Windows.UI.Color ParseAccent(string? hex)
