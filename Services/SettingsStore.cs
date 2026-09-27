@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -127,6 +128,9 @@ public sealed class AppSettings
     public int WindowH { get; set; } = 860;
     public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;
+    /// <summary>True once a real window position has been persisted; a
+    /// negative X/Y on a secondary monitor is legitimate, not "unset".</summary>
+    public bool WindowPosSaved { get; set; }
 
     /// <summary>Online lyric search window size (resizable; remembered).</summary>
     public int LyricSearchW { get; set; } = 560;
@@ -241,7 +245,13 @@ public sealed class SettingsStore
             {
                 var data = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath, Encoding.UTF8));
                 if (data != null)
+                {
+                    // The QQ login cookie is stored DPAPI-encrypted (Current
+                    // User scope). Plaintext values from older versions are
+                    // transparently migrated on the next Save.
+                    data.QqCookie = Unprotect(data.QqCookie);
                     return data;
+                }
             }
         }
         catch
@@ -256,11 +266,46 @@ public sealed class SettingsStore
     {
         try
         {
-            AtomicFile.WriteAllText(FilePath, JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+            // Encrypt the QQ cookie at rest: swap in the protected value for
+            // serialization, restore the plaintext on the live instance.
+            var plainCookie = settings.QqCookie;
+            var live = settings;
+            try
+            {
+                live.QqCookie = string.IsNullOrEmpty(plainCookie) ? "" : Protect(plainCookie);
+                AtomicFile.WriteAllText(FilePath, JsonSerializer.Serialize(live, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+            }
+            finally
+            {
+                live.QqCookie = plainCookie;
+            }
         }
         catch
         {
             // best-effort
+        }
+    }
+
+    private const string CookiePrefix = "dpapi:";
+
+    private static string Protect(string plain)
+    {
+        var blob = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), null, DataProtectionScope.CurrentUser);
+        return CookiePrefix + Convert.ToBase64String(blob);
+    }
+
+    private static string Unprotect(string? stored)
+    {
+        if (string.IsNullOrEmpty(stored) || !stored.StartsWith(CookiePrefix, StringComparison.Ordinal))
+            return stored ?? ""; // plaintext from an older version — migrated on save
+        try
+        {
+            var blob = Convert.FromBase64String(stored[CookiePrefix.Length..]);
+            return Encoding.UTF8.GetString(ProtectedData.Unprotect(blob, null, DataProtectionScope.CurrentUser));
+        }
+        catch
+        {
+            return ""; // undecryptable (different user profile) — start clean
         }
     }
 }

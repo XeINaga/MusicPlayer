@@ -223,7 +223,8 @@ public sealed class LastFmService
 
     // ───────────── Failed scrobble persistence ─────────────
 
-    private static readonly string FailedScrobblePath =
+    // Resolved per access so a runtime DataLocation change takes effect.
+    private static string FailedScrobblePath =>
         Path.Combine(DataLocation.Root, "lastfm_pending.json");
 
     private void SaveFailedScrobbles(IList<ScrobbleEntry> entries)

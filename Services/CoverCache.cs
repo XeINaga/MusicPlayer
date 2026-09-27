@@ -15,8 +15,9 @@ namespace MusicPlayer.Services;
 /// </summary>
 internal static class CoverCache
 {
-    private static readonly string CacheDir =
-        Path.Combine(DataLocation.DefaultRoot, "covers");
+    // Resolved per access (not cached at type init) so a user-changed
+    // data directory takes effect like everywhere else.
+    private static string CacheDir => Path.Combine(DataLocation.Root, "covers");
 
     /// <summary>
     /// Return a decoded cover bitmap.  If the disk cache already holds
@@ -44,14 +45,24 @@ internal static class CoverCache
         {
             Directory.CreateDirectory(CacheDir);
 
-            var cacheFile = Path.Combine(CacheDir, HashPath(audioPath) + ".png");
+            // Key includes the audio file's mtime so re-tagged/replaced
+            // artwork invalidates the stale cached image.
+            long mtime = 0;
+            try { mtime = File.GetLastWriteTimeUtc(audioPath).Ticks; } catch { }
+            var cacheFile = Path.Combine(CacheDir, HashPath(audioPath) + "." + mtime.ToString("x") + ".png");
 
             // Slow path: writing the extracted art is a synchronous write of up
             // to a couple of megabytes. On the UI thread that stalls scrolling,
             // so push it to the thread pool. Reading it back via UriSource is
             // already asynchronous, and is how the fast path works too.
             if (!File.Exists(cacheFile))
-                await Task.Run(() => File.WriteAllBytes(cacheFile, rawBytes));
+                await Task.Run(() =>
+                {
+                    var tmp = cacheFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    File.WriteAllBytes(tmp, rawBytes);
+                    try { File.Move(tmp, cacheFile, true); }
+                    catch { try { File.Delete(tmp); } catch { } }
+                });
 
             return CreateFromDisk(cacheFile);
         }

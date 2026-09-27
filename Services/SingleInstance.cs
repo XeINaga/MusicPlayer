@@ -21,13 +21,14 @@ internal static class SingleInstance
     private static Window? _window;
 
     /// <summary>
-    /// Tries to acquire the single-instance mutex.
+    /// Tries to acquire the single-instance mutex. Deliberately window-free so
+    /// the app can call it BEFORE constructing MainWindow (a second launch used
+    /// to run the entire window construction just to be told to exit).
     /// Returns <c>true</c> if this is the first instance (caller should continue).
     /// Returns <c>false</c> if another instance already exists (caller should exit).
     /// </summary>
-    public static bool TryAcquire(Window window)
+    public static bool TryAcquire()
     {
-        _window = window;
         _dispatcher = DispatcherQueue.GetForCurrentThread();
 
         bool createdNew;
@@ -53,6 +54,9 @@ internal static class SingleInstance
         StartActivationListener();
         return true;
     }
+
+    /// <summary>Hand the first instance the window the listener should raise.</summary>
+    public static void RegisterWindow(Window window) => _window = window;
 
     /// <summary>
     /// Signals an already-running instance to bring its window to the foreground.
@@ -122,11 +126,15 @@ internal static class SingleInstance
     /// </summary>
     public static void Release()
     {
-        _activateEvent?.Dispose();
+        // Wake the listener thread FIRST so it can observe the null event and
+        // exit instead of blocking on a disposed handle.
+        _activateEvent?.Set();
         _activateEvent = null;
-        _mutex?.ReleaseMutex();
+        // This thread never waited on the mutex, so ReleaseMutex would throw;
+        // disposing it is all the cleanup needed.
         _mutex?.Dispose();
         _mutex = null;
+        _window = null;
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]

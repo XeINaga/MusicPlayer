@@ -56,6 +56,7 @@ public sealed partial class MainWindow : Window
     private FrameworkElement? _lyricScrollTarget;
     private int _currentLineIndex = -1;
     private int _loadedIndex = -1;
+    private int _lyricsLoadToken; // invalidates in-flight background lyric parses
 
     private DesktopLyricsOverlay? _desktopLyrics;
     private readonly PlayMode[] _modeOrder = { PlayMode.Sequential, PlayMode.LoopAll, PlayMode.LoopOne, PlayMode.Random };
@@ -81,7 +82,6 @@ public sealed partial class MainWindow : Window
     private readonly List<ScrobbleEntry> _scrobbleQueue = new();
     private bool _scrobbleTimerRunning;
     private readonly DispatcherTimer _scrobbleTimer = new();
-    private readonly HashSet<string> _scrobbledThisSession = new(); // dedup per session
 
     /// <summary>Lightweight DTO for the album grid (not a Track, just grouping metadata).</summary>
     private sealed class AlbumInfo
@@ -135,6 +135,9 @@ public sealed partial class MainWindow : Window
     private bool _spinRunning;
 
     private readonly DispatcherTimer _lyricTimer = new();
+    // Coalesces settings.json writes from hot paths (color picker, sliders,
+    // overlay drag reports). 500ms after the last change the timer flushes.
+    private readonly DispatcherTimer _settingsSaveTimer = new();
     private readonly DispatcherTimer _sleepTimer = new();
     private readonly DispatcherTimer _searchDebounceTimer = new();
     private static readonly Brush CoverPlaceholder =
@@ -295,6 +298,14 @@ public sealed partial class MainWindow : Window
         {
             _dynNormReloadTimer.Stop();
             _playback.ReloadCurrent();
+        };
+
+        // Settings write coalescing (see ScheduleSettingsSave).
+        _settingsSaveTimer.Interval = TimeSpan.FromMilliseconds(500);
+        _settingsSaveTimer.Tick += (_, _) =>
+        {
+            _settingsSaveTimer.Stop();
+            SettingsStore.Save(_settings);
         };
 
         this.Activated += MainWindow_Activated;
@@ -1203,12 +1214,16 @@ public sealed partial class MainWindow : Window
             Paths = p.Tracks.Select(t => t.Path).ToList()
         }).ToList());
 
-    /// <summary>Find a track by path, creating + registering it in the library if missing.</summary>
+    /// <summary>Find a track by path, creating + registering it in the library if missing.
+    /// Paths in LibraryExclusions (deliberately removed by the user) are never resurrected.</summary>
     private Track? ResolveTrack(string path)
     {
         var existing = _library.FirstOrDefault(t => t.Path == path);
         if (existing != null)
             return existing;
+
+        if (_settings.LibraryExclusions.Contains(path, StringComparer.OrdinalIgnoreCase))
+            return null; // user removed this on purpose — do not re-add via recent/playlists
 
         var track = new Track(path);
         track.LyricPath = LyricBindingStore.Get(path);
@@ -2103,6 +2118,10 @@ public sealed partial class MainWindow : Window
         if (q == null || q.Count == 0 || cur < 0 || cur >= q.Count)
         {
             // Nothing playing yet: make it the (paused) queue head.
+            // Suppress the recent-play entry the index event would push — the
+            // track has not actually sounded, and this branch was polluting
+            // 最近播放 / LastPlayed with never-played songs.
+            _suppressNextRecent = true;
             var single = new ObservableCollection<Track> { t };
             _playback.SetQueue(single, 0, autoPlay: false);
             BindQueue();
@@ -2753,8 +2772,8 @@ public sealed partial class MainWindow : Window
     {
         if (args.DropResult != DataPackageOperation.Move || _queueDragCurrent == null)
             return;
-        if (_playback.Queue is not ObservableCollection<Track> q)
-            return;
+        if (_playback.Queue is not IList<Track> q)
+            return; // no queue — nothing to remove from
 
         var idx = q.IndexOf(_queueDragCurrent);
         if (idx >= 0)
@@ -2769,8 +2788,8 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Button btn || btn.DataContext is not Track track)
             return;
-        if (_playback.Queue is not ObservableCollection<Track> q)
-            return;
+        if (_playback.Queue is not IList<Track> q)
+            return; // no queue — nothing to remove from
 
         var idx = q.IndexOf(track);
         if (idx < 0)
@@ -2804,12 +2823,12 @@ public sealed partial class MainWindow : Window
         {
             _settings.LyricPosX = x;
             _settings.LyricPosY = y;
-            SettingsStore.Save(_settings);
+            ScheduleSettingsSave();
         });
         _desktopLyrics.SizeReported += (w) => _dispatcher.TryEnqueue(() =>
         {
             _settings.LyricBoxWidth = w;
-            SettingsStore.Save(_settings);
+            ScheduleSettingsSave();
         });
         _desktopLyrics.ApplyStyle(_settings);
         _desktopLyrics.SetClickThrough(_settings.LyricClickThroughDefault);
@@ -2938,12 +2957,10 @@ public sealed partial class MainWindow : Window
                 }
                 _suppressNextRecent = false;
 
-                // Last.fm scrobble: only when the track has been played past the halfway point.
-                var dur = _playback.Duration;
-                if (dur.TotalSeconds > 30 && _playback.Position.TotalSeconds >= dur.TotalSeconds / 2.0)
-                {
-                    EnqueueScrobble(t);
-                }
+                // Scrobble bookkeeping moved to OnPositionTick: eligibility now
+                // requires that THIS play session started before the halfway
+                // point, so resumed sessions (already past half) don't scrobble
+                // after listening for a second.
             }
         }
 
@@ -3049,20 +3066,28 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        // Scrobble: if the track crosses the halfway point during playback,
-        // scrobble it (covers seeks past the half-point too).
-        if (_isPlaying && dur.TotalSeconds > 30 && pos.TotalSeconds >= dur.TotalSeconds / 2.0)
+        // Scrobble: like the play counter, only when this play session started
+        // before the halfway point and has now crossed it. Resumed sessions
+        // (starting past half) and sub-threshold skips never qualify.
+        if (_isPlaying && dur.TotalSeconds > 30 && _pendingCountTrack != null &&
+            pos.TotalSeconds >= dur.TotalSeconds / 2.0 && _pendingCountStartSec < dur.TotalSeconds / 2.0)
         {
-            var q = _playback.Queue;
-            var idx = _playback.CurrentIndex;
-            if (q != null && idx >= 0 && idx < q.Count)
-                EnqueueScrobble(q[idx]);
+            EnqueueScrobble(_pendingCountTrack);
         }
 
         if ((DateTime.Now - _lastProgressSave).TotalSeconds >= 3)
         {
             _lastProgressSave = DateTime.Now;
-            PlaylistStore.SaveProgress(_playback.CurrentIndex, pos, CurrentPath());
+            var progressIdx = _playback.CurrentIndex;
+            var progressPos = pos;
+            var progressPath = CurrentPath();
+            Task.Run(() => PlaylistStore.SaveProgress(progressIdx, progressPos, progressPath));
+
+            // Persist volume/rate alongside the 3s progress cadence instead of
+            // only at clean exit (a killed process used to lose them).
+            _settings.Volume = _playback.TargetVolume;
+            _settings.PlaybackRate = _playback.Rate;
+            ScheduleSettingsSave();
 
             // Persist PlayCount / Favorite changes at the same cadence. Off the
             // UI thread: serializing the whole library mid-playback stutters.
@@ -3087,11 +3112,6 @@ public sealed partial class MainWindow : Window
     private void EnqueueScrobble(Track track)
     {
         if (!_lastFm.IsConnected)
-            return;
-
-        // Dedup: only scrobble each track once per session.
-        var key = $"{track.Artist}\0{track.Title}\0{track.Path}";
-        if (!_scrobbledThisSession.Add(key))
             return;
 
         var entry = new ScrobbleEntry
@@ -3160,8 +3180,28 @@ public sealed partial class MainWindow : Window
 
         BindCurrentCover(track);
 
-        _lyrics = LyricsParser.Parse(track.Path, track.LyricPath,
-            _settings.LyricEncoding == "auto" ? null : _settings.LyricEncoding);
+        // Parse OFF the UI thread: file probing + decode can stall for seconds
+        // on network shares, and this runs on every track switch. The token
+        // discards results superseded by a newer load or a ResetNowPlaying.
+        var loadToken = ++_lyricsLoadToken;
+        var parsePath = track.Path;
+        var parseLyricPath = track.LyricPath;
+        var parseEnc = _settings.LyricEncoding == "auto" ? null : _settings.LyricEncoding;
+        _ = Task.Run(async () =>
+        {
+            LyricDocument? doc = null;
+            try { doc = LyricsParser.Parse(parsePath, parseLyricPath, parseEnc); }
+            catch { doc = null; }
+            if (loadToken != _lyricsLoadToken) return; // superseded
+            _dispatcher.TryEnqueue(() => ApplyLoadedLyrics(track, doc, loadToken));
+        });
+        return;
+    }
+
+    private void ApplyLoadedLyrics(Track track, LyricDocument? doc, int loadToken)
+    {
+        if (loadToken != _lyricsLoadToken) return; // superseded
+        _lyrics = doc != null && doc.Lines.Count > 0 ? doc : null;
         if (_lyrics == null || _lyrics.Lines.Count == 0)
         {
             LyricStack.Children.Add(new TextBlock
@@ -3185,13 +3225,14 @@ public sealed partial class MainWindow : Window
         UpdateLyricHighlight(_playback.Position);
     }
 
-    private void BindCurrentCover(Track track)
+    private void BindCurrentCover(Track? track)
     {
         if (_currentTrack != null)
             _currentTrack.PropertyChanged -= CurrentTrack_PropertyChanged;
 
         _currentTrack = track;
-        _currentTrack.PropertyChanged += CurrentTrack_PropertyChanged;
+        if (track != null)
+            _currentTrack.PropertyChanged += CurrentTrack_PropertyChanged;
     }
 
     private void CurrentTrack_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -3233,6 +3274,16 @@ public sealed partial class MainWindow : Window
     private void ResetNowPlaying()
     {
         SetCurrentTrackHighlight(null);
+        // Full lyric/track state reset: leaving _loadedIndex/_lyrics behind let
+        // later LoadLyricsFor(_loadedIndex) calls resurrect an unrelated
+        // library track into the now-playing panel ("ghost").
+        _loadedIndex = -1;
+        _lyrics = null;
+        _lyricsLoadToken++; // kill any in-flight parse
+        _currentLineIndex = -1;
+        _lyricPanels.Clear();
+        LyricStack.Children.Clear();
+        BindCurrentCover(null);
         NowTitle.Text = "未在播放";
         NowArtist.Text = string.Empty;
         NowAlbum.Text = string.Empty;
@@ -3841,12 +3892,21 @@ public sealed partial class MainWindow : Window
         var sourceName = source switch { 1 => "网易云", 2 => "LRCLIB", _ => "QQ音乐" };
 
         ShowInfoBar($"正在下载歌词（{sourceName}）：{selected.Title} - {selected.Artist}");
-        var lyric = source switch
+        (string? Lyric, string? Trans, string? Roma)? lyric;
+        try
         {
-            1 => await NetEaseLyricService.FetchLyricAsync(selected.SongMid),
-            2 => await LrclibService.FetchLyricAsync(selected.SongMid),
-            _ => await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId),
-        };
+            lyric = source switch
+            {
+                1 => await NetEaseLyricService.FetchLyricAsync(selected.SongMid),
+                2 => await LrclibService.FetchLyricAsync(selected.SongMid),
+                _ => await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId),
+            };
+        }
+        catch (Exception ex)
+        {
+            ShowInfoBar($"下载歌词失败：{ex.Message}");
+            return false;
+        }
         if (string.IsNullOrEmpty(lyric?.Lyric))
         {
             ShowInfoBar("该歌曲没有可用歌词。");
@@ -4050,13 +4110,13 @@ public sealed partial class MainWindow : Window
     ///   - complete   : all three parts present              → skipped entirely
     /// Touches the disk once per track, so call it via Task.Run.
     /// </summary>
-    private (List<Track> NoLyric, List<Track> Incomplete) ClassifyLyricTracks()
+    private (List<Track> NoLyric, List<Track> Incomplete) ClassifyLyricTracks(List<Track> tracks)
     {
         var noLyric = new List<Track>();
         var incomplete = new List<Track>();
         var forcedEnc = _settings.LyricEncoding == "auto" ? null : _settings.LyricEncoding;
 
-        foreach (var t in _activeTracks)
+        foreach (var t in tracks)
         {
             if (!HasLocalLyric(t))
             {
@@ -4148,12 +4208,21 @@ public sealed partial class MainWindow : Window
     private async Task StartLyricCompletionAsync()
     {
         if (_batchLyricRunning) return;
+        // Flag BEFORE the first await: the multi-second scan used to run with
+        // the button still enabled, letting a second click start a concurrent
+        // run that cleared this queue mid-flight.
+        _batchLyricRunning = true;
+        UpdateLyricSummary();
+
+        // Snapshot on the UI thread: the worker enumerates the collection while
+        // the user can edit it.
+        var snapshot = _activeTracks.ToList();
 
         // Classification stats every track on disk (File.Exists checks plus a
         // full parse of each lyric file), which is seconds of blocking I/O on a
         // large list — run it off the UI thread so the window stays responsive.
         LyricStatusText.Text = "正在扫描曲库…";
-        var (noLyric, incomplete) = await Task.Run(ClassifyLyricTracks);
+        var (noLyric, incomplete) = await Task.Run(() => ClassifyLyricTracks(snapshot));
 
         if (noLyric.Count == 0 && incomplete.Count == 0)
         {
@@ -4261,6 +4330,7 @@ public sealed partial class MainWindow : Window
                 // Be polite to the API — but bail out immediately on cancel.
                 try { await Task.Delay(400, ct); }
                 catch (OperationCanceledException) { }
+                catch (ObjectDisposedException) { } // CTS disposed by a stop race
             }
 
             if (refreshCurrent)
@@ -4512,6 +4582,8 @@ public sealed partial class MainWindow : Window
 
     private void LyricEncodingCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressSettingEvents)
+            return;
         _settings.LyricEncoding = LyricEncodingCombo.SelectedIndex switch
         {
             1 => "gbk",
@@ -4759,8 +4831,10 @@ public sealed partial class MainWindow : Window
 
     private void AccentColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
+        if (_suppressSettingEvents)
+            return;
         _settings.AccentColor = ToHex(args.NewColor);
-        SettingsStore.Save(_settings);
+        ScheduleSettingsSave();
         ApplyAccentColor();
     }
 
@@ -4892,7 +4966,7 @@ public sealed partial class MainWindow : Window
         if (_suppressSettingEvents)
             return;
         _settings.LyricFontSize = e.NewValue;
-        SettingsStore.Save(_settings);
+        ScheduleSettingsSave();
         UpdateLyricSizePreview();
         ApplyStyleLive();
     }
@@ -4910,14 +4984,16 @@ public sealed partial class MainWindow : Window
     private void LyricColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
         _settings.LyricColor = ToHex(args.NewColor);
-        SettingsStore.Save(_settings);
+        ScheduleSettingsSave();
         ApplyStyleLive();
     }
 
     private void LyricOpacitySlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
+        if (_suppressSettingEvents)
+            return;
         _settings.LyricBgOpacity = e.NewValue / 100.0;
-        SettingsStore.Save(_settings);
+        ScheduleSettingsSave();
         ApplyStyleLive();
     }
 
@@ -4997,7 +5073,7 @@ public sealed partial class MainWindow : Window
         if (_suppressSettingEvents)
             return;
         _settings.QqCookie = QqCookieBox.Text.Trim();
-        SettingsStore.Save(_settings);
+        ScheduleSettingsSave();
         QQLyricService.SetCookie(_settings.QqCookie);
     }
 
@@ -5027,7 +5103,7 @@ public sealed partial class MainWindow : Window
         _settings.DynNormMaxGain = Math.Clamp(DynNormGainSlider.Value, 1, 10);
         _settings.DynNormWindow = (int)Math.Clamp(DynNormWindowSlider.Value, 3, 31);
         UpdateDynNormTexts();
-        SettingsStore.Save(_settings);
+        ScheduleSettingsSave();
 
         _playback.DynNormPeak = _settings.DynNormPeak;
         _playback.DynNormMaxGain = _settings.DynNormMaxGain;
@@ -5038,6 +5114,17 @@ public sealed partial class MainWindow : Window
             _dynNormReloadTimer.Stop();
             _dynNormReloadTimer.Start();
         }
+    }
+
+    /// <summary>
+    /// Coalesce settings.json writes from hot paths (picker drags, slider
+    /// ticks, overlay drag reports): one flush 500ms after the last change
+    /// instead of a synchronous serialize+replace per event.
+    /// </summary>
+    private void ScheduleSettingsSave()
+    {
+        _settingsSaveTimer.Stop();
+        _settingsSaveTimer.Start();
     }
 
     private void UpdateDynNormTexts()
@@ -5221,8 +5308,11 @@ public sealed partial class MainWindow : Window
         int w = _settings.WindowW > 0 ? Math.Min(_settings.WindowW, vw) : 1380;
         int h = _settings.WindowH > 0 ? Math.Min(_settings.WindowH, vh) : 860;
 
-        int x = _settings.WindowX >= 0 ? _settings.WindowX : vx + (vw - w) / 2;
-        int y = _settings.WindowY >= 0 ? _settings.WindowY : vy + (vh - h) / 2;
+        // WindowPosSaved (not "coordinate >= 0") is the sentinel: windows on
+        // monitors LEFT OF / ABOVE the primary screen legitimately have
+        // negative coordinates, which used to reset their saved position.
+        int x = _settings.WindowPosSaved ? _settings.WindowX : vx + (vw - w) / 2;
+        int y = _settings.WindowPosSaved ? _settings.WindowY : vy + (vh - h) / 2;
         x = Math.Max(vx, Math.Min(x, vx + vw - w));
         y = Math.Max(vy, Math.Min(y, vy + vh - h));
 
@@ -5275,6 +5365,7 @@ public sealed partial class MainWindow : Window
             _settings.WindowH = r.Height;
             _settings.WindowX = r.Left;
             _settings.WindowY = r.Top;
+            _settings.WindowPosSaved = true;
         }
         // Persist the level the user chose, not the live one: closing the window
         // mid-crossfade (200 ms fade-out, or a multi-second fade-in) would store

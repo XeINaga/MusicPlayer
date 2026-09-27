@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Text;
 
@@ -18,7 +19,9 @@ public static class AtomicFile
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
 
-        var tmp = path + ".tmp";
+        // Unique per call: a fixed ".tmp" name let two concurrent writers of
+        // the same target replace each other's half-written temp file.
+        var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         File.WriteAllText(tmp, contents, encoding);
 
         try
