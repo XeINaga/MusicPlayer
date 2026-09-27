@@ -53,6 +53,10 @@ public sealed class DesktopLyricsOverlay : IDisposable
     /// as {"t":"pos","x":…,"y":…} — raised on a background thread.</summary>
     public event Action<int, int>? PositionReported;
 
+    /// <summary>The overlay reports the user-set wrap width (resize end)
+    /// as {"t":"size","w":…} — raised on a background thread.</summary>
+    public event Action<int>? SizeReported;
+
     /// <summary>
     /// Launch the overlay process (if needed) and connect both pipes.
     /// Runs on the send worker thread only (serialized by the semaphore), so
@@ -187,11 +191,19 @@ public sealed class DesktopLyricsOverlay : IDisposable
         {
             using var doc = System.Text.Json.JsonDocument.Parse(msg);
             var root = doc.RootElement;
-            if (root.TryGetProperty("t", out var t) && t.GetString() == "pos"
-                && root.TryGetProperty("x", out var x) && x.TryGetInt32(out var xi)
-                && root.TryGetProperty("y", out var y) && y.TryGetInt32(out var yi))
+            if (root.TryGetProperty("t", out var t))
             {
-                PositionReported?.Invoke(xi, yi);
+                if (t.GetString() == "pos"
+                    && root.TryGetProperty("x", out var x) && x.TryGetInt32(out var xi)
+                    && root.TryGetProperty("y", out var y) && y.TryGetInt32(out var yi))
+                {
+                    PositionReported?.Invoke(xi, yi);
+                }
+                else if (t.GetString() == "size"
+                    && root.TryGetProperty("w", out var w) && w.TryGetInt32(out var wi))
+                {
+                    SizeReported?.Invoke(wi);
+                }
             }
         }
         catch
@@ -260,6 +272,8 @@ public sealed class DesktopLyricsOverlay : IDisposable
             bold = s.LyricBold ? 1 : 0,
             align = s.LyricAlign ?? "Center",
             order = LyricPreferences.ParseLineOrder(s.LyricLineOrder),
+            vertical = s.LyricVertical ? 1 : 0,
+            width = s.LyricBoxWidth,
         };
         Send(JsonSerializer.Serialize(payload, JsonOptions));
     }

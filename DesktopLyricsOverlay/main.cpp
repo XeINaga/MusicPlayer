@@ -182,6 +182,8 @@ static D2D1_COLOR_F ParseColor(const std::string& hex) {
 struct State {
     std::wstring orig, roma, trans;
     std::string order = "ORT";     // vertical line order: O=原文 R=罗马音 T=翻译
+    bool vertical = false;         // render lines as vertical columns
+    int userWidth = 0;             // user-set wrap width (logical px; 0 = auto)
     float font = 24.0f;
     D2D1_COLOR_F color = D2D1::ColorF(1, 1, 1, 1);
     float bg = 0.0f;
@@ -196,6 +198,12 @@ static CRITICAL_SECTION g_cs;
 static HWND g_hwnd = nullptr;
 static int g_x = 0, g_y = 0;
 static bool g_positioned = false;
+static bool g_hover = false;            // mouse over the window (frame visible)
+static bool g_hiddenByFullscreen = false;
+static bool g_resizing = false;         // dragging the right edge to set width
+static float g_resizeStartX = 0;
+static int g_resizeStartW = 0;
+static float g_lastWrapW = 820.0f;      // wrap width actually used last render
 
 static ID2D1Factory* g_d2dFactory = nullptr;
 static IDWriteFactory* g_dwriteFactory = nullptr;
@@ -251,11 +259,37 @@ static void Render() {
 
     const float gap = 6.0f;
     const float pad = 16.0f;
-    const float wrapW = 820.0f;
+    const float wrapW = st.userWidth > 0 ? (float)st.userWidth : 820.0f;
+    g_lastWrapW = wrapW;
     const wchar_t* fontFamily = L"Microsoft YaHei";
 
-    // Phase 1: measure (layout width = wrapW so long lines wrap, short lines keep natural width)
     float totalH = 0, maxW = 0;
+    // Vertical mode: each line becomes one or more vertical character
+    // columns (chars stacked top-to-bottom), columns laid left-to-right.
+    struct VColumn { std::wstring chars; float size; };
+    std::vector<VColumn> vcols;
+    if (st.vertical) {
+        int sh = GetSystemMetrics(SM_CYSCREEN);
+        const float maxColH = (sh / g_dpiScale) - 140.0f;
+        for (char role : st.order) {
+            std::wstring text =
+                role == 'O' ? st.orig  :
+                role == 'R' ? st.roma  :
+                role == 'T' ? st.trans : L"";
+            if (text.empty()) continue;
+            float size = role == 'O' ? st.font :
+                         role == 'R' ? std::max(10.0f, st.font * 0.55f) :
+                                       std::max(11.0f, st.font * 0.65f);
+            int perCol = (int)std::max(1.0f, maxColH / (size * 1.16f));
+            for (size_t i = 0; i < text.size(); i += perCol)
+                vcols.push_back({ text.substr(i, perCol), size });
+        }
+        for (auto& c : vcols) {
+            maxW += st.font * 1.35f + gap;
+            totalH = std::max(totalH, (float)c.chars.size() * c.size * 1.16f);
+        }
+        if (maxW > 0) maxW -= gap; // no trailing gap
+    } else
     for (auto& ln : lines) {
         IDWriteTextFormat* fmt = nullptr;
         g_dwriteFactory->CreateTextFormat(fontFamily, nullptr,
@@ -273,7 +307,7 @@ static void Render() {
         if (fmt) fmt->Release();
     }
     if (totalH > 0) totalH -= gap;
-    if (maxW > wrapW) maxW = wrapW;
+    if (!st.vertical && maxW > wrapW) maxW = wrapW;
     const float logicalW = maxW + pad * 2.0f;
     const float logicalH = totalH + pad * 2.0f;
     int pixW = (int)(logicalW * g_dpiScale + 0.5f);
@@ -312,6 +346,31 @@ static void Render() {
     }
 
     // Text (per-pixel alpha, always opaque)
+    if (st.vertical) {
+        const float colW = st.font * 1.35f;
+        float x = pad;
+        for (auto& c : vcols) {
+            const float charH = c.size * 1.16f;
+            ID2D1SolidColorBrush* tb = nullptr;
+            g_dcRT->CreateSolidColorBrush(st.color, &tb);
+            if (tb) {
+                for (UINT32 i = 0; i < c.chars.size(); i++) {
+                    IDWriteTextFormat* fmt = nullptr;
+                    g_dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+                        st.bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, c.size, L"", &fmt);
+                    if (fmt) fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+                    IDWriteTextLayout* lay = nullptr;
+                    if (fmt) g_dwriteFactory->CreateTextLayout(&c.chars[i], 1, fmt, colW, charH * 1.3f, &lay);
+                    if (lay) g_dcRT->DrawTextLayout(D2D1::Point2F(x, pad + i * charH), lay, tb);
+                    if (lay) lay->Release();
+                    if (fmt) fmt->Release();
+                }
+                tb->Release();
+            }
+            x += colW + gap;
+        }
+    } else {
     float y = pad;
     for (auto& ln : lines) {
         IDWriteTextFormat* fmt = nullptr;
@@ -330,6 +389,30 @@ static void Render() {
         y += ln.h + gap;
         if (lay) lay->Release();
         if (fmt) fmt->Release();
+    }
+    }
+
+    // Hover frame: thin border + corner resize grips, shown only while the
+    // mouse is over the window and never in click-through mode.
+    bool showFrame = g_hover && !st.clickThrough;
+    if (showFrame) {
+        ID2D1SolidColorBrush* fb = nullptr;
+        g_dcRT->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.75f), &fb);
+        if (fb) {
+            float m = 1.0f;
+            g_dcRT->DrawRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(m, m, logicalW - m, logicalH - m), 14, 14), fb, 1.6f);
+            float gs = 9.0f;
+            D2D1_ROUNDED_RECT grip = D2D1::RoundedRect(D2D1::RectF(0, 0, gs, gs), 2.5f, 2.5f);
+            float cs[2] = { 4.0f, logicalW - gs - 4.0f };
+            float rs[2] = { 4.0f, logicalH - gs - 4.0f };
+            for (float gx : cs) for (float gy : rs) {
+                grip.rect.left = gx; grip.rect.top = gy;
+                grip.rect.right = gx + gs; grip.rect.bottom = gy + gs;
+                g_dcRT->FillRoundedRectangle(grip, fb);
+            }
+            fb->Release();
+        }
     }
 
     HRESULT hr = g_dcRT->EndDraw();
@@ -371,6 +454,48 @@ static void ReportPosition() {
     char b[96];
     snprintf(b, sizeof b, "{\"t\":\"pos\",\"x\":%ld,\"y\":%ld}\n", (long)g_x, (long)g_y);
     PipeWrite(b);
+}
+
+// Report the user-set wrap width so the host can persist it.
+static void ReportSize() {
+    char b[96];
+    snprintf(b, sizeof b, "{\"t\":\"size\",\"w\":%d}\n", g_state.userWidth);
+    PipeWrite(b);
+}
+
+// ---------- fullscreen auto-hide ----------
+// True when the foreground window covers its whole monitor (a game or any
+// borderless fullscreen app). The desktop lyrics hide while that is the case.
+static bool IsForegroundFullscreen() {
+    HWND f = GetForegroundWindow();
+    if (!f || f == g_hwnd) return false;
+    if (f == GetShellWindow()) return false;
+    // The desktop is a SHELLDLL_DefView hosted in a Progman/WorkerW window.
+    if (FindWindowExW(f, nullptr, L"SHELLDLL_DefView", nullptr)) return false;
+    LONG ex = GetWindowLongW(f, GWL_EXSTYLE);
+    if (ex & WS_EX_TOOLWINDOW) return false;
+    HMONITOR mon = MonitorFromWindow(f, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO mi = { sizeof(mi) };
+    if (!GetMonitorInfoW(mon, &mi)) return false;
+    RECT r;
+    if (!GetWindowRect(f, &r)) return false;
+    return r.left <= mi.rcMonitor.left + 2 && r.right >= mi.rcMonitor.right - 2 &&
+           r.top <= mi.rcMonitor.top + 2 && r.bottom >= mi.rcMonitor.bottom - 2;
+}
+
+static void UpdateFullscreenHide() {
+    bool fs = IsForegroundFullscreen();
+    bool visible;
+    EnterCriticalSection(&g_cs);
+    visible = g_state.visible;
+    LeaveCriticalSection(&g_cs);
+    if (fs && visible && !g_hiddenByFullscreen) {
+        g_hiddenByFullscreen = true;
+        ShowWindow(g_hwnd, SW_HIDE);
+    } else if (!fs && g_hiddenByFullscreen) {
+        g_hiddenByFullscreen = false;
+        ShowWindow(g_hwnd, SW_SHOW);
+    }
 }
 
 static DWORD WINAPI ReportPipeThread(LPVOID) {
@@ -427,12 +552,16 @@ static void ApplyCommand(const std::string& line) {
         auto* bo = FindMember(root, "bold");
         auto* al = FindMember(root, "align");
         auto* or_ = FindMember(root, "order");
+        auto* ve = FindMember(root, "vertical");
+        auto* uw = FindMember(root, "width");
         EnterCriticalSection(&g_cs);
         if (f && f->type == JsonVal::NUM)  g_state.font = (float)f->num;
         if (c && c->type == JsonVal::STR)  g_state.color = ParseColor(c->str);
         if (b && b->type == JsonVal::NUM)  g_state.bg = (float)b->num;
         if (bo && bo->type == JsonVal::BOOL) g_state.bold = bo->boolean;
         if (al && al->type == JsonVal::STR) g_state.alignLeft = (al->str == "Left");
+        if (ve) g_state.vertical = (ve->type == JsonVal::BOOL ? ve->boolean : (ve->type == JsonVal::NUM && ve->num != 0));
+        if (uw && uw->type == JsonVal::NUM) g_state.userWidth = (int)uw->num;
         if (or_ && or_->type == JsonVal::STR && or_->str.size() == 3
             && or_->str.find('O') != std::string::npos
             && or_->str.find('R') != std::string::npos
@@ -444,6 +573,7 @@ static void ApplyCommand(const std::string& line) {
         auto* on = FindMember(root, "on");
         bool v = on && on->type == JsonVal::BOOL ? on->boolean : (on && on->type == JsonVal::NUM ? on->num != 0 : false);
         EnterCriticalSection(&g_cs); g_state.clickThrough = v; LeaveCriticalSection(&g_cs);
+        if (v) g_hover = false;  // click-through: never show the frame
         if (g_hwnd) {
             LONG ex = GetWindowLong(g_hwnd, GWL_EXSTYLE);
             if (v) ex |= WS_EX_TRANSPARENT; else ex &= ~WS_EX_TRANSPARENT;
@@ -508,35 +638,88 @@ static DWORD WINAPI PipeThread(LPVOID) {
 static bool g_dragging = false;
 static POINT g_dragPrev = { 0, 0 };
 
+// Right 14 logical px of the window = width-resize zone.
+static bool InResizeZone(HWND h, LPARAM l) {
+    RECT r;
+    GetWindowRect(h, &r);
+    float logicalW = (r.right - r.left) / g_dpiScale;
+    float x = (int)(short)LOWORD(l) / g_dpiScale;
+    return x >= logicalW - 14.0f;
+}
+
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
         case WM_APP_RENDER:
             Render();
             return 0;
-        case WM_LBUTTONDOWN:
-            if (!g_state.clickThrough) {
-                g_dragging = true;
-                g_dragPrev.x = (int)(short)LOWORD(l);
-                g_dragPrev.y = (int)(short)HIWORD(l);
-                SetCapture(h);
-            }
+        case WM_TIMER:
+            if (w == 1) UpdateFullscreenHide();
             return 0;
-        case WM_MOUSEMOVE:
-            if (g_dragging) {
+        case WM_MOUSEMOVE: {
+            if (!g_hover) {
+                g_hover = true;
+                TRACKMOUSEEVENT tme = { sizeof(tme), TME_LEAVE, h, 0 };
+                TrackMouseEvent(&tme);
+                PostMessage(h, WM_APP_RENDER, 0, 0); // show the frame
+            }
+            if (g_resizing) {
+                int dx = (int)(short)LOWORD(l) - (int)g_resizeStartX;
+                int nw = g_resizeStartW + (int)(dx / g_dpiScale);
+                EnterCriticalSection(&g_cs);
+                g_state.userWidth = nw < 160 ? 160 : (nw > 3000 ? 3000 : nw);
+                LeaveCriticalSection(&g_cs);
+                PostMessage(h, WM_APP_RENDER, 0, 0);
+            } else if (g_dragging) {
                 int dx = (int)(short)LOWORD(l) - g_dragPrev.x;
                 int dy = (int)(short)HIWORD(l) - g_dragPrev.y;
                 g_x += dx; g_y += dy;
                 SetWindowPos(h, HWND_TOPMOST, g_x, g_y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             }
             return 0;
+        }
+        case WM_MOUSELEAVE:
+            g_hover = false;
+            PostMessage(h, WM_APP_RENDER, 0, 0); // hide the frame
+            return 0;
+        case WM_SETCURSOR: {
+            if (LOWORD(l) == HTCLIENT) {
+                DWORD lp = GetMessagePos();
+                POINT pt = { (short)LOWORD(lp), (short)HIWORD(lp) };
+                ScreenToClient(h, &pt);
+                SetCursor(LoadCursor(nullptr, InResizeZone(h, MAKELPARAM(pt.x, pt.y)) ? IDC_SIZEWE : IDC_ARROW));
+                return TRUE;
+            }
+            return DefWindowProc(h, m, w, l);
+        }
+        case WM_LBUTTONDOWN:
+            if (!g_state.clickThrough) {
+                if (InResizeZone(h, l)) {
+                    g_resizing = true;
+                    g_resizeStartX = (int)(short)LOWORD(l);
+                    EnterCriticalSection(&g_cs);
+                    g_resizeStartW = g_state.userWidth > 0 ? g_state.userWidth : (int)g_lastWrapW;
+                    LeaveCriticalSection(&g_cs);
+                } else {
+                    g_dragging = true;
+                    g_dragPrev.x = (int)(short)LOWORD(l);
+                    g_dragPrev.y = (int)(short)HIWORD(l);
+                }
+                SetCapture(h);
+            }
+            return 0;
         case WM_LBUTTONUP:
-            if (g_dragging) {
+            if (g_resizing) {
+                g_resizing = false;
+                ReleaseCapture();
+                ReportSize();       // persist the new width via the host
+            } else if (g_dragging) {
                 g_dragging = false;
                 ReleaseCapture();
                 ReportPosition();   // persist the new position via the host
             }
             return 0;
         case WM_DESTROY:
+            KillTimer(h, 1);
             ReportPosition();       // last chance: where the user left it
             PostQuitMessage(0);
             return 0;
@@ -573,6 +756,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     CreateThread(nullptr, 0, PipeThread, nullptr, 0, nullptr);
     CreateThread(nullptr, 0, ReportPipeThread, nullptr, 0, nullptr);
+    SetTimer(g_hwnd, 1, 1000, nullptr);   // fullscreen auto-hide watchdog
 
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {

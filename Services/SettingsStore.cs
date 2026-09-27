@@ -64,6 +64,12 @@ public sealed class AppSettings
     /// <summary>Desktop-lyrics overlay window position; -1,-1 = default (bottom center).</summary>
     public int LyricPosX { get; set; } = -1;
     public int LyricPosY { get; set; } = -1;
+
+    /// <summary>Desktop lyrics render as vertical character columns.</summary>
+    public bool LyricVertical { get; set; }
+
+    /// <summary>Desktop lyrics wrap width (logical px); 0 = auto-fit.</summary>
+    public int LyricBoxWidth { get; set; }
     public string DefaultPlayMode { get; set; } = "Sequential"; // PlayMode name
 
     /// <summary>What the window close button does: "Exit" or "Tray" (minimize to tray).</summary>
