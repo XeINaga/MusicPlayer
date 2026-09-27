@@ -21,7 +21,14 @@ public static class AutoStart
         try
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, false);
-            return key?.GetValue(ValueName) is string;
+            if (key?.GetValue(ValueName) is not string raw)
+                return false;
+            // A stale entry from an old install location would silently launch
+            // nothing; only report enabled when it points at THIS exe.
+            var exe = Process.GetCurrentProcess().MainModule?.FileName;
+            if (string.IsNullOrEmpty(exe))
+                return false;
+            return string.Equals(raw.Trim('"'), exe, StringComparison.OrdinalIgnoreCase);
         }
         catch
         {

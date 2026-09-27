@@ -93,6 +93,9 @@ public sealed class DesktopLyricsOverlay : IDisposable
                     {
                         UseShellExecute = false,
                         CreateNoWindow = true,
+                        // The overlay rejects pipe clients whose process id
+                        // differs from the host (us).
+                        Arguments = $"--host-pid {Environment.ProcessId}",
                     }
                 };
                 _proc.Start();
