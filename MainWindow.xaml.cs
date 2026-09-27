@@ -266,9 +266,20 @@ public sealed partial class MainWindow : Window
         // The range assignment coerces Value (0 -> 12) which fires
         // ValueChanged; the guard keeps that from saving 12 over the user's
         // persisted font size before it was ever read back.
+        // The dynaudnorm sliders below hit the SAME XBF bug — their ranges
+        // must live in code, too.
         _suppressSettingEvents = true;
         LyricFontSlider.Minimum = 12;
         LyricFontSlider.Maximum = 72;
+        DynNormPeakSlider.Minimum = 0.1;
+        DynNormPeakSlider.Maximum = 0.95;
+        DynNormPeakSlider.StepFrequency = 0.05;
+        DynNormGainSlider.Minimum = 1;
+        DynNormGainSlider.Maximum = 10;
+        DynNormGainSlider.StepFrequency = 0.5;
+        DynNormWindowSlider.Minimum = 3;
+        DynNormWindowSlider.Maximum = 31;
+        DynNormWindowSlider.StepFrequency = 2;
         _suppressSettingEvents = false;
 
         // Play button: a gentle grow on hover — it is the transport bar's
