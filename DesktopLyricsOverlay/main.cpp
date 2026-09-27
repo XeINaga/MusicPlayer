@@ -334,10 +334,15 @@ static void Render() {
     g_dcRT->SetTransform(D2D1::Matrix3x2F::Scale(g_dpiScale, g_dpiScale));
     g_dcRT->Clear(D2D1::ColorF(0, 0, 0, 0));   // transparent
 
-    // Background panel (alpha = bg opacity; invisible at 0)
-    if (st.bg > 0.001f) {
+    // Background panel (alpha = bg opacity; invisible at 0). While hovered,
+    // force a minimum alpha: layered-window hit-testing is per-pixel, and at
+    // bg = 0 only the glyph strokes were hoverable — the hover state flickered
+    // on/off between glyphs and the resize zone was unreachable.
+    float bgA = st.bg;
+    if (g_hover && !st.clickThrough && bgA < 0.15f) bgA = 0.15f;
+    if (bgA > 0.001f) {
         ID2D1SolidColorBrush* bgBrush = nullptr;
-        g_dcRT->CreateSolidColorBrush(D2D1::ColorF(0.05f, 0.05f, 0.07f, st.bg), &bgBrush);
+        g_dcRT->CreateSolidColorBrush(D2D1::ColorF(0.05f, 0.05f, 0.07f, bgA), &bgBrush);
         if (bgBrush) {
             D2D1_ROUNDED_RECT rr = D2D1::RoundedRect(D2D1::RectF(0, 0, logicalW, logicalH), 16, 16);
             g_dcRT->FillRoundedRectangle(rr, bgBrush);
@@ -474,6 +479,11 @@ static bool IsForegroundFullscreen() {
     if (FindWindowExW(f, nullptr, L"SHELLDLL_DefView", nullptr)) return false;
     LONG ex = GetWindowLongW(f, GWL_EXSTYLE);
     if (ex & WS_EX_TOOLWINDOW) return false;
+    // A MAXIMIZED normal window also covers its monitor (rect + invisible
+    // borders) but keeps WS_CAPTION; true fullscreen (games, video) drops it.
+    // Without this check the lyrics hid whenever any maximized app was front.
+    LONG style = GetWindowLongW(f, GWL_STYLE);
+    if (style & WS_CAPTION) return false;
     HMONITOR mon = MonitorFromWindow(f, MONITOR_DEFAULTTONEAREST);
     MONITORINFO mi = { sizeof(mi) };
     if (!GetMonitorInfoW(mon, &mi)) return false;
