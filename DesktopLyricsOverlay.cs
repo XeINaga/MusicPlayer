@@ -103,7 +103,15 @@ public sealed class DesktopLyricsOverlay : IDisposable
             }
         }
         if (_proc == null || _proc.HasExited)
+        {
+            if (_disposed && _proc != null)
+            {
+                try { _proc.Kill(); } catch { }
+                _proc.Dispose();
+                _proc = null;
+            }
             return;
+        }
 
         // The C++ side creates both pipes on startup; retry until ready.
         // Kept OUTSIDE any lock so Close() on the UI thread never blocks here.
@@ -133,6 +141,8 @@ public sealed class DesktopLyricsOverlay : IDisposable
         {
             try { main?.Dispose(); } catch { }
             try { rpt?.Dispose(); } catch { }
+            KillOrphan(_proc);
+            _proc = null;
             return;
         }
 
@@ -142,6 +152,8 @@ public sealed class DesktopLyricsOverlay : IDisposable
             {
                 try { main.Dispose(); } catch { }
                 try { rpt.Dispose(); } catch { }
+                KillOrphan(_proc);
+                _proc = null;
                 return;
             }
             _pipe = main;
@@ -149,6 +161,15 @@ public sealed class DesktopLyricsOverlay : IDisposable
         }
 
         StartReadLoop(rpt);
+    }
+
+    /// <summary>Kill a freshly spawned overlay that nobody took ownership of
+    /// (a Close() raced the connect loop) so it cannot linger as a zombie.</summary>
+    private static void KillOrphan(Process? proc)
+    {
+        if (proc == null) return;
+        try { if (!proc.HasExited) proc.Kill(); } catch { }
+        try { proc.Dispose(); } catch { }
     }
 
     /// <summary>Background reader for position reports (exits when the pipe dies).</summary>

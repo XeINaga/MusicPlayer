@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <!-- MinGW toolchain for the desktop-lyrics overlay; override on machines
+         where it lives elsewhere. -->
+    <GxxPath Condition="'$(GxxPath)' == ''">E:\mingw\msys2\ucrt64\bin\</GxxPath>
     <OutputType>WinExe</OutputType>
     <!-- Platform 26100: matches the installed Windows Kits Platform.xml and the
          26100 projection FFmpegInteropX was compiled against; the app still
@@ -16,7 +19,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AssemblyName>MusicPlayer</AssemblyName>
     <RootNamespace>MusicPlayer</RootNamespace>
-    <Version>1.3.4</Version>
+    <Version>1.4.0</Version>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -37,6 +40,7 @@
     <PackageReference Include="FFmpegInteropX" Version="2.1.0.81200" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260710003" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.4" />
     <!-- Needed so Encoding.GetEncoding("GBK")/Shift-JIS work at runtime:
          .NET does not ship legacy codepages unless this provider is registered. -->
     <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.0" />
@@ -140,7 +144,9 @@
     copied into the self-contained publish folder.
   -->
   <Target Name="BuildOverlay" BeforeTargets="Build;Publish">
-    <Exec Command="&quot;E:\mingw\msys2\ucrt64\bin\g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32" ContinueOnError="true" />
+    <!-- No ContinueOnError: a silent compile failure shipped a stale overlay
+         exe once; the build must fail loudly when g++ is unavailable. -->
+    <Exec Command="&quot;$(GxxPath)g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32" />
   </Target>
 
   <Target Name="CopyOverlayPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">

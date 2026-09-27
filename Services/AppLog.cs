@@ -60,17 +60,38 @@ public static class AppLog
     /// </summary>
     public static string LyricCompletionLogPath => Path.Combine(LogDir, "LyricCompletion.log");
 
-    /// <summary>Append a timestamped line to the lyric-completion log.</summary>
+    /// <summary>Append a timestamped line to the lyric-completion log.
+    /// Rotates the file to ".1" once it exceeds 5 MB so long-term use cannot
+    /// grow a single log without bound.</summary>
     public static void WriteLyricCompletion(string message)
     {
         try
         {
+            RotateIfNeeded(LyricCompletionLogPath);
             var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}";
             File.AppendAllText(LyricCompletionLogPath, line, new UTF8Encoding(false));
         }
         catch
         {
             // best effort — logging must never crash the app
+        }
+    }
+
+    private static void RotateIfNeeded(string path)
+    {
+        try
+        {
+            var fi = new FileInfo(path);
+            if (fi.Exists && fi.Length > 5 * 1024 * 1024)
+            {
+                var backup = path + ".1";
+                if (File.Exists(backup)) File.Delete(backup);
+                File.Move(path, backup);
+            }
+        }
+        catch
+        {
+            // rotation is best effort; append still works
         }
     }
 

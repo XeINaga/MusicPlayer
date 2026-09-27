@@ -323,7 +323,7 @@ static void Render() {
     }
 
     SetWindowPos(g_hwnd, HWND_TOPMOST, g_x, g_y, pixW, pixH,
-        SWP_NOACTIVATE | (st.visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+        SWP_NOACTIVATE | ((st.visible && !g_hiddenByFullscreen) ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
 
     EnsureBitmap(pixW, pixH);
     if (!g_dcRT || !g_hdcMem) return;
@@ -421,6 +421,14 @@ static void Render() {
     }
 
     HRESULT hr = g_dcRT->EndDraw();
+    if (hr == (HRESULT)D2DERR_RECREATE_TARGET) {
+        // Device lost (driver reset etc.): drop the target so the next render
+        // recreates it instead of spinning on a dead one forever.
+        g_dcRT->Release(); g_dcRT = nullptr;
+        if (g_hbm) { DeleteObject(g_hbm); g_hbm = nullptr; }
+        g_bmW = g_bmH = 0;
+        return;
+    }
     if (SUCCEEDED(hr)) {
         POINT ptd = { g_x, g_y };
         SIZE sz = { pixW, pixH };
@@ -504,7 +512,11 @@ static void UpdateFullscreenHide() {
         ShowWindow(g_hwnd, SW_HIDE);
     } else if (!fs && g_hiddenByFullscreen) {
         g_hiddenByFullscreen = false;
-        ShowWindow(g_hwnd, SW_SHOW);
+        bool visible;
+        EnterCriticalSection(&g_cs);
+        visible = g_state.visible;
+        LeaveCriticalSection(&g_cs);
+        if (visible) ShowWindow(g_hwnd, SW_SHOW); // host may have hidden it meanwhile
     }
 }
 
@@ -623,11 +635,12 @@ static DWORD WINAPI PipeThread(LPVOID) {
         HANDLE hPipe = CreateNamedPipeW(PIPE_NAME,
             PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
             1, 4096, 4096, 0, nullptr);
-        if (hPipe == INVALID_HANDLE_VALUE) break;
+        if (hPipe == INVALID_HANDLE_VALUE) { Sleep(500); continue; } // name squatted — retry, don't brick
 
         if (ConnectNamedPipe(hPipe, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
             char buf[4096]; DWORD rd; std::string acc;
             while (ReadFile(hPipe, buf, sizeof(buf) - 1, &rd, nullptr) && rd > 0) {
+                if (acc.size() > 1u << 20) acc.clear(); // runaway stream without newlines
                 acc.append(buf, rd);
                 size_t pos;
                 while ((pos = acc.find('\n')) != std::string::npos) {
@@ -779,8 +792,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     if (g_hdcMem) DeleteDC(g_hdcMem);
     if (g_dwriteFactory) g_dwriteFactory->Release();
     if (g_d2dFactory) g_d2dFactory->Release();
-    DeleteCriticalSection(&g_pipeCs);
-    DeleteCriticalSection(&g_cs);
+    // NOTE: g_cs / g_pipeCs are intentionally NOT deleted — the pipe threads
+    // may still hold them at this point (PostMessage(WM_DESTROY) does not
+    // synchronize with them), and deleting a busy CS is undefined behavior.
+    // The process is exiting; the OS reclaims everything.
     CoUninitialize();
     return 0;
 }

@@ -225,13 +225,31 @@ public sealed class PlaylistStore
         if (!File.Exists(filePath))
             return result;
 
-        foreach (var raw in File.ReadLines(filePath))
+        // Detect the file's encoding: ANSI/GBK m3u files with Chinese paths
+        // decoded as UTF-8 silently dropped every entry.
+        string[] lines;
+        try
+        {
+            var text = EncodingHelper.ReadText(filePath, "auto");
+            lines = text.Replace("\r\n", "\n").Split('\n');
+        }
+        catch
+        {
+            return result;
+        }
+
+        var baseDir = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
+        foreach (var raw in lines)
         {
             var line = raw.Trim();
             if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal))
                 continue;
-            if (File.Exists(line))
-                result.Add(line);
+
+            // Relative paths resolve against the m3u's own directory (M3U spec),
+            // not the process working directory.
+            var candidate = Path.IsPathRooted(line) ? line : Path.GetFullPath(Path.Combine(baseDir, line));
+            if (File.Exists(candidate))
+                result.Add(candidate);
         }
 
         return result;
