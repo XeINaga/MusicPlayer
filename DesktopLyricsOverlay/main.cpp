@@ -241,6 +241,22 @@ static void EnsureBitmap(int w, int h) {
     g_d2dFactory->CreateDCRenderTarget(&rp, &g_dcRT);
 }
 
+// Length in code units of the grapheme-ish cluster at i: one surrogate pair
+// plus trailing combining marks / variation selectors / ZWJ sequences.
+static size_t ClusterLen(const std::wstring& t, size_t i) {
+    size_t len = 1;
+    if (i + 1 < t.size() && IS_HIGH_SURROGATE(t[i]) && IS_LOW_SURROGATE(t[i + 1]))
+        len = 2;
+    while (i + len < t.size()) {
+        wchar_t c = t[i + len];
+        bool combining = (c >= 0x0300 && c <= 0x036F) || (c >= 0x3099 && c <= 0x309A) ||
+                         c == 0xFE0F || c == 0xFE0E || c == 0x200D;
+        if (!combining) break;
+        len++;
+    }
+    return len;
+}
+
 static void Render() {
     if (!g_hwnd) return;
     State st;
@@ -266,7 +282,7 @@ static void Render() {
     float totalH = 0, maxW = 0;
     // Vertical mode: each line becomes one or more vertical character
     // columns (chars stacked top-to-bottom), columns laid left-to-right.
-    struct VColumn { std::wstring chars; float size; };
+    struct VColumn { std::vector<std::wstring> glyphs; float size; };
     std::vector<VColumn> vcols;
     if (st.vertical) {
         int sh = GetSystemMetrics(SM_CYSCREEN);
@@ -281,12 +297,29 @@ static void Render() {
                          role == 'R' ? std::max(10.0f, st.font * 0.55f) :
                                        std::max(11.0f, st.font * 0.65f);
             int perCol = (int)std::max(1.0f, maxColH / (size * 1.16f));
-            for (size_t i = 0; i < text.size(); i += perCol)
-                vcols.push_back({ text.substr(i, perCol), size });
+            // Walk grapheme-ish clusters so surrogate pairs (emoji) and
+            // combining marks are never split across columns.
+            size_t pos = 0;
+            while (pos < text.size()) {
+                size_t take = 0, glyphs = 0;
+                while (pos + take < text.size() && glyphs < (size_t)perCol) {
+                    size_t cl = ClusterLen(text, pos + take);
+                    take += cl; glyphs++;
+                }
+                VColumn col; col.size = size;
+                size_t off = 0;
+                while (off < take) {
+                    size_t cl = ClusterLen(text, pos + off);
+                    col.glyphs.push_back(text.substr(pos + off, cl));
+                    off += cl;
+                }
+                vcols.push_back(std::move(col));
+                pos += take;
+            }
         }
         for (auto& c : vcols) {
             maxW += st.font * 1.35f + gap;
-            totalH = std::max(totalH, (float)c.chars.size() * c.size * 1.16f);
+            totalH = std::max(totalH, (float)c.glyphs.size() * c.size * 1.16f);
         }
         if (maxW > 0) maxW -= gap; // no trailing gap
     } else
@@ -322,6 +355,17 @@ static void Render() {
         g_positioned = true;
     }
 
+    // Spread from the center outward: when the content size changes (lyrics of
+    // a different length), shift the window so its CENTER stays put instead of
+    // the top-left corner dragging the box to the right/down.
+    static int g_lastPixW = 0, g_lastPixH = 0;
+    if (g_positioned && g_lastPixW > 0 && (pixW != g_lastPixW || pixH != g_lastPixH)) {
+        g_x += (g_lastPixW - pixW) / 2;
+        g_y += (g_lastPixH - pixH) / 2;
+    }
+    g_lastPixW = pixW;
+    g_lastPixH = pixH;
+
     SetWindowPos(g_hwnd, HWND_TOPMOST, g_x, g_y, pixW, pixH,
         SWP_NOACTIVATE | ((st.visible && !g_hiddenByFullscreen) ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
 
@@ -353,28 +397,44 @@ static void Render() {
     // Text (per-pixel alpha, always opaque)
     if (st.vertical) {
         const float colW = st.font * 1.35f;
+        ID2D1SolidColorBrush* tb = nullptr;
+        g_dcRT->CreateSolidColorBrush(st.color, &tb);
+        // One TextFormat per distinct size (at most three roles) instead of
+        // one object per drawn character.
+        IDWriteTextFormat* fmtO = nullptr, *fmtR = nullptr, *fmtT = nullptr;
+        auto mkFmt = [&](float size) -> IDWriteTextFormat* {
+            IDWriteTextFormat* f = nullptr;
+            g_dwriteFactory->CreateTextFormat(fontFamily, nullptr,
+                st.bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, L"", &f);
+            if (f) f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            return f;
+        };
+        auto fmtFor = [&](float size) -> IDWriteTextFormat* {
+            if (size == st.font) { if (!fmtO) fmtO = mkFmt(size); return fmtO; }
+            if (size == std::max(10.0f, st.font * 0.55f)) { if (!fmtR) fmtR = mkFmt(size); return fmtR; }
+            if (!fmtT) fmtT = mkFmt(size);
+            return fmtT;
+        };
         float x = pad;
         for (auto& c : vcols) {
             const float charH = c.size * 1.16f;
-            ID2D1SolidColorBrush* tb = nullptr;
-            g_dcRT->CreateSolidColorBrush(st.color, &tb);
-            if (tb) {
-                for (UINT32 i = 0; i < c.chars.size(); i++) {
-                    IDWriteTextFormat* fmt = nullptr;
-                    g_dwriteFactory->CreateTextFormat(fontFamily, nullptr,
-                        st.bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, c.size, L"", &fmt);
-                    if (fmt) fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            IDWriteTextFormat* fmt = fmtFor(c.size);
+            if (tb && fmt) {
+                for (UINT32 i = 0; i < c.glyphs.size(); i++) {
                     IDWriteTextLayout* lay = nullptr;
-                    if (fmt) g_dwriteFactory->CreateTextLayout(&c.chars[i], 1, fmt, colW, charH * 1.3f, &lay);
+                    g_dwriteFactory->CreateTextLayout(
+                        c.glyphs[i].c_str(), (UINT32)c.glyphs[i].size(), fmt, colW, charH * 1.3f, &lay);
                     if (lay) g_dcRT->DrawTextLayout(D2D1::Point2F(x, pad + i * charH), lay, tb);
                     if (lay) lay->Release();
-                    if (fmt) fmt->Release();
                 }
-                tb->Release();
             }
             x += colW + gap;
         }
+        if (fmtO) fmtO->Release();
+        if (fmtR) fmtR->Release();
+        if (fmtT) fmtT->Release();
+        if (tb) tb->Release();
     } else {
     float y = pad;
     for (auto& ln : lines) {
@@ -520,6 +580,16 @@ static void UpdateFullscreenHide() {
     }
 }
 
+static DWORD g_hostPid = 0;   // spawning process id, from --host-pid
+
+// Only the host (our parent process) may talk to / read from the pipes.
+static bool ClientIsHost(HANDLE hPipe) {
+    if (g_hostPid == 0) return true; // legacy launch without the argument
+    ULONG pid = 0;
+    if (!GetNamedPipeClientProcessId(hPipe, &pid)) return false;
+    return pid == g_hostPid;
+}
+
 static DWORD WINAPI ReportPipeThread(LPVOID) {
     while (true) {
         HANDLE h = CreateNamedPipeW(RPT_PIPE_NAME,
@@ -528,6 +598,11 @@ static DWORD WINAPI ReportPipeThread(LPVOID) {
         if (h == INVALID_HANDLE_VALUE) { Sleep(500); continue; }
 
         if (ConnectNamedPipe(h, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
+            if (!ClientIsHost(h)) {
+                DisconnectNamedPipe(h);
+                CloseHandle(h);
+                continue;
+            }
             EnterCriticalSection(&g_pipeCs);
             g_rptPipe = h;
             LeaveCriticalSection(&g_pipeCs);
@@ -638,6 +713,11 @@ static DWORD WINAPI PipeThread(LPVOID) {
         if (hPipe == INVALID_HANDLE_VALUE) { Sleep(500); continue; } // name squatted — retry, don't brick
 
         if (ConnectNamedPipe(hPipe, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
+            if (!ClientIsHost(hPipe)) {
+                DisconnectNamedPipe(hPipe);
+                CloseHandle(hPipe);
+                continue;
+            }
             char buf[4096]; DWORD rd; std::string acc;
             while (ReadFile(hPipe, buf, sizeof(buf) - 1, &rd, nullptr) && rd > 0) {
                 if (acc.size() > 1u << 20) acc.clear(); // runaway stream without newlines
@@ -779,6 +859,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
 
     CreateThread(nullptr, 0, PipeThread, nullptr, 0, nullptr);
     CreateThread(nullptr, 0, ReportPipeThread, nullptr, 0, nullptr);
+    // The host passes its own PID: pipe clients with any other process id
+    // are rejected, so only MusicPlayer can inject lyrics or read reports.
+    {
+        LPWSTR cl = GetCommandLineW();
+        if (cl) {
+            const wchar_t* tag = wcsstr(cl, L"--host-pid");
+            if (tag) g_hostPid = (DWORD)_wtoi(tag + 10);
+        }
+    }
     SetTimer(g_hwnd, 1, 1000, nullptr);   // fullscreen auto-hide watchdog
 
     MSG msg;
