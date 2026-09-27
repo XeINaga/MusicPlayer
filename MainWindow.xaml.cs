@@ -187,6 +187,9 @@ public sealed partial class MainWindow : Window
 
         // Dynamic volume (loudness normalization) routing.
         _playback.LoudnessNormalization = _settings.DynamicVolume;
+        _playback.DynNormPeak = _settings.DynNormPeak;
+        _playback.DynNormMaxGain = _settings.DynNormMaxGain;
+        _playback.DynNormWindow = _settings.DynNormWindow;
 
         // Filename-vs-tag title display + QQ login cookie for the lyric source.
         MetadataService.PreferFilenameTitles = _settings.TitlePreferFilename;
@@ -273,6 +276,15 @@ public sealed partial class MainWindow : Window
         BtnPlay.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(120) };
         BtnPlay.PointerEntered += (_, _) => BtnPlay.Scale = new System.Numerics.Vector3(1.06f, 1.06f, 1f);
         BtnPlay.PointerExited += (_, _) => BtnPlay.Scale = System.Numerics.Vector3.One;
+
+        // dynaudnorm slider debounce: reload the current track ~0.8s after the
+        // last slider movement so dragging doesn't reopen the file per tick.
+        _dynNormReloadTimer.Interval = TimeSpan.FromMilliseconds(800);
+        _dynNormReloadTimer.Tick += (_, _) =>
+        {
+            _dynNormReloadTimer.Stop();
+            _playback.ReloadCurrent();
+        };
 
         this.Activated += MainWindow_Activated;
         this.Closed += MainWindow_Closed;
@@ -4436,6 +4448,10 @@ public sealed partial class MainWindow : Window
         SyncLyricOptionChecks();
         CoverSpinToggle.IsOn = _settings.CoverSpin;
         DynamicVolumeToggle.IsOn = _settings.DynamicVolume;
+        DynNormPeakSlider.Value = _settings.DynNormPeak;
+        DynNormGainSlider.Value = _settings.DynNormMaxGain;
+        DynNormWindowSlider.Value = _settings.DynNormWindow;
+        UpdateDynNormTexts();
         TitlePreferFilenameToggle.IsOn = _settings.TitlePreferFilename;
         QqCookieBox.Text = _settings.QqCookie;
         CloseActionCombo.SelectedIndex = _settings.CloseAction == "Tray" ? 1 : 0;
@@ -4968,6 +4984,40 @@ public sealed partial class MainWindow : Window
         // Re-route the current track so the change is heard immediately;
         // playback state and position are preserved across the reload.
         _playback.ReloadCurrent();
+    }
+
+    // Debounces dynaudnorm slider drags: the filter chain is applied per
+    // source load, so reloading on every ValueChanged tick would reopen the
+    // file dozens of times. The reload runs ~0.8s after the last movement.
+    private readonly DispatcherTimer _dynNormReloadTimer = new();
+
+    private void DynNormSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+
+        _settings.DynNormPeak = Math.Clamp(DynNormPeakSlider.Value, 0.1, 0.95);
+        _settings.DynNormMaxGain = Math.Clamp(DynNormGainSlider.Value, 1, 10);
+        _settings.DynNormWindow = (int)Math.Clamp(DynNormWindowSlider.Value, 3, 31);
+        UpdateDynNormTexts();
+        SettingsStore.Save(_settings);
+
+        _playback.DynNormPeak = _settings.DynNormPeak;
+        _playback.DynNormMaxGain = _settings.DynNormMaxGain;
+        _playback.DynNormWindow = _settings.DynNormWindow;
+
+        if (_settings.DynamicVolume)
+        {
+            _dynNormReloadTimer.Stop();
+            _dynNormReloadTimer.Start();
+        }
+    }
+
+    private void UpdateDynNormTexts()
+    {
+        DynNormPeakText.Text = _settings.DynNormPeak.ToString("0.00");
+        DynNormGainText.Text = "×" + _settings.DynNormMaxGain.ToString("0.0");
+        DynNormWindowText.Text = $"≈{_settings.DynNormWindow * 0.5:0.#} 秒";
     }
 
     private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)
