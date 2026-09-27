@@ -730,21 +730,21 @@
                                     <StackPanel Spacing="6" Margin="18,6,0,0">
                                         <StackPanel Orientation="Horizontal" Spacing="10">
                                             <TextBlock Text="目标峰值" Style="{StaticResource SettingsHint}" Width="80" VerticalAlignment="Center" />
-                                            <Slider x:Name="DynNormPeakSlider" Minimum="0.1" Maximum="0.95" StepFrequency="0.05" Width="260"
+                                            <Slider x:Name="DynNormPeakSlider" Width="260"
                                                     Foreground="{StaticResource QqGreen}" ValueChanged="DynNormSlider_ValueChanged"
                                                     ToolTipService.ToolTip="归一化后允许达到的最大音量比例（0.1–0.95）" />
                                             <TextBlock x:Name="DynNormPeakText" Style="{StaticResource SettingsHint}" Width="70" VerticalAlignment="Center" />
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal" Spacing="10">
                                             <TextBlock Text="最大增益" Style="{StaticResource SettingsHint}" Width="80" VerticalAlignment="Center" />
-                                            <Slider x:Name="DynNormGainSlider" Minimum="1" Maximum="10" StepFrequency="0.5" Width="260"
+                                            <Slider x:Name="DynNormGainSlider" Width="260"
                                                     Foreground="{StaticResource QqGreen}" ValueChanged="DynNormSlider_ValueChanged"
                                                     ToolTipService.ToolTip="小声段落最多被放大的倍数（1–10）" />
                                             <TextBlock x:Name="DynNormGainText" Style="{StaticResource SettingsHint}" Width="70" VerticalAlignment="Center" />
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal" Spacing="10">
                                             <TextBlock Text="平滑窗口" Style="{StaticResource SettingsHint}" Width="80" VerticalAlignment="Center" />
-                                            <Slider x:Name="DynNormWindowSlider" Minimum="3" Maximum="31" StepFrequency="2" Width="260"
+                                            <Slider x:Name="DynNormWindowSlider" Width="260"
                                                     Foreground="{StaticResource QqGreen}" ValueChanged="DynNormSlider_ValueChanged"
                                                     ToolTipService.ToolTip="增益调整的平滑跨度，越大越平缓（3–31 帧，1 帧 = 0.5 秒）" />
                                             <TextBlock x:Name="DynNormWindowText" Style="{StaticResource SettingsHint}" Width="70" VerticalAlignment="Center" />
