@@ -53,13 +53,12 @@ public sealed class PlaybackService
     // Without it, Previous never records where it left and the back history
     // collapses to a single entry after one Previous/Next round trip.
     private readonly Stack<Track> _randomForward = new();
-    // Random mode: indices not yet played in the current round. Drawing from
-    // this until it empties plays every track once before any repeat.
-    // It holds *indices*, so it is only meaningful for the exact queue it was
-    // built from — _bagQueueCount detects add/remove, and structural edits
-    // (reorder, queue swap) clear it explicitly.
-    private readonly List<int> _randomBag = new();
-    private int _bagQueueCount = -1;
+    // Random mode: tracks not yet played in the current round. Holds TRACK
+    // REFERENCES (not indices): queue insertions/removals/reorders shift
+    // indices and used to desync an index-based bag — some tracks drawn twice,
+    // others never — while references stay valid through any edit and are
+    // lazily dropped when their track leaves the queue.
+    private readonly List<Track> _randomBag = new();
 
     // Crossfade state: fades volume out over 200ms then loads the next track
     // and fades it in over CrossfadeDurationMs (0 = off, instant switch).
@@ -234,6 +233,10 @@ public sealed class PlaybackService
     private void GoTo(int index)
     {
         _index = index;
+        // The track now playing has "had its turn": drop it from the random
+        // bag on every navigation path (picks, auto-advance, draw).
+        if (_mode == PlayMode.Random && _queue != null && index >= 0 && index < _queue.Count)
+            _randomBag.Remove(_queue[index]);
         CurrentIndexChanged?.Invoke(_index);
 
         if (_crossfadeDurationMs > 0)
@@ -342,7 +345,8 @@ public sealed class PlaybackService
         {
             // Count it as played this round so the bag will not hand it back
             // until the next one.
-            _randomBag.Remove(index);
+            if (_queue != null && index < _queue.Count)
+                _randomBag.Remove(_queue[index]);
             // New ground, not a redo.
             _randomForward.Clear();
         }
@@ -353,13 +357,10 @@ public sealed class PlaybackService
     /// <summary>Adjust the internal index after a track is removed from the queue.</summary>
     public void ShiftIndex(int delta)
     {
+        // The random bag holds TRACK REFERENCES, which a removal does not
+        // renumber — no reset needed (dead references are swept lazily).
+        // History is kept on purpose for the same reason.
         _index = Math.Max(-1, _index + delta);
-        // Every index the round was built from has moved, so it has to go. The
-        // count guard in ComputeNextRandom would usually catch this too, but
-        // that only holds while removals are the sole edit — drop the round
-        // explicitly rather than depend on it. History is kept on purpose: it
-        // tracks Track objects, which a removal does not renumber.
-        ResetRandomBag();
     }
 
     /// <summary>
@@ -370,11 +371,9 @@ public sealed class PlaybackService
     {
         if (_queue == null || index < 0 || index >= _queue.Count)
             return;
+        // Drag-reordering is safe with a reference-based bag: the tracks are
+        // the same objects, only their positions changed.
         _index = index;
-        // Drag-reordering moves tracks between indices without changing the
-        // count, so the length guard cannot catch it — every stored index now
-        // points at a different track.
-        ResetRandomBag();
     }
 
     /// <summary>
@@ -844,57 +843,59 @@ public sealed class PlaybackService
     /// Random mode: draw the next track from the current round's pool, so every
     /// queued track plays once before any of them comes up again.
     /// </summary>
-    private int ComputeNextRandom(int n)
+    private int ComputeNextRandom()
     {
-        if (n == 1)
-            return 0;
+        if (_queue == null || _queue.Count == 0)
+            return _index >= 0 ? _index : -1;
 
-        // Indices only line up with the queue the bag was built from; a length
-        // change means tracks were added or removed, so start a fresh round.
-        if (_bagQueueCount != n)
-            RefillRandomBag(n);
+        // Lazily drop references whose tracks left the queue.
+        _randomBag.RemoveAll(t => !_queue.Contains(t));
 
         if (_randomBag.Count == 0)
-            RefillRandomBag(n);
+            RefillRandomBag();
 
-        // Draw from the tail: O(1) and leaves the remaining order untouched.
-        var pick = _randomBag.Count - 1;
-        var r = _randomBag[pick];
+        if (_randomBag.Count == 0)
+            return _index >= 0 ? _index : -1; // single-track queue
 
-        // A fresh round puts every track back, including the one playing now.
-        // Drawing it immediately would replay the same track twice in a row —
-        // it reads as a broken skip, so take a different one and leave it in
-        // the bag for later in the round.
-        if (r == _index && _randomBag.Count > 1)
+        var pick = _rnd.Next(_randomBag.Count);
+        var track = _randomBag[pick];
+        var idx = _queue.IndexOf(track);
+
+        if (idx < 0)
         {
-            pick = _rnd.Next(_randomBag.Count - 1);
-            r = _randomBag[pick];
+            // Reference died between the sweep and the draw — drop and retry.
+            _randomBag.RemoveAt(pick);
+            return ComputeNextRandom();
         }
 
         _randomBag.RemoveAt(pick);
-        return r;
+        return idx;
     }
 
-    /// <summary>Refill the round with every index, shuffled (Fisher-Yates).</summary>
-    private void RefillRandomBag(int n)
+    /// <summary>Refill the round with every queued track except the one
+    /// playing, shuffled (Fisher-Yates).</summary>
+    private void RefillRandomBag()
     {
         _randomBag.Clear();
-        for (var i = 0; i < n; i++)
-            _randomBag.Add(i);
+        if (_queue == null)
+            return;
+
+        var current = _index >= 0 && _index < _queue.Count ? _queue[_index] : null;
+        foreach (var t in _queue)
+            if (!ReferenceEquals(t, current) && !_randomBag.Contains(t))
+                _randomBag.Add(t);
 
         for (var i = _randomBag.Count - 1; i > 0; i--)
         {
             var j = _rnd.Next(i + 1);
             (_randomBag[i], _randomBag[j]) = (_randomBag[j], _randomBag[i]);
         }
-        _bagQueueCount = n;
     }
 
     /// <summary>Drop the current round; the next draw builds a fresh one.</summary>
     private void ResetRandomBag()
     {
         _randomBag.Clear();
-        _bagQueueCount = -1;
     }
 
     private int ComputeNext(bool forward)
@@ -902,10 +903,10 @@ public sealed class PlaybackService
         if (_queue == null || _queue.Count == 0)
             return -1;
 
-        var n = _queue.Count;
-
         if (_mode == PlayMode.Random)
-            return ComputeNextRandom(n);
+            return ComputeNextRandom();
+
+        var n = _queue.Count;
 
         if (forward)
         {
