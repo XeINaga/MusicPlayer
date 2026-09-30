@@ -93,6 +93,41 @@ public sealed class PlaylistStore
         catch { return new List<TrackEntry>(); }
     }
 
+    // ---------- Random round (shuffle bag) ----------
+
+    private static string RandomBagFile => Path.Combine(DataLocation.Root, "randombag.json");
+
+    public static void SaveRandomBag(IEnumerable<string> paths)
+    {
+        try
+        {
+            EnsureDir();
+            var data = new RandomBagData { Paths = paths.ToList() };
+            AtomicFile.WriteAllText(RandomBagFile, JsonSerializer.Serialize(data), Encoding.UTF8);
+        }
+        catch { /* best-effort */ }
+    }
+
+    public static List<string> LoadRandomBag()
+    {
+        try
+        {
+            if (!File.Exists(RandomBagFile))
+                return new List<string>();
+            var data = JsonSerializer.Deserialize<RandomBagData>(File.ReadAllText(RandomBagFile, Encoding.UTF8));
+            return data?.Paths ?? new List<string>();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
+    public static void ClearRandomBag()
+    {
+        try { if (File.Exists(RandomBagFile)) File.Delete(RandomBagFile); } catch { }
+    }
+
     // ---------- Recently played ----------
 
     public static void SaveRecent(IEnumerable<Track> tracks)
@@ -254,6 +289,13 @@ public sealed class PlaylistStore
 
         return result;
     }
+}
+
+// Persisted random-round state: the tracks still pending in the shuffle bag,
+// so "every track once before any repeat" survives an app restart.
+public sealed class RandomBagData
+{
+    public List<string> Paths { get; set; } = new();
 }
 
 public sealed class TrackEntry

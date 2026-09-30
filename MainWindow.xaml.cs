@@ -474,6 +474,16 @@ public sealed partial class MainWindow : Window
                                   .ToList();
                 seed.Reverse();
                 _playback.SeedRandomHistory(seed);
+
+                // Shuffle bag: restore the pending round from disk so "every
+                // track once before any repeat" spans app restarts. The resumed
+                // track is excluded by RestoreRandomBag itself.
+                if (_playback.Mode == PlayMode.Random)
+                    _playback.RestoreRandomBag(
+                        PlaylistStore.LoadRandomBag()
+                            .Select(p => _library.FirstOrDefault(t => t.Path == p))
+                            .Where(t => t != null)
+                            .Select(t => t!));
             }
         }
     }
@@ -5351,6 +5361,12 @@ public sealed partial class MainWindow : Window
         _desktopLyrics = null;
 
         PlaylistStore.SaveProgress(_playback.CurrentIndex, _playback.Position, CurrentPath());
+
+        // Persist the random round so it survives restarts (random mode only).
+        if (_playback.Mode == PlayMode.Random)
+            PlaylistStore.SaveRandomBag(_playback.RandomBagRemaining.Select(t => t.Path));
+        else
+            PlaylistStore.ClearRandomBag();
 
         // Synchronous, unlike the periodic saves which run in the background: a
         // pending background save may not have finished by now, and PlayCount /
