@@ -200,6 +200,8 @@ static int g_x = 0, g_y = 0;
 static bool g_positioned = false;
 static bool g_hover = false;            // mouse over the window (frame visible)
 static bool g_hiddenByFullscreen = false;
+static bool g_pipeConnected = false;    // host currently attached to the cmd pipe
+static FILETIME g_hostGoneAt = { 0, 0 }; // when the host last disconnected
 static bool g_resizing = false;         // dragging the right edge to set width
 static float g_resizeStartX = 0;
 static int g_resizeStartW = 0;
@@ -718,6 +720,7 @@ static DWORD WINAPI PipeThread(LPVOID) {
                 CloseHandle(hPipe);
                 continue;
             }
+            g_pipeConnected = true;
             char buf[4096]; DWORD rd; std::string acc;
             while (ReadFile(hPipe, buf, sizeof(buf) - 1, &rd, nullptr) && rd > 0) {
                 if (acc.size() > 1u << 20) acc.clear(); // runaway stream without newlines
@@ -731,6 +734,8 @@ static DWORD WINAPI PipeThread(LPVOID) {
                 }
             }
         }
+        g_pipeConnected = false;
+        GetSystemTimeAsFileTime(&g_hostGoneAt); // orphan watchdog starts ticking
         DisconnectNamedPipe(hPipe);
         CloseHandle(hPipe);
     }
@@ -756,7 +761,22 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             Render();
             return 0;
         case WM_TIMER:
-            if (w == 1) UpdateFullscreenHide();
+            if (w == 1) {
+                UpdateFullscreenHide();
+                // Host-death suicide: if the command pipe has no client for
+                // 10 s while we are showing lyrics, the host died without a
+                // quit command (crash / taskkill) — remove the stale window.
+                if (!g_pipeConnected && g_state.visible) {
+                    FILETIME now;
+                    GetSystemTimeAsFileTime(&now);
+                    ULONGLONG now64 = ((ULONGLONG)now.dwHighDateTime << 32) | now.dwLowDateTime;
+                    ULONGLONG gone64 = ((ULONGLONG)g_hostGoneAt.dwHighDateTime << 32) | g_hostGoneAt.dwLowDateTime;
+                    if (gone64 != 0 && (now64 - gone64) > 10000000ULL * 10)
+                        PostMessage(h, WM_DESTROY, 0, 0);
+                } else {
+                    GetSystemTimeAsFileTime(&g_hostGoneAt);
+                }
+            }
             return 0;
         case WM_MOUSEMOVE: {
             if (!g_hover) {
