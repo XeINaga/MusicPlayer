@@ -328,6 +328,10 @@ public sealed partial class MainWindow : Window
         if (_settings.UseGlobalHotkeys)
             EnableHotkeys();
 
+        // Desktop lyrics: reopen automatically when they were on at exit.
+        if (_settings.LyricOverlayEnabled)
+            BtnDesktopLyrics.IsChecked = true;
+
         // Retry any pending Last.fm scrobbles from a previous session.
         _ = Task.Run(async () => await _lastFm.RetryFailedScrobblesAsync());
     }
@@ -2833,6 +2837,7 @@ public sealed partial class MainWindow : Window
         {
             _settings.LyricPosX = x;
             _settings.LyricPosY = y;
+            _settings.LyricPosSaved = true;
             ScheduleSettingsSave();
         });
         _desktopLyrics.SizeReported += (w) => _dispatcher.TryEnqueue(() =>
@@ -2840,10 +2845,12 @@ public sealed partial class MainWindow : Window
             _settings.LyricBoxWidth = w;
             ScheduleSettingsSave();
         });
+        _settings.LyricOverlayEnabled = true;
+        SettingsStore.Save(_settings);
         _desktopLyrics.ApplyStyle(_settings);
         _desktopLyrics.SetClickThrough(_settings.LyricClickThroughDefault);
         // Restore the position the user dragged it to last time (if any).
-        if (_settings.LyricPosX >= 0 && _settings.LyricPosY >= 0)
+        if (_settings.LyricPosSaved)
             _desktopLyrics.SetPosition(_settings.LyricPosX, _settings.LyricPosY);
         _desktopLyrics.Activate();
         BtnClickThrough.IsEnabled = true;
@@ -2877,6 +2884,8 @@ public sealed partial class MainWindow : Window
 
     private void BtnDesktopLyrics_Unchecked(object sender, RoutedEventArgs e)
     {
+        _settings.LyricOverlayEnabled = false;
+        SettingsStore.Save(_settings);
         _desktopLyrics?.Close();
         _desktopLyrics = null;
         BtnClickThrough.IsEnabled = false;

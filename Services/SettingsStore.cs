@@ -65,6 +65,12 @@ public sealed class AppSettings
     /// <summary>Desktop-lyrics overlay window position; -1,-1 = default (bottom center).</summary>
     public int LyricPosX { get; set; } = -1;
     public int LyricPosY { get; set; } = -1;
+    /// <summary>True once a real lyric-window position has been persisted;
+    /// negative X/Y on monitors left of the primary are legitimate, not "unset".</summary>
+    public bool LyricPosSaved { get; set; }
+
+    /// <summary>Auto-open the desktop lyrics on launch when they were on at exit.</summary>
+    public bool LyricOverlayEnabled { get; set; }
 
     /// <summary>Desktop lyrics render as vertical character columns.</summary>
     public bool LyricVertical { get; set; }
