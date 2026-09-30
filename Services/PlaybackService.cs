@@ -576,8 +576,14 @@ public sealed class PlaybackService
             var peak = DynNormPeak.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
             var gain = DynNormMaxGain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
             var window = Math.Clamp(DynNormWindow | 1, 3, 31); // force odd
+
+            // FFmpegInteropX never drains the filter graph at EOS: dynaudnorm
+            // buffers the last (window) worth of audio and it is silently
+            // dropped — measured ~18.4 s skipped at g=31/f=600ms. Fix: a SMALL
+            // frame length (25 ms) shrinks the buffer to ≤0.78 s regardless of
+            // the gaussian window, making the tail loss imperceptible.
             config.Audio.FFmpegAudioFilters =
-                $"dynaudnorm=peak={peak}:maxgain={gain}:gausssize={window}";
+                $"dynaudnorm=framelen=25:gausssize={window}:peak={peak}:maxgain={gain}";
             return await FFmpegMediaSource.CreateFromUriAsync(path, config);
         }
         return await FFmpegMediaSource.CreateFromUriAsync(path);
