@@ -1239,6 +1239,12 @@ public sealed partial class MainWindow : Window
         if (_settings.LibraryExclusions.Contains(path, StringComparer.OrdinalIgnoreCase))
             return null; // user removed this on purpose — do not re-add via recent/playlists
 
+        // Never create ghost entries for files that no longer exist: the
+        // recent-play list keeps deleted songs alive, and the watched-folder
+        // sync then removed the resurrected track on EVERY launch.
+        if (!File.Exists(path))
+            return null;
+
         var track = new Track(path);
         track.LyricPath = LyricBindingStore.Get(path);
         _library.Add(track);
