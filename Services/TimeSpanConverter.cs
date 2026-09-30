@@ -7,7 +7,7 @@ namespace MusicPlayer.Services;
 /// Converts a <see cref="TimeSpan"/> to "m:ss" for playlist rows.
 /// Returns an empty string for zero / unset durations.
 /// </summary>
-public sealed class TimeSpanConverter : IValueConverter
+public sealed partial class TimeSpanConverter : IValueConverter
 {
     public object? Convert(object? value, Type typeName, object? parameter, string? language)
     {

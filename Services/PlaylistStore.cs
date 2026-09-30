@@ -30,7 +30,10 @@ public sealed class PlaylistStore
     private static void EnsureDir()
     {
         try { Directory.CreateDirectory(AppDir); }
-        catch { /* best-effort */ }
+        catch (Exception ex)
+        {
+            AppLog.WritePersistenceFailure(PlaylistFile, ex);
+        }
     }
 
     // ---------- Local library (auto playlist) ----------
@@ -90,7 +93,11 @@ public sealed class PlaylistStore
 
             return new List<TrackEntry>();
         }
-        catch { return new List<TrackEntry>(); }
+        catch (Exception ex)
+        {
+            BackupCorruptFile(PlaylistFile, ex);
+            return new List<TrackEntry>();
+        }
     }
 
     // ---------- Random round (shuffle bag) ----------
@@ -117,8 +124,9 @@ public sealed class PlaylistStore
             var data = JsonSerializer.Deserialize<RandomBagData>(File.ReadAllText(RandomBagFile, Encoding.UTF8));
             return data?.Paths ?? new List<string>();
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.WritePersistenceFailure(RandomBagFile, ex);
             return new List<string>();
         }
     }
@@ -145,7 +153,10 @@ public sealed class PlaylistStore
             var data = new RecentData { Items = items };
             AtomicFile.WriteAllText(RecentFile, JsonSerializer.Serialize(data), Encoding.UTF8);
         }
-        catch { /* best-effort */ }
+        catch (Exception ex)
+        {
+            AppLog.WritePersistenceFailure(RecentFile, ex);
+        }
     }
 
     public static List<TrackEntry> LoadRecent()
@@ -184,7 +195,11 @@ public sealed class PlaylistStore
 
             return new List<TrackEntry>();
         }
-        catch { return new List<TrackEntry>(); }
+        catch (Exception ex)
+        {
+            BackupCorruptFile(RecentFile, ex);
+            return new List<TrackEntry>();
+        }
     }
 
     // ---------- User playlists ----------
@@ -197,7 +212,10 @@ public sealed class PlaylistStore
             var data = new PlaylistsData { Items = new List<PlaylistDto>(lists) };
             AtomicFile.WriteAllText(PlaylistsFile, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
         }
-        catch { /* best-effort */ }
+        catch (Exception ex)
+        {
+            AppLog.WritePersistenceFailure(PlaylistsFile, ex);
+        }
     }
 
     public static List<PlaylistDto> LoadPlaylists()
@@ -209,7 +227,11 @@ public sealed class PlaylistStore
             var data = JsonSerializer.Deserialize<PlaylistsData>(File.ReadAllText(PlaylistsFile, Encoding.UTF8));
             return data?.Items ?? new List<PlaylistDto>();
         }
-        catch { return new List<PlaylistDto>(); }
+        catch (Exception ex)
+        {
+            BackupCorruptFile(PlaylistsFile, ex);
+            return new List<PlaylistDto>();
+        }
     }
 
     // ---------- Last playback progress ----------
@@ -222,7 +244,10 @@ public sealed class PlaylistStore
             var data = new ProgressData { Index = index, PositionMs = (long)position.TotalMilliseconds, Path = path };
             AtomicFile.WriteAllText(ProgressFile, JsonSerializer.Serialize(data), Encoding.UTF8);
         }
-        catch { /* best-effort */ }
+        catch (Exception ex)
+        {
+            AppLog.WritePersistenceFailure(ProgressFile, ex);
+        }
     }
 
     public static ProgressData LoadProgress()
@@ -234,7 +259,28 @@ public sealed class PlaylistStore
             var data = JsonSerializer.Deserialize<ProgressData>(File.ReadAllText(ProgressFile, Encoding.UTF8));
             return data ?? new ProgressData { Index = -1 };
         }
-        catch { return new ProgressData { Index = -1 }; }
+        catch (Exception ex)
+        {
+            BackupCorruptFile(ProgressFile, ex);
+            return new ProgressData { Index = -1 };
+        }
+    }
+
+    private static void BackupCorruptFile(string path, Exception exception)
+    {
+        AppLog.WritePersistenceFailure(path, exception);
+        try
+        {
+            if (File.Exists(path))
+            {
+                var backup = path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + ".bak";
+                File.Copy(path, backup);
+            }
+        }
+        catch (Exception backupException)
+        {
+            AppLog.WritePersistenceFailure(path + " (backup)", backupException);
+        }
     }
 
     // ---------- Manual M3U export / import ----------

@@ -7,11 +7,8 @@ namespace MusicPlayer.Services;
 /// <summary>
 /// Central log-directory resolution + lightweight append-only log writers.
 ///
-/// The log directory prefers "&lt;install dir&gt;\log" — the folder the MSI
-/// installer pre-creates with Everyone-write permission (see installer.wxs,
-/// LogDir component). If that is not writable (a manual install into Program
-/// Files without the MSI permission tweak, or a read-only deployment), it
-/// falls back to %LOCALAPPDATA%\MusicPlayer\log so logging never throws.
+/// The log directory is always "&lt;install dir&gt;\log" — the folder the MSI
+/// installer pre-creates (see installer.wxs, LogDir component).
 ///
 /// Both the crash log (App.xaml.cs) and the lyric-completion log land here.
 /// </summary>
@@ -20,8 +17,7 @@ public static class AppLog
     private static string? _logDir;
 
     /// <summary>
-    /// Resolved log directory: install dir\log when writable, otherwise
-    /// %LOCALAPPDATA%\MusicPlayer\log. Cached after first resolution.
+    /// Resolved log directory under the application installation directory.
     /// </summary>
     public static string LogDir
     {
@@ -31,24 +27,8 @@ public static class AppLog
                 return _logDir;
 
             var primary = Path.Combine(AppContext.BaseDirectory, "log");
-            try
-            {
-                Directory.CreateDirectory(primary);
-                // Probe: the directory may exist but deny writes (Program Files
-                // without the installer's Everyone-write ACL).
-                var probe = Path.Combine(primary, ".write-probe");
-                File.WriteAllText(probe, string.Empty);
-                File.Delete(probe);
-                _logDir = primary;
-            }
-            catch
-            {
-                var fallback = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "MusicPlayer", "log");
-                try { Directory.CreateDirectory(fallback); } catch { /* best effort */ }
-                _logDir = fallback;
-            }
+            try { Directory.CreateDirectory(primary); } catch { /* best effort */ }
+            _logDir = primary;
 
             return _logDir;
         }
@@ -110,6 +90,19 @@ public static class AppLog
         catch
         {
             // best effort
+        }
+    }
+
+    public static void WritePersistenceFailure(string path, Exception exception)
+    {
+        try
+        {
+            var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Persistence failure: {path}{Environment.NewLine}" +
+                       $"{exception}{Environment.NewLine}";
+            File.AppendAllText(Path.Combine(LogDir, "MusicPlayer.log"), line, new UTF8Encoding(false));
+        }
+        catch
+        {
         }
     }
 }

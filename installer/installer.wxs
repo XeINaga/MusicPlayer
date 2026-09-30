@@ -104,9 +104,7 @@
           <RegistryValue Root="HKLM" Key="SOFTWARE\MusicPlayer" Name="InstallPath"
                          Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         </Component>
-        <!-- Runtime log folder. Program Files is admin-only by default, so
-             grant Everyone write access to JUST this folder; the app falls
-             back to %LOCALAPPDATA%\MusicPlayer\log if even that fails. -->
+        <!-- Runtime log folder. Application logs are always written here. -->
         <Directory Id="LogDir" Name="log">
           <!-- Fixed GUID: components with a directory KeyPath cannot use "*". -->
           <Component Id="LogFolder" Guid="A4C2E9F1-7B3D-4E58-9A61-C8D40E2F5B73">
