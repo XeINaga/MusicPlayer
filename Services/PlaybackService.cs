@@ -570,10 +570,14 @@ public sealed class PlaybackService
             config.General.AutoExtendDuration = true;
 
             // InvariantCulture: dynaudnorm rejects "0,95".
+            // LONG option names: this FFmpeg build's dynaudnorm predates the
+            // p/m/g short aliases — a graph with short names fails to init and
+            // playback silently falls back to unfiltered audio.
             var peak = DynNormPeak.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
             var gain = DynNormMaxGain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
             var window = Math.Clamp(DynNormWindow | 1, 3, 31); // force odd
-            config.Audio.FFmpegAudioFilters = $"dynaudnorm:p={peak}:m={gain}:g={window}";
+            config.Audio.FFmpegAudioFilters =
+                $"dynaudnorm=peak={peak}:maxgain={gain}:gausssize={window}";
             return await FFmpegMediaSource.CreateFromUriAsync(path, config);
         }
         return await FFmpegMediaSource.CreateFromUriAsync(path);
