@@ -196,9 +196,6 @@ public sealed partial class MainWindow : Window
 
         // Dynamic volume (loudness normalization) routing.
         _playback.LoudnessNormalization = _settings.DynamicVolume;
-        _playback.DynNormPeak = _settings.DynNormPeak;
-        _playback.DynNormMaxGain = _settings.DynNormMaxGain;
-        _playback.DynNormWindow = _settings.DynNormWindow;
 
         // Filename-vs-tag title display + QQ login cookie for the lyric source.
         MetadataService.PreferFilenameTitles = _settings.TitlePreferFilename;
@@ -275,20 +272,9 @@ public sealed partial class MainWindow : Window
         // The range assignment coerces Value (0 -> 12) which fires
         // ValueChanged; the guard keeps that from saving 12 over the user's
         // persisted font size before it was ever read back.
-        // The dynaudnorm sliders below hit the SAME XBF bug — their ranges
-        // must live in code, too.
         _suppressSettingEvents = true;
         LyricFontSlider.Minimum = 12;
         LyricFontSlider.Maximum = 72;
-        DynNormPeakSlider.Minimum = 0.1;
-        DynNormPeakSlider.Maximum = 0.95;
-        DynNormPeakSlider.StepFrequency = 0.05;
-        DynNormGainSlider.Minimum = 1;
-        DynNormGainSlider.Maximum = 10;
-        DynNormGainSlider.StepFrequency = 0.5;
-        DynNormWindowSlider.Minimum = 3;
-        DynNormWindowSlider.Maximum = 31;
-        DynNormWindowSlider.StepFrequency = 2;
         _suppressSettingEvents = false;
 
         // Play button: a gentle grow on hover — it is the transport bar's
@@ -296,15 +282,6 @@ public sealed partial class MainWindow : Window
         BtnPlay.ScaleTransition = new Vector3Transition { Duration = TimeSpan.FromMilliseconds(120) };
         BtnPlay.PointerEntered += (_, _) => BtnPlay.Scale = new System.Numerics.Vector3(1.06f, 1.06f, 1f);
         BtnPlay.PointerExited += (_, _) => BtnPlay.Scale = System.Numerics.Vector3.One;
-
-        // dynaudnorm slider debounce: reload the current track ~0.8s after the
-        // last slider movement so dragging doesn't reopen the file per tick.
-        _dynNormReloadTimer.Interval = TimeSpan.FromMilliseconds(800);
-        _dynNormReloadTimer.Tick += (_, _) =>
-        {
-            _dynNormReloadTimer.Stop();
-            _playback.ReloadCurrent();
-        };
 
         // Settings write coalescing (see ScheduleSettingsSave).
         _settingsSaveTimer.Interval = TimeSpan.FromMilliseconds(500);
@@ -4645,10 +4622,6 @@ public sealed partial class MainWindow : Window
         SyncLyricOptionChecks();
         CoverSpinToggle.IsOn = _settings.CoverSpin;
         DynamicVolumeToggle.IsOn = _settings.DynamicVolume;
-        DynNormPeakSlider.Value = _settings.DynNormPeak;
-        DynNormGainSlider.Value = _settings.DynNormMaxGain;
-        DynNormWindowSlider.Value = _settings.DynNormWindow;
-        UpdateDynNormTexts();
         TitlePreferFilenameToggle.IsOn = _settings.TitlePreferFilename;
         QqCookieBox.Text = _settings.QqCookie;
         CloseActionCombo.SelectedIndex = _settings.CloseAction == "Tray" ? 1 : 0;
@@ -5198,33 +5171,6 @@ public sealed partial class MainWindow : Window
         _playback.ReloadCurrent();
     }
 
-    // Debounces dynaudnorm slider drags: the filter chain is applied per
-    // source load, so reloading on every ValueChanged tick would reopen the
-    // file dozens of times. The reload runs ~0.8s after the last movement.
-    private readonly DispatcherTimer _dynNormReloadTimer = new();
-
-    private void DynNormSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
-    {
-        if (_suppressSettingEvents)
-            return;
-
-        _settings.DynNormPeak = Math.Clamp(DynNormPeakSlider.Value, 0.1, 0.95);
-        _settings.DynNormMaxGain = Math.Clamp(DynNormGainSlider.Value, 1, 10);
-        _settings.DynNormWindow = (int)Math.Clamp(DynNormWindowSlider.Value, 3, 31);
-        UpdateDynNormTexts();
-        ScheduleSettingsSave();
-
-        _playback.DynNormPeak = _settings.DynNormPeak;
-        _playback.DynNormMaxGain = _settings.DynNormMaxGain;
-        _playback.DynNormWindow = _settings.DynNormWindow;
-
-        if (_settings.DynamicVolume)
-        {
-            _dynNormReloadTimer.Stop();
-            _dynNormReloadTimer.Start();
-        }
-    }
-
     /// <summary>
     /// Coalesce settings.json writes from hot paths (picker drags, slider
     /// ticks, overlay drag reports): one flush 500ms after the last change
@@ -5234,13 +5180,6 @@ public sealed partial class MainWindow : Window
     {
         _settingsSaveTimer.Stop();
         _settingsSaveTimer.Start();
-    }
-
-    private void UpdateDynNormTexts()
-    {
-        DynNormPeakText.Text = _settings.DynNormPeak.ToString("0.00");
-        DynNormGainText.Text = "×" + _settings.DynNormMaxGain.ToString("0.0");
-        DynNormWindowText.Text = $"≈{_settings.DynNormWindow * 0.5:0.#} 秒";
     }
 
     private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)

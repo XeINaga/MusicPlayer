@@ -83,22 +83,17 @@ public sealed class AppSettings
     public string CloseAction { get; set; } = "Exit";
 
     /// <summary>
-    /// Dynamic volume: route all playback through FFmpeg's dynaudnorm filter so
-    /// quiet songs are amplified and loud ones attenuated. Takes effect on the
-    /// current track via a seamless reload.
+    /// Apply cached ReplayGain metadata as a fixed per-track volume adjustment.
+    /// Tracks without ReplayGain metadata play at the user's selected volume.
     /// </summary>
     public bool DynamicVolume { get; set; }
 
-    /// <summary>dynaudnorm target peak (0.1–0.95): the loudest level the
-    /// normalizer may reach.</summary>
+    /// Legacy settings retained for backwards-compatible settings.json reads.
+    /// They are no longer used by the fixed-gain implementation.
     public double DynNormPeak { get; set; } = 0.95;
 
-    /// <summary>dynaudnorm maximum gain (1–10): how far quiet passages may be
-    /// amplified.</summary>
     public double DynNormMaxGain { get; set; } = 10.0;
 
-    /// <summary>dynaudnorm Gaussian window in frames (3–31, odd; 1 frame =
-    /// 0.5 s): larger = smoother, slower gain changes.</summary>
     public int DynNormWindow { get; set; } = 31;
 
     /// <summary>

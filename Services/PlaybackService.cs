@@ -64,6 +64,7 @@ public sealed class PlaybackService
     // and fades it in over CrossfadeDurationMs (0 = off, instant switch).
     private int _crossfadeDurationMs;
     private double _targetVolume = 1.0;
+    private double _trackGain = 1.0;
     private readonly DispatcherTimer _fadeTimer = new();
     private bool _fadingOut;
     private double _fadeFrom;
@@ -90,21 +91,15 @@ public sealed class PlaybackService
     }
 
     /// <summary>
-    /// Dynamic volume (loudness normalization): when on, every track is routed
-    /// through FFmpeg's dynaudnorm filter, which lifts quiet passages and tames
-    /// loud ones. Applies to the next load; the UI reloads the current track
-    /// when toggled so it is heard immediately.
+    /// Applies a cached fixed ReplayGain adjustment to the current track.
     /// </summary>
     public bool LoudnessNormalization { get; set; }
 
-    /// <summary>dynaudnorm target peak (0.1–0.95).</summary>
-    public double DynNormPeak { get; set; } = 0.95;
-
-    /// <summary>dynaudnorm maximum gain (1–10).</summary>
-    public double DynNormMaxGain { get; set; } = 10.0;
-
-    /// <summary>dynaudnorm Gaussian window in frames (3–31, odd).</summary>
-    public int DynNormWindow { get; set; } = 31;
+    // Retained for source/settings compatibility; fixed ReplayGain does not
+    // use real-time normalization parameters.
+    public double DynNormPeak { get; set; } = 0.88;
+    public double DynNormMaxGain { get; set; } = 4.0;
+    public int DynNormWindow { get; set; } = 21;
 
     private SystemMediaTransportControls? _smtc;
     private bool _smtcBound;
@@ -241,7 +236,7 @@ public sealed class PlaybackService
 
         if (_crossfadeDurationMs > 0)
         {
-            _pendingTargetVolume = _targetVolume;
+            _pendingTargetVolume = _targetVolume * _trackGain;
             StartCrossfade(index);
         }
         else
@@ -475,7 +470,7 @@ public sealed class PlaybackService
         IMediaPlaybackSource? source = null;
         MediaSource? nativeSource = null;
         FFmpegMediaSource? ffmpegSource = null;
-        var forceFfmpeg = LoudnessNormalization;
+        var forceFfmpeg = false;
 
         try
         {
@@ -492,6 +487,10 @@ public sealed class PlaybackService
                 nativeSource = MediaSource.CreateFromStorageFile(file);
                 source = nativeSource;
             }
+
+            SetTrackGain(LoudnessNormalization
+                ? await LoudnessCache.GetGainDbAsync(path)
+                : 0);
 
             if (token != _loadToken)
             {
@@ -551,40 +550,9 @@ public sealed class PlaybackService
         }
     }
 
-    /// <summary>Create the FFmpeg source, attaching the dynamic audio
-    /// normalizer when dynamic volume is on (target peak 0.95, max gain 10,
-    /// ~15s Gaussian window). dynaudnorm maps frames 1:1 with untouched
-    /// timestamps — loudnorm was rejected because its 3s lookahead buffer
-    /// both shifted the timeline +3s (position jumped at start) and lost the
-    /// last seconds (the host does not drain the filter chain at EOS).</summary>
+    /// <summary>Create an FFmpeg source for formats not supported by Media Foundation.</summary>
     private async Task<FFmpegMediaSource> CreateFfmpegSourceAsync(string path)
     {
-        if (LoudnessNormalization)
-        {
-            var config = new MediaSourceConfig();
-            // FFmpeg sources report the CONTAINER's duration, which for many
-            // mp3/flac files is a few seconds shorter than the actual audio —
-            // playback then ended early ("last seconds cut"). This makes the
-            // MediaStreamSource cover the extra decoded data.
-            config.General.AutoExtendDuration = true;
-
-            // InvariantCulture: dynaudnorm rejects "0,95".
-            // LONG option names: this FFmpeg build's dynaudnorm predates the
-            // p/m/g short aliases — a graph with short names fails to init and
-            // playback silently falls back to unfiltered audio.
-            var peak = DynNormPeak.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
-            var gain = DynNormMaxGain.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
-            var window = Math.Clamp(DynNormWindow | 1, 3, 31); // force odd
-
-            // FFmpegInteropX never drains the filter graph at EOS: dynaudnorm
-            // buffers the last (window) worth of audio and it is silently
-            // dropped — measured ~18.4 s skipped at g=31/f=600ms. Fix: a SMALL
-            // frame length (25 ms) shrinks the buffer to ≤0.78 s regardless of
-            // the gaussian window, making the tail loss imperceptible.
-            config.Audio.FFmpegAudioFilters =
-                $"dynaudnorm=framelen=25:gausssize={window}:peak={peak}:maxgain={gain}";
-            return await FFmpegMediaSource.CreateFromUriAsync(path, config);
-        }
         return await FFmpegMediaSource.CreateFromUriAsync(path);
     }
 
@@ -1025,7 +993,7 @@ public sealed class PlaybackService
         set
         {
             var v = Math.Clamp(value, 0.0, 1.0);
-            _player.Volume = v;
+            _player.Volume = v * _trackGain;
             _targetVolume = v;
             // A fade-in ramps toward _fadeTo and settles on
             // _pendingTargetVolume, so a slider move during a crossfade has to
@@ -1033,9 +1001,19 @@ public sealed class PlaybackService
             // level the user just picked with the old one, and it only comes
             // back after a restart (the persisted target is the new value).
             if (!_fadingOut && _fadeTimer.IsEnabled)
-                _fadeTo = v;
-            _pendingTargetVolume = v;
+                _fadeTo = v * _trackGain;
+            _pendingTargetVolume = v * _trackGain;
         }
+    }
+
+    public void SetTrackGain(double gainDb)
+    {
+        var gain = Math.Pow(10, Math.Clamp(gainDb, -12, 6) / 20.0);
+        _trackGain = Math.Clamp(gain, 0.25, 2.0);
+        _player.Volume = _targetVolume * _trackGain;
+        if (!_fadingOut && _fadeTimer.IsEnabled)
+            _fadeTo = _targetVolume * _trackGain;
+        _pendingTargetVolume = _targetVolume * _trackGain;
     }
 
     /// <summary>
