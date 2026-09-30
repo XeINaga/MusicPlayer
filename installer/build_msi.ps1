@@ -17,10 +17,44 @@ Set-Location $root
 
 $publishDir = "bin/Release/net10.0-windows10.0.26100.0/win-x64/publish"
 $outMsi     = "installer/MusicPlayer.msi"
+$ffmpegUrl  = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-lgpl.zip"
+$ffmpegTemp = Join-Path ([System.IO.Path]::GetTempPath()) "MusicPlayer-ffmpeg"
+
+function Ensure-Ffmpeg {
+    $existing = Join-Path (Resolve-Path $publishDir -ErrorAction SilentlyContinue) "ffmpeg.exe"
+    if ($existing -and (Test-Path $existing)) {
+        Write-Host "FFmpeg already present: $existing" -ForegroundColor DarkGray
+        return
+    }
+
+    New-Item -ItemType Directory -Path $ffmpegTemp -Force | Out-Null
+    $archive = Join-Path $ffmpegTemp "ffmpeg.zip"
+    $partial = "$archive.part"
+    $extract = Join-Path $ffmpegTemp "extract"
+    Write-Host "Downloading LGPL FFmpeg from GitHub Releases ..." -ForegroundColor Cyan
+    # curl supports HTTP range requests, so an interrupted download resumes
+    # from the existing .part file instead of starting over.
+    & curl.exe -L --fail --retry 3 --retry-delay 2 -C - -o $partial $ffmpegUrl
+    if ($LASTEXITCODE -ne 0) { throw "FFmpeg download failed (exit $LASTEXITCODE)" }
+    Move-Item $partial $archive -Force
+    if (Test-Path $extract) {
+        Remove-Item $extract -Recurse -Force
+    }
+    Expand-Archive -Path $archive -DestinationPath $extract -Force
+    $source = Get-ChildItem $extract -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+    if ($null -eq $source) { throw "ffmpeg.exe was not found in the downloaded archive." }
+    Copy-Item $source.FullName (Join-Path $publishDir "ffmpeg.exe") -Force
+    $license = Get-ChildItem $extract -Recurse -File |
+        Where-Object { $_.Name -match '^LICENSE(\.txt)?$' } | Select-Object -First 1
+    if ($license) {
+        Copy-Item $license.FullName (Join-Path $publishDir "FFmpeg-LICENSE.txt") -Force
+    }
+}
 
 Write-Host "1/4  dotnet publish -c Release (self-contained, trims locales) ..." -ForegroundColor Cyan
 dotnet publish -c Release
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
+Ensure-Ffmpeg
 
 Write-Host "2/4  building standalone Uninstall.exe ..." -ForegroundColor Cyan
 # Compiled with the .NET Framework csc that ships with Windows: zero
