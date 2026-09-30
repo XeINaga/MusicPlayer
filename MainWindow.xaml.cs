@@ -2892,11 +2892,20 @@ public sealed partial class MainWindow : Window
         BtnClickThrough.IsChecked = false;
     }
 
-    private void BtnClickThrough_Checked(object sender, RoutedEventArgs e) =>
+    private void BtnClickThrough_Checked(object sender, RoutedEventArgs e)
+    {
         _desktopLyrics?.SetClickThrough(true);
+        // Persist: the bottom-bar toggle used to be lost on restart.
+        _settings.LyricClickThroughDefault = true;
+        SettingsStore.Save(_settings);
+    }
 
-    private void BtnClickThrough_Unchecked(object sender, RoutedEventArgs e) =>
+    private void BtnClickThrough_Unchecked(object sender, RoutedEventArgs e)
+    {
         _desktopLyrics?.SetClickThrough(false);
+        _settings.LyricClickThroughDefault = false;
+        SettingsStore.Save(_settings);
+    }
 
     // ---------- Playback events ----------
 
