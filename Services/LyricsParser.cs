@@ -80,16 +80,16 @@ public static class LyricsParser
         }
 
         // 2) Companion files (LRC only; timestamps merge by time)
-        foreach (var s in RomajiSuffixes)
+        foreach (var suffix in RomajiSuffixes)
         {
-            var f = basePath + s + ".lrc";
+            var f = basePath + suffix + ".lrc";
             if (File.Exists(f))
                 MergeCompanion(f, doc, map, LyricRole.Romaji, forcedEncoding);
         }
 
-        foreach (var s in TranslationSuffixes)
+        foreach (var suffix in TranslationSuffixes)
         {
-            var f = basePath + s + ".lrc";
+            var f = basePath + suffix + ".lrc";
             if (File.Exists(f))
                 MergeCompanion(f, doc, map, LyricRole.Translation, forcedEncoding);
         }
@@ -134,8 +134,13 @@ public static class LyricsParser
         var grouped = raw.GroupBy(r => r.Time).OrderBy(g => g.Key);
         foreach (var g in grouped)
         {
-            var line = GetOrCreate(map, doc, g.Key);
             var texts = g.Select(x => x.Text).Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+            // Blank timestamped lines ([00:45.00] with no text) are dropped
+            // entirely instead of rendering as empty rows.
+            if (texts.Count == 0)
+                continue;
+
+            var line = GetOrCreate(map, doc, g.Key);
             if (texts.Count > 0) line.Original = texts[0];
             if (texts.Count > 1) line.Romaji = texts[1];
             if (texts.Count > 2) line.Translation = texts[2];
@@ -148,10 +153,11 @@ public static class LyricsParser
         var grouped = raw.GroupBy(r => r.Time).OrderBy(g => g.Key);
         foreach (var g in grouped)
         {
-            var line = GetOrCreate(map, doc, g.Key);
             var text = g.Select(x => x.Text).FirstOrDefault(t => !string.IsNullOrWhiteSpace(t));
             if (text == null)
-                continue;
+                continue; // blank companion line — drop
+
+            var line = GetOrCreate(map, doc, g.Key);
 
             switch (role)
             {
@@ -205,6 +211,32 @@ public static class LyricsParser
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Strip lines that carry no visible text: timestamped lines with an empty
+    /// body ([01:02.00] alone) and blank separator lines. Downloaded lyrics
+    /// (NetEase/QRC) often contain them; they render as blank rows.
+    /// </summary>
+    public static string RemoveBlankLines(string lrc)
+    {
+        var outLines = new List<string>();
+        foreach (var raw in lrc.Replace("\r\n", "\n").Split('\n'))
+        {
+            var line = raw.TrimEnd();
+            if (line.Length == 0)
+                continue;
+
+            var matches = TimeTag.Matches(line);
+            if (matches.Count > 0)
+            {
+                var body = WordTimeTag.Replace(TimeTag.Replace(line, string.Empty), string.Empty).Trim();
+                if (body.Length == 0)
+                    continue; // timestamp with no text
+            }
+            outLines.Add(line);
+        }
+        return string.Join("\n", outLines);
     }
 
     // ---------- SRT ----------

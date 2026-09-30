@@ -3609,9 +3609,9 @@ public sealed partial class MainWindow : Window
             Path.GetFileNameWithoutExtension(track.Path));
         var utf8 = new System.Text.UTF8Encoding(false);
 
-        if (main != null) AtomicFile.WriteAllText(basePath + ".lrc", main, utf8);
-        if (zh != null) AtomicFile.WriteAllText(basePath + ".zh.lrc", zh, utf8);
-        if (ro != null) AtomicFile.WriteAllText(basePath + ".romaji.lrc", ro, utf8);
+        if (main != null) AtomicFile.WriteAllText(basePath + ".lrc", LyricsParser.RemoveBlankLines(main), utf8);
+        if (zh != null) AtomicFile.WriteAllText(basePath + ".zh.lrc", LyricsParser.RemoveBlankLines(zh), utf8);
+        if (ro != null) AtomicFile.WriteAllText(basePath + ".romaji.lrc", LyricsParser.RemoveBlankLines(ro), utf8);
         return true;
     }
 
