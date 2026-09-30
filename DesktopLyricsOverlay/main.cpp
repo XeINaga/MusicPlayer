@@ -196,6 +196,8 @@ static State g_state;
 static CRITICAL_SECTION g_cs;
 
 static HWND g_hwnd = nullptr;
+// g_x/g_y = the CENTER of the lyric box (persisted/restored across sessions);
+// the box spreads symmetrically around this point as content size changes.
 static int g_x = 0, g_y = 0;
 static bool g_positioned = false;
 static bool g_hover = false;            // mouse over the window (frame visible)
@@ -352,23 +354,15 @@ static void Render() {
 
     if (st.visible && !g_positioned) {
         int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
-        g_x = (sw - pixW) / 2;
-        g_y = sh - pixH - 60;
+        g_x = sw / 2;
+        g_y = sh - pixH / 2 - 60;
         g_positioned = true;
     }
 
-    // Spread from the center outward: when the content size changes (lyrics of
-    // a different length), shift the window so its CENTER stays put instead of
-    // the top-left corner dragging the box to the right/down.
-    static int g_lastPixW = 0, g_lastPixH = 0;
-    if (g_positioned && g_lastPixW > 0 && (pixW != g_lastPixW || pixH != g_lastPixH)) {
-        g_x += (g_lastPixW - pixW) / 2;
-        g_y += (g_lastPixH - pixH) / 2;
-    }
-    g_lastPixW = pixW;
-    g_lastPixH = pixH;
-
-    SetWindowPos(g_hwnd, HWND_TOPMOST, g_x, g_y, pixW, pixH,
+    // g_x/g_y are the CENTER of the box: the window always spreads
+    // symmetrically around this point as its content size changes, and the
+    // exact same point is persisted/restored across sessions.
+    SetWindowPos(g_hwnd, HWND_TOPMOST, g_x - pixW / 2, g_y - pixH / 2, pixW, pixH,
         SWP_NOACTIVATE | ((st.visible && !g_hiddenByFullscreen) ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
 
     EnsureBitmap(pixW, pixH);
@@ -492,7 +486,7 @@ static void Render() {
         return;
     }
     if (SUCCEEDED(hr)) {
-        POINT ptd = { g_x, g_y };
+        POINT ptd = { g_x - pixW / 2, g_y - pixH / 2 };
         SIZE sz = { pixW, pixH };
         POINT pts = { 0, 0 };
         BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
@@ -686,11 +680,11 @@ static void ApplyCommand(const std::string& line) {
         auto* px = FindMember(root, "x");
         auto* py = FindMember(root, "y");
         if (px && px->type == JsonVal::NUM && py && py->type == JsonVal::NUM) {
-            g_x = (int)px->num;
+            g_x = (int)px->num;   // center of the lyric box
             g_y = (int)py->num;
             g_positioned = true;
             if (g_hwnd)
-                SetWindowPos(g_hwnd, HWND_TOPMOST, g_x, g_y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+                SetWindowPos(g_hwnd, HWND_TOPMOST, g_x - g_bmW / 2, g_y - g_bmH / 2, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
         }
     } else if (type == "show") {
@@ -795,8 +789,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             } else if (g_dragging) {
                 int dx = (int)(short)LOWORD(l) - g_dragPrev.x;
                 int dy = (int)(short)HIWORD(l) - g_dragPrev.y;
-                g_x += dx; g_y += dy;
-                SetWindowPos(h, HWND_TOPMOST, g_x, g_y, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+                g_x += dx; g_y += dy;   // the center moves with the drag
+                SetWindowPos(h, HWND_TOPMOST, g_x - g_bmW / 2, g_y - g_bmH / 2, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             }
             return 0;
         }
