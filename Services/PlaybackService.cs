@@ -898,6 +898,25 @@ public sealed class PlaybackService
         _randomBag.Clear();
     }
 
+    /// <summary>Tracks still pending in the shuffle bag (for persistence).</summary>
+    public IReadOnlyList<Track> RandomBagRemaining => _randomBag.ToList();
+
+    /// <summary>
+    /// Restore a persisted shuffle bag after a session restore. Only tracks
+    /// present in the current queue are kept, and the track that is about to
+    /// resume is excluded (it is getting its play right now).
+    /// </summary>
+    public void RestoreRandomBag(IEnumerable<Track> tracks)
+    {
+        _randomBag.Clear();
+        if (_queue == null || _mode != PlayMode.Random)
+            return;
+        var current = _index >= 0 && _index < _queue.Count ? _queue[_index] : null;
+        foreach (var t in tracks)
+            if (_queue.Contains(t) && !ReferenceEquals(t, current) && !_randomBag.Contains(t))
+                _randomBag.Add(t);
+    }
+
     private int ComputeNext(bool forward)
     {
         if (_queue == null || _queue.Count == 0)
