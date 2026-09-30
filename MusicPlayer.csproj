@@ -26,6 +26,8 @@
     <EnableDefaultItems>true</EnableDefaultItems>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <LangVersion>latest</LangVersion>
+    <!-- Keep an existing publish directory across builds and publishes. -->
+    <DeleteExistingFiles>false</DeleteExistingFiles>
   </PropertyGroup>
 
   <!-- The installer folder holds its OWN compilation units (installer/uninstall/
@@ -41,9 +43,6 @@
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260710003" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.4" />
-    <!-- Needed so Encoding.GetEncoding("GBK")/Shift-JIS work at runtime:
-         .NET does not ship legacy codepages unless this provider is registered. -->
-    <PackageReference Include="System.Text.Encoding.CodePages" Version="10.0.0" />
   </ItemGroup>
 
   <!--

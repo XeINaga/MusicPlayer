@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -38,9 +39,6 @@ internal static class CoverCache
     /// </remarks>
     public static async Task<BitmapImage?> GetOrLoadAsync(string audioPath, byte[]? rawBytes)
     {
-        if (rawBytes == null || rawBytes.Length == 0)
-            return null;
-
         try
         {
             Directory.CreateDirectory(CacheDir);
@@ -51,18 +49,23 @@ internal static class CoverCache
             try { mtime = File.GetLastWriteTimeUtc(audioPath).Ticks; } catch { }
             var cacheFile = Path.Combine(CacheDir, HashPath(audioPath) + "." + mtime.ToString("x") + ".png");
 
+            if (File.Exists(cacheFile))
+                return CreateFromDisk(cacheFile);
+
+            if (rawBytes == null || rawBytes.Length == 0)
+                return null;
+
             // Slow path: writing the extracted art is a synchronous write of up
             // to a couple of megabytes. On the UI thread that stalls scrolling,
             // so push it to the thread pool. Reading it back via UriSource is
             // already asynchronous, and is how the fast path works too.
-            if (!File.Exists(cacheFile))
-                await Task.Run(() =>
-                {
-                    var tmp = cacheFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                    File.WriteAllBytes(tmp, rawBytes);
-                    try { File.Move(tmp, cacheFile, true); }
-                    catch { try { File.Delete(tmp); } catch { } }
-                });
+            await Task.Run(() =>
+            {
+                var tmp = cacheFile + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                File.WriteAllBytes(tmp, rawBytes);
+                try { File.Move(tmp, cacheFile, true); }
+                catch { try { File.Delete(tmp); } catch { } }
+            });
 
             return CreateFromDisk(cacheFile);
         }
@@ -70,8 +73,36 @@ internal static class CoverCache
         {
             // On any I/O or codec failure fall back to an in-memory bitmap so
             // the UI still shows *something*.
-            return await CreateInMemoryAsync(rawBytes!);
+            return rawBytes == null ? null : await CreateInMemoryAsync(rawBytes);
         }
+    }
+
+    public static Task TrimAsync(long maxBytes = 256L * 1024 * 1024)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                if (!Directory.Exists(CacheDir))
+                    return;
+
+                var files = new DirectoryInfo(CacheDir)
+                    .EnumerateFiles("*.png")
+                    .OrderByDescending(f => f.LastAccessTimeUtc)
+                    .ToList();
+                long total = files.Sum(f => f.Length);
+                foreach (var file in files.OrderBy(f => f.LastAccessTimeUtc))
+                {
+                    if (total <= maxBytes)
+                        break;
+                    total -= file.Length;
+                    try { file.Delete(); } catch { }
+                }
+            }
+            catch
+            {
+            }
+        });
     }
 
     /// <summary>

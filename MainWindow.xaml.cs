@@ -103,6 +103,10 @@ public sealed partial class MainWindow : Window
         public string TrackCountText => $"{TrackCount} 首歌曲";
     }
 
+    private List<AlbumInfo>? _albumGridCache;
+    private List<ArtistInfo>? _artistGridCache;
+    private bool _groupCacheDirty = true;
+
     // Close-to-tray support.
     private TrayIconService? _tray;
     private HotkeyService? _hotkey;
@@ -140,6 +144,8 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _settingsSaveTimer = new();
     private readonly DispatcherTimer _sleepTimer = new();
     private readonly DispatcherTimer _searchDebounceTimer = new();
+    private int _displayRefreshVersion;
+    private readonly CancellationTokenSource _metadataCts = new();
     private static readonly Brush CoverPlaceholder =
         new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x15, 0x15, 0x1c));
 
@@ -148,6 +154,7 @@ public sealed partial class MainWindow : Window
         this.InitializeComponent();
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
+        _ = CoverCache.TrimAsync();
 
         PlaylistsList.ItemsSource = _playlists;
         TrackGrid.ItemsSource = _displayTracks;
@@ -179,8 +186,7 @@ public sealed partial class MainWindow : Window
         {
             _searchDebounceTimer.Stop();
             _searchText = SearchBox.Text.Trim();
-            RefreshDisplay();
-            ScrollTrackListToTop(); // new result set — start from the top
+            _ = RefreshDisplayAsync(true);
         };
 
         // Restore persisted volume (so it matches the last session).
@@ -1020,6 +1026,8 @@ public sealed partial class MainWindow : Window
             LoadLyricsFor(0);
         }
 
+        if (added)
+            _groupCacheDirty = true;
         RefreshDisplay();
     }
 
@@ -1058,6 +1066,8 @@ public sealed partial class MainWindow : Window
             LoadLyricsFor(0);
         }
 
+        if (added)
+            _groupCacheDirty = true;
         RefreshDisplay();
     }
 
@@ -1067,12 +1077,19 @@ public sealed partial class MainWindow : Window
     // it took to drain.
     private readonly SemaphoreSlim _metadataGate = new(8);
 
-    private async void LoadMetadataFor(Track track)
+    private async Task LoadMetadataForAsync(Track track)
     {
-        await _metadataGate.WaitAsync();
+        var cancellationToken = _metadataCts.Token;
+        var entered = false;
         try
         {
-            await MetadataService.LoadAsync(track, _dispatcher);
+            await _metadataGate.WaitAsync(cancellationToken);
+            entered = true;
+            await MetadataService.LoadAsync(track, _dispatcher, cancellationToken);
+            _groupCacheDirty = true;
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch
         {
@@ -1080,9 +1097,13 @@ public sealed partial class MainWindow : Window
         }
         finally
         {
-            _metadataGate.Release();
+            if (entered)
+                _metadataGate.Release();
         }
     }
+
+    private void LoadMetadataFor(Track track) =>
+        _ = LoadMetadataForAsync(track);
 
     private void PersistLibrary() =>
         PlaylistStore.SaveAutoPlaylist(_library);
@@ -2183,34 +2204,8 @@ public sealed partial class MainWindow : Window
         if (_activeTracks == null)
             return;
 
-        // When an album filter is active (album drill-down), restrict to that album.
-        var source = _activeTracks;
-        if (_currentView == NavView.Albums && !string.IsNullOrEmpty(_albumFilter))
-        {
-            source = _activeTracks.Where(t =>
-                string.Equals(t.Album, _albumFilter, StringComparison.OrdinalIgnoreCase)).ToList();
-        }
-
-        var q = _searchText;
-        var filtered = source.Where(t =>
-            string.IsNullOrWhiteSpace(q)
-            || (t.Title != null && t.Title.Contains(q, StringComparison.OrdinalIgnoreCase))
-            || (t.Artist != null && t.Artist.Contains(q, StringComparison.OrdinalIgnoreCase))
-            || (t.Album != null && t.Album.Contains(q, StringComparison.OrdinalIgnoreCase))).ToList();
-
-        filtered = _sortBy switch
-        {
-            "Title" => filtered.OrderBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
-            "Artist" => filtered.OrderBy(t => t.Artist ?? "", StringComparer.OrdinalIgnoreCase)
-                                  .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
-            "Album" => filtered.OrderBy(t => t.Album ?? "", StringComparer.OrdinalIgnoreCase)
-                                 .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
-            "DateAdded" => filtered.OrderByDescending(t => t.DateAdded).ToList(),
-            "Duration" => filtered.OrderBy(t => t.Duration).ToList(),
-            "PlayCount" => filtered.OrderByDescending(t => t.PlayCount)
-                                    .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
-            _ => filtered
-        };
+        ++_displayRefreshVersion;
+        var filtered = FilterAndSortTracks(_activeTracks, _currentView, _albumFilter, _searchText, _sortBy);
 
         // One Reset instead of a Clear() followed by N Inserts — see
         // BulkObservableCollection. Search and sort rebuild this on every
@@ -2220,6 +2215,65 @@ public sealed partial class MainWindow : Window
         TrackList.CanReorderItems = CanReorderPlaylist();
 
         UpdateEmptyHint();
+    }
+
+    private async Task RefreshDisplayAsync(bool scrollToTop)
+    {
+        if (_activeTracks == null)
+            return;
+
+        var version = ++_displayRefreshVersion;
+        var snapshot = _activeTracks.ToList();
+        var view = _currentView;
+        var albumFilter = _albumFilter;
+        var query = _searchText;
+        var sortBy = _sortBy;
+        var filtered = await Task.Run(() =>
+            FilterAndSortTracks(snapshot, view, albumFilter, query, sortBy));
+
+        if (version != _displayRefreshVersion)
+            return;
+
+        _displayTracks.ReplaceAll(filtered);
+        TrackList.CanReorderItems = CanReorderPlaylist();
+        UpdateEmptyHint();
+        if (scrollToTop)
+            ScrollTrackListToTop();
+    }
+
+    private static List<Track> FilterAndSortTracks(
+        IEnumerable<Track> tracks,
+        NavView view,
+        string albumFilter,
+        string query,
+        string sortBy)
+    {
+        IEnumerable<Track> source = tracks;
+        if (view == NavView.Albums && !string.IsNullOrEmpty(albumFilter))
+        {
+            source = source.Where(t =>
+                string.Equals(t.Album, albumFilter, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var filtered = source.Where(t =>
+            string.IsNullOrWhiteSpace(query)
+            || (t.Title != null && t.Title.Contains(query, StringComparison.OrdinalIgnoreCase))
+            || (t.Artist != null && t.Artist.Contains(query, StringComparison.OrdinalIgnoreCase))
+            || (t.Album != null && t.Album.Contains(query, StringComparison.OrdinalIgnoreCase)));
+
+        return sortBy switch
+        {
+            "Title" => filtered.OrderBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
+            "Artist" => filtered.OrderBy(t => t.Artist ?? "", StringComparer.OrdinalIgnoreCase)
+                                 .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
+            "Album" => filtered.OrderBy(t => t.Album ?? "", StringComparer.OrdinalIgnoreCase)
+                                .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
+            "DateAdded" => filtered.OrderByDescending(t => t.DateAdded).ToList(),
+            "Duration" => filtered.OrderBy(t => t.Duration).ToList(),
+            "PlayCount" => filtered.OrderByDescending(t => t.PlayCount)
+                                   .ThenBy(t => t.Title ?? "", StringComparer.OrdinalIgnoreCase).ToList(),
+            _ => filtered.ToList()
+        };
     }
 
     private void TrackList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
@@ -2303,6 +2357,12 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void BuildAlbumGrid()
     {
+        if (!_groupCacheDirty && _albumGridCache != null)
+        {
+            AlbumGrid.ItemsSource = _albumGridCache;
+            return;
+        }
+
         var albums = _library
             .Where(t => !string.IsNullOrWhiteSpace(t.Album))
             .GroupBy(t => t.Album!, StringComparer.OrdinalIgnoreCase)
@@ -2316,6 +2376,8 @@ public sealed partial class MainWindow : Window
             .OrderBy(a => a.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        _albumGridCache = albums;
+        _groupCacheDirty = false;
         AlbumGrid.ItemsSource = albums;
     }
 
@@ -2325,6 +2387,12 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void BuildArtistGrid()
     {
+        if (!_groupCacheDirty && _artistGridCache != null)
+        {
+            ArtistGrid.ItemsSource = _artistGridCache;
+            return;
+        }
+
         var artists = _library
             .Where(t => !string.IsNullOrWhiteSpace(t.Artist))
             .GroupBy(t => t.Artist!, StringComparer.OrdinalIgnoreCase)
@@ -2337,6 +2405,8 @@ public sealed partial class MainWindow : Window
             .OrderBy(a => a.ArtistName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        _artistGridCache = artists;
+        _groupCacheDirty = false;
         ArtistGrid.ItemsSource = artists;
     }
 
@@ -3266,7 +3336,7 @@ public sealed partial class MainWindow : Window
 
         _currentTrack = track;
         if (track != null)
-            _currentTrack.PropertyChanged += CurrentTrack_PropertyChanged;
+            track.PropertyChanged += CurrentTrack_PropertyChanged;
     }
 
     private void CurrentTrack_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -4499,6 +4569,11 @@ public sealed partial class MainWindow : Window
         {
             await action();
         }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is expected when the window closes or an operation
+            // is explicitly stopped; do not surface it as a user-facing error.
+        }
         catch (Exception ex)
         {
             ShowInfoBar($"{what}失败：{ex.Message}");
@@ -5370,6 +5445,7 @@ public sealed partial class MainWindow : Window
         _tray?.Dispose();
         _tray = null;
 
+        _metadataCts.Cancel();
         DisableHotkeys();
 
         // The desktop-lyrics overlay is a separate window — close it too,
@@ -5395,6 +5471,14 @@ public sealed partial class MainWindow : Window
         // Synchronous, unlike the periodic saves which run in the background: a
         // pending background save may not have finished by now, and PlayCount /
         // Favorite changes would be lost with it.
+        try
+        {
+            _librarySaveTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // The synchronous final save below is still attempted.
+        }
         PersistLibrary();
 
         // Persist window geometry + volume.
