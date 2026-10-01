@@ -94,7 +94,7 @@ public sealed partial class SoundEffectWindow : Window
             // cosmetic only
         }
 
-        var w = _settings.SoundFxW is >= 560 and <= 4000 ? _settings.SoundFxW : 720;
+        var w = _settings.SoundFxW is >= 620 and <= 4000 ? _settings.SoundFxW : 720;
         var h = _settings.SoundFxH is >= 500 and <= 4000 ? _settings.SoundFxH : 660;
         AppWindow.ResizeClient(new SizeInt32(w, h));
         _frameW = AppWindow.Size.Width - w;
@@ -103,7 +103,7 @@ public sealed partial class SoundEffectWindow : Window
 
         if (AppWindow.Presenter is OverlappedPresenter p)
         {
-            p.PreferredMinimumWidth = 560;
+            p.PreferredMinimumWidth = 620;
             p.PreferredMinimumHeight = 500;
         }
 
@@ -125,7 +125,7 @@ public sealed partial class SoundEffectWindow : Window
             var size = AppWindow.Size;
             var cw = size.Width - _frameW;
             var ch = size.Height - _frameH;
-            if (cw >= 560 && ch >= 500)
+            if (cw >= 620 && ch >= 500)
             {
                 _settings.SoundFxW = cw;
                 _settings.SoundFxH = ch;
