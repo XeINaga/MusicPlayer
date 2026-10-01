@@ -19,7 +19,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AssemblyName>MusicPlayer</AssemblyName>
     <RootNamespace>MusicPlayer</RootNamespace>
-    <Version>1.5.6</Version>
+    <Version>1.5.7</Version>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -117,6 +117,51 @@
       <VcDllP Include="$(SystemRoot)\System32\msvcp140.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(VcDllP)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
+  </Target>
+
+  <!--
+    Trim unused Windows App SDK AI/ML components from build AND publish.
+
+    The self-contained WinAppSDK 1.8 copies its full AI/ML stack into the
+    output: onnxruntime + DirectML (~38 MB) and the Windows.AI.* managed
+    projections. This player never loads them, so they are deleted right
+    after Build and again after Publish.
+
+    KEPT on purpose (verified by bisecting with 0xC0000135 startup exits):
+    Microsoft.Windows.Widgets.dll/.winmd/.Projection.dll and
+    Microsoft.InteractiveExperiences.Projection.dll — removing any of these
+    makes the self-contained bootstrapper fail with STATUS_DLL_NOT_FOUND
+    even though the app never uses Widgets. They total ~4.5 MB.
+
+    Wildcard ItemGroup includes only expand when each entry carries the
+    directory prefix, so the file list is explicit (the ->'$(dir)%(Identity)'
+    transform below adds the prefix). Keep in sync when upgrading the SDK.
+  -->
+  <PropertyGroup>
+    <_TrimAiFiles>onnxruntime.dll;onnxruntime_providers_shared.dll;DirectML.dll;Microsoft.ML.OnnxRuntime.dll;Microsoft.Windows.AI.AICapabilities.dll;Microsoft.Windows.AI.ContentModerationInternal.winmd;Microsoft.Windows.AI.ContentSafety.Projection.dll;Microsoft.Windows.AI.ContentSafety.dll;Microsoft.Windows.AI.ContentSafety.winmd;Microsoft.Windows.AI.Foundation.Projection.dll;Microsoft.Windows.AI.Foundation.winmd;Microsoft.Windows.AI.FoundationInternal.winmd;Microsoft.Windows.AI.GenerativeInternal.winmd;Microsoft.Windows.AI.Imaging.Projection.dll;Microsoft.Windows.AI.Imaging.dll;Microsoft.Windows.AI.Imaging.winmd;Microsoft.Windows.AI.MachineLearning.Projection.dll;Microsoft.Windows.AI.MachineLearning.dll;Microsoft.Windows.AI.MachineLearning.winmd;Microsoft.Windows.AI.Projection.dll;Microsoft.Windows.AI.Text.Projection.dll;Microsoft.Windows.AI.Text.dll;Microsoft.Windows.AI.Text.winmd;Microsoft.Windows.AI.winmd</_TrimAiFiles>
+    <_TrimAiDirs>NpuDetect;NVIDIA Corporation</_TrimAiDirs>
+  </PropertyGroup>
+
+  <Target Name="TrimUnusedComponents" AfterTargets="Build">
+    <ItemGroup>
+      <_TrimAiFileRaw Include="$(_TrimAiFiles)" />
+      <_TrimAiFile Include="@(_TrimAiFileRaw->'$(OutDir)%(Identity)')" />
+      <_TrimAiDirRaw Include="$(_TrimAiDirs)" />
+      <_TrimAiDir Include="@(_TrimAiDirRaw->'$(OutDir)%(Identity)')" />
+    </ItemGroup>
+    <Delete Files="@(_TrimAiFile)" ContinueOnError="true" />
+    <RemoveDir Directories="@(_TrimAiDir)" ContinueOnError="true" />
+  </Target>
+
+  <Target Name="TrimUnusedComponentsPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <_TrimAiFilePubRaw Include="$(_TrimAiFiles)" />
+      <_TrimAiFilePub Include="@(_TrimAiFilePubRaw->'$(PublishDir)%(Identity)')" />
+      <_TrimAiDirPubRaw Include="$(_TrimAiDirs)" />
+      <_TrimAiDirPub Include="@(_TrimAiDirPubRaw->'$(PublishDir)%(Identity)')" />
+    </ItemGroup>
+    <Delete Files="@(_TrimAiFilePub)" ContinueOnError="true" />
+    <RemoveDir Directories="@(_TrimAiDirPub)" ContinueOnError="true" />
   </Target>
 
   <!--

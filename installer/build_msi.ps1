@@ -17,38 +17,23 @@ Set-Location $root
 
 $publishDir = "bin/Release/net10.0-windows10.0.26100.0/win-x64/publish"
 $outMsi     = "installer/MusicPlayer.msi"
-$ffmpegUrl  = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-lgpl.zip"
-$ffmpegTemp = Join-Path ([System.IO.Path]::GetTempPath()) "MusicPlayer-ffmpeg"
+$ffmpegLite = Join-Path $PSScriptRoot "ffmpeg-lite/ffmpeg.exe"
 
 function Ensure-Ffmpeg {
-    $existing = Join-Path (Resolve-Path $publishDir -ErrorAction SilentlyContinue) "ffmpeg.exe"
-    if ($existing -and (Test-Path $existing)) {
-        Write-Host "FFmpeg already present: $existing" -ForegroundColor DarkGray
-        return
+    # The trimmed ffmpeg build (audio demux/decode + loudnorm only, ~2 MB,
+    # compiled from the FFmpeg 8.0 sources with --disable-everything) ships
+    # under installer/ffmpeg-lite. The old 131 MB BtbN full build is gone:
+    # ffmpeg.exe only does loudness scanning for the dynamic-volume feature —
+    # playback and the sound-effect filters run inside FFmpegInteropX's own
+    # av*.dll, never through ffmpeg.exe.
+    if (-not (Test-Path $ffmpegLite)) {
+        throw "installer/ffmpeg-lite/ffmpeg.exe is missing. Rebuild it from the FFmpeg 8.0 sources: configure with --disable-everything plus the audio demuxers/decoders, loudnorm/aformat/aresample filters, 'null' muxer and pcm_s16le encoder."
     }
 
-    New-Item -ItemType Directory -Path $ffmpegTemp -Force | Out-Null
-    $archive = Join-Path $ffmpegTemp "ffmpeg.zip"
-    $partial = "$archive.part"
-    $extract = Join-Path $ffmpegTemp "extract"
-    Write-Host "Downloading LGPL FFmpeg from GitHub Releases ..." -ForegroundColor Cyan
-    # curl supports HTTP range requests, so an interrupted download resumes
-    # from the existing .part file instead of starting over.
-    & curl.exe -L --fail --retry 3 --retry-delay 2 -C - -o $partial $ffmpegUrl
-    if ($LASTEXITCODE -ne 0) { throw "FFmpeg download failed (exit $LASTEXITCODE)" }
-    Move-Item $partial $archive -Force
-    if (Test-Path $extract) {
-        Remove-Item $extract -Recurse -Force
-    }
-    Expand-Archive -Path $archive -DestinationPath $extract -Force
-    $source = Get-ChildItem $extract -Recurse -Filter ffmpeg.exe | Select-Object -First 1
-    if ($null -eq $source) { throw "ffmpeg.exe was not found in the downloaded archive." }
-    Copy-Item $source.FullName (Join-Path $publishDir "ffmpeg.exe") -Force
-    $license = Get-ChildItem $extract -Recurse -File |
-        Where-Object { $_.Name -match '^LICENSE(\.txt)?$' } | Select-Object -First 1
-    if ($license) {
-        Copy-Item $license.FullName (Join-Path $publishDir "FFmpeg-LICENSE.txt") -Force
-    }
+    Copy-Item $ffmpegLite (Join-Path $publishDir "ffmpeg.exe") -Force
+    Copy-Item (Join-Path $PSScriptRoot "ffmpeg-lite/FFmpeg-LICENSE.txt") (Join-Path $publishDir "FFmpeg-LICENSE.txt") -Force
+    $size = [math]::Round((Get-Item (Join-Path $publishDir "ffmpeg.exe")).Length / 1MB, 1)
+    Write-Host "FFmpeg (trimmed build, $size MB) deployed to publish/" -ForegroundColor DarkGray
 }
 
 Write-Host "1/4  dotnet publish -c Release (self-contained, trims locales) ..." -ForegroundColor Cyan
