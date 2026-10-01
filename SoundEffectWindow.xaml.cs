@@ -223,13 +223,19 @@ public sealed partial class SoundEffectWindow : Window
                 TextAlignment = TextAlignment.Center,
                 Foreground = secondary,
             };
+            _eqValues[i] = value;
 
             // WinUI's Slider has no vertical orientation — rotate it. With a
             // -90° rotation the minimum sits at the bottom, the maximum on top.
+            // The negative horizontal margin shrinks the LAYOUT width to 46
+            // (190 - 2×72) so the slider's arrange slot equals its rotated
+            // visual bounding box; without it the 190px-wide control overflows
+            // the 46px host and the rendered track lands a column to the right.
             var slider = new Slider
             {
                 Width = 190,
                 Height = 46,
+                Margin = new Thickness(-72, 0, -72, 0),
                 Minimum = -12,
                 Maximum = 12,
                 StepFrequency = 0.5,
@@ -325,7 +331,7 @@ public sealed partial class SoundEffectWindow : Window
         }
 
         var fx = FxGrid.Children;
-        for (var i = 0; i < EffectDefs.Length && i * 1 < fx.Count; i++)
+        for (var i = 0; i < EffectDefs.Length && i < fx.Count; i++)
         {
             if (fx[i] is StackPanel cell && cell.Children.Count >= 2 && cell.Children[1] is Slider s)
             {
