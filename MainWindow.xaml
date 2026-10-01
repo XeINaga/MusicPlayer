@@ -112,27 +112,9 @@
                 <Setter Property="CornerRadius" Value="{StaticResource RadiusSmall}" />
             </Style>
 
-            <!-- Settings section card -->
-            <Style x:Key="SettingsCard" TargetType="Border">
-                <Setter Property="Background" Value="{ThemeResource CardBg}" />
-                <Setter Property="BorderBrush" Value="{ThemeResource BorderSoft}" />
-                <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="CornerRadius" Value="{StaticResource RadiusMedium}" />
-                <Setter Property="Padding" Value="22,18" />
-            </Style>
-
-            <Style x:Key="SettingsCardTitle" TargetType="TextBlock">
-                <Setter Property="FontSize" Value="15" />
-                <Setter Property="FontWeight" Value="SemiBold" />
-                <Setter Property="Foreground" Value="{ThemeResource TextPrimary}" />
-                <Setter Property="Margin" Value="0,0,0,14" />
-            </Style>
-
-            <Style x:Key="SettingsHint" TargetType="TextBlock">
-                <Setter Property="Foreground" Value="{ThemeResource TextSecondary}" />
-                <Setter Property="FontSize" Value="12" />
-                <Setter Property="TextWrapping" Value="Wrap" />
-            </Style>
+            <!-- Settings section card styles (SettingsCard/SettingsCardTitle/
+                 SettingsHint) now live in Themes/SukiTheme.xaml — shared with
+                 the SoundEffectWindow panel. -->
 
             <DataTemplate x:Key="TrackCardTemplate">
                 <Grid Width="164" Margin="10,10,10,8" RightTapped="TrackItem_RightTapped">
@@ -734,6 +716,14 @@
                                                   ToolTipService.ToolTip="使用歌曲预先保存的 ReplayGain 响度信息，在播放时应用固定增益，不改变歌曲时间轴。" />
                                     <StackPanel Spacing="6" Margin="18,6,0,0">
                                         <TextBlock Text="使用歌曲内嵌的 ReplayGain 信息；没有该信息的歌曲保持原始音量。播放时只应用固定增益，不会跳过歌曲结尾。" Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+                                        <TextBlock Text="音效（均衡器 / 混响 / 环绕 / 超重低音）" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />
+                                        <Button Content="打开音效面板" Click="SoundFxOpen_Click" FontSize="12"
+                                                Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                                                Background="{ThemeResource ButtonBackground}"
+                                                BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1"
+                                                ToolTipService.ToolTip="10 段图形均衡器与风格预设、超重低音、混响、环绕等效果" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <TextBlock Text="定时停止播放" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />

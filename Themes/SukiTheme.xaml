@@ -118,4 +118,30 @@
     <CornerRadius x:Key="RadiusLarge">16</CornerRadius>
     <CornerRadius x:Key="RadiusPill">20</CornerRadius>
     <Thickness x:Key="CardPadding">18,16</Thickness>
+
+    <!-- Settings section card styles. Shared app-wide (MainWindow's settings
+         page and the SoundEffectWindow panel) so secondary windows render
+         cards identical to the main window without duplicating the styles.
+         They only reference {ThemeResource} keys above, so a single
+         theme-independent definition works for both themes. -->
+    <Style x:Key="SettingsCard" TargetType="Border">
+        <Setter Property="Background" Value="{ThemeResource CardBg}" />
+        <Setter Property="BorderBrush" Value="{ThemeResource BorderSoft}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{StaticResource RadiusMedium}" />
+        <Setter Property="Padding" Value="22,18" />
+    </Style>
+
+    <Style x:Key="SettingsCardTitle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{ThemeResource TextPrimary}" />
+        <Setter Property="Margin" Value="0,0,0,14" />
+    </Style>
+
+    <Style x:Key="SettingsHint" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{ThemeResource TextSecondary}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
 </ResourceDictionary>

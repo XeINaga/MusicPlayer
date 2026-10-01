@@ -449,10 +449,10 @@ public sealed class PlaybackService
     /// <summary>
     /// Load the track at the current index. Native-MF formats go through
     /// StorageFile (fixes paths with '#'/'?'), everything else through FFmpeg.
-    /// With <see cref="LoudnessNormalization"/> on, EVERY format routes through
-    /// FFmpeg so the loudnorm filter can equalize loudness; if FFmpeg then
-    /// fails on a normally-native file, we silently fall back to the system
-    /// decoder (without the filter) instead of failing the track.
+    /// With a sound-effect chain active, EVERY format routes through FFmpeg so
+    /// the filters apply; if FFmpeg then fails on a normally-native file, we
+    /// silently fall back to the system decoder (without effects) instead of
+    /// failing the track.
     /// Async: a superseded load (fast track switching) aborts silently.
     /// </summary>
     private async void LoadCurrent(TimeSpan? resume = null, bool play = false)
@@ -470,13 +470,17 @@ public sealed class PlaybackService
         IMediaPlaybackSource? source = null;
         MediaSource? nativeSource = null;
         FFmpegMediaSource? ffmpegSource = null;
-        var forceFfmpeg = false;
+        // Sound effects are FFmpeg audio filters, so the track must go through
+        // the FFmpeg decoder whenever a chain is active. Null chain = system
+        // decoder (native path), same as when all effects are off.
+        var filters = SoundFx.BuildFilterChain();
+        var forceFfmpeg = filters != null;
 
         try
         {
             if (forceFfmpeg || FfmpegExtensions.Contains(Path.GetExtension(path)))
             {
-                ffmpegSource = await CreateFfmpegSourceAsync(path);
+                ffmpegSource = await CreateFfmpegSourceAsync(path, filters);
                 if (token != _loadToken) { ffmpegSource.Dispose(); return; }
                 source = ffmpegSource.CreateMediaPlaybackItem();
             }
@@ -550,10 +554,19 @@ public sealed class PlaybackService
         }
     }
 
-    /// <summary>Create an FFmpeg source for formats not supported by Media Foundation.</summary>
-    private async Task<FFmpegMediaSource> CreateFfmpegSourceAsync(string path)
+    /// <summary>
+    /// Create an FFmpeg source for formats not supported by Media Foundation,
+    /// or for any format when a sound-effect filter chain is active.
+    /// AutoExtendDuration keeps the timeline honest when a filter graph would
+    /// otherwise report a wrong declared duration.
+    /// </summary>
+    private async Task<FFmpegMediaSource> CreateFfmpegSourceAsync(string path, string? filters)
     {
-        return await FFmpegMediaSource.CreateFromUriAsync(path);
+        var config = new MediaSourceConfig();
+        config.General.AutoExtendDuration = true;
+        if (!string.IsNullOrEmpty(filters))
+            config.Audio.FFmpegAudioFilters = filters;
+        return await FFmpegMediaSource.CreateFromUriAsync(path, config);
     }
 
     /// <summary>

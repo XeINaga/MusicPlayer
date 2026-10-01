@@ -144,6 +144,11 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _settingsSaveTimer = new();
     private readonly DispatcherTimer _sleepTimer = new();
     private readonly DispatcherTimer _searchDebounceTimer = new();
+    // Sound-effect window changes land here: one reload 600ms after the last
+    // knob stops moving, so dragging a slider doesn't rebuild the source
+    // dozens of times. The filter chain only exists inside the media source,
+    // so a change must be heard via a reload of the current track.
+    private readonly DispatcherTimer _soundFxApplyTimer = new();
     private int _displayRefreshVersion;
     private readonly CancellationTokenSource _metadataCts = new();
     private static readonly Brush CoverPlaceholder =
@@ -155,6 +160,10 @@ public sealed partial class MainWindow : Window
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _ = CoverCache.TrimAsync();
+
+        // Sound-effect DSP state mirrors the persisted settings; PlaybackService
+        // reads it every track load to decide the decoder route + filter chain.
+        SoundFx.LoadFrom(_settings);
 
         PlaylistsList.ItemsSource = _playlists;
         TrackGrid.ItemsSource = _displayTracks;
@@ -188,6 +197,9 @@ public sealed partial class MainWindow : Window
             _searchText = SearchBox.Text.Trim();
             _ = RefreshDisplayAsync(true);
         };
+
+        _soundFxApplyTimer.Interval = TimeSpan.FromMilliseconds(600);
+        _soundFxApplyTimer.Tick += OnSoundFxApplyTick;
 
         // Restore persisted volume (so it matches the last session).
         _playback.Volume = _settings.Volume;
@@ -5181,6 +5193,42 @@ public sealed partial class MainWindow : Window
         _settingsSaveTimer.Stop();
         _settingsSaveTimer.Start();
     }
+
+    /// <summary>
+    /// The sound-effect window calls this after any knob changes. Coalesced:
+    /// the current track is re-loaded (resuming at the same position) once the
+    /// user stops adjusting, because the FFmpeg filter chain is baked into the
+    /// media source at load time.
+    /// </summary>
+    public void ApplySoundFxDebounced()
+    {
+        _soundFxApplyTimer.Stop();
+        _soundFxApplyTimer.Start();
+    }
+
+    private void OnSoundFxApplyTick(object? sender, object e)
+    {
+        _soundFxApplyTimer.Stop();
+        if (_playback.CurrentIndex >= 0)
+            _playback.ReloadCurrent();
+    }
+
+    /// <summary>Open the sound-effect panel (centered on this window).</summary>
+    private void SoundFxOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (_soundFxWindow != null)
+        {
+            _soundFxWindow.Activate();
+            return;
+        }
+
+        _soundFxWindow = new SoundEffectWindow(_settings,
+            WinRT.Interop.WindowNative.GetWindowHandle(this), ApplySoundFxDebounced);
+        _soundFxWindow.Closed += (_, _) => _soundFxWindow = null;
+        _soundFxWindow.Activate();
+    }
+
+    private SoundEffectWindow? _soundFxWindow;
 
     private void AutoStartToggle_Toggled(object sender, RoutedEventArgs e)
     {
