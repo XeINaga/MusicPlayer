@@ -96,6 +96,32 @@ public sealed class AppSettings
 
     public int DynNormWindow { get; set; } = 31;
 
+    // ---------- 音效（图形均衡器 + 效果旋钮，镜像 SoundFx 的持久化层） ----------
+
+    /// <summary>Sound effects master switch. When off, tracks load through the
+    /// system decoder and no FFmpeg audio filter chain is built.</summary>
+    public bool SoundEffectsEnabled { get; set; }
+
+    /// <summary>Ten EQ band gains in dB (-12..+12), centers 31Hz..16kHz.</summary>
+    public List<double> EqGains { get; set; } = new() { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+    /// <summary>Last used EQ preset name ("Off".."Vocal", or "Custom").</summary>
+    public string EqPreset { get; set; } = "Off";
+
+    /// <summary>Effect knobs, 0..100 (Balance -100..100): high-frequency
+    /// detail / aecho reverb / stereowiden / bass shelf / compressor punch /
+    /// output channel balance.</summary>
+    public double EffectHiFi { get; set; }
+    public double EffectReverb { get; set; }
+    public double EffectSurround { get; set; }
+    public double EffectBass { get; set; }
+    public double EffectPunch { get; set; }
+    public double EffectBalance { get; set; }
+
+    /// <summary>Sound-effect window client size (resizable; remembered).</summary>
+    public int SoundFxW { get; set; } = 720;
+    public int SoundFxH { get; set; } = 660;
+
     /// <summary>
     /// Show the audio FILE NAME's title instead of the embedded tag title in
     /// track lists (useful when tags are wrong, e.g. katakana conversions).

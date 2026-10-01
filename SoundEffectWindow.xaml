@@ -1,0 +1,82 @@
+<Window
+    x:Class="MusicPlayer.SoundEffectWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="音效">
+
+    <!-- Same design tokens as the main window (SukiTheme.xaml is merged at the
+         app level, so every {ThemeResource} here follows the window theme). -->
+    <Grid x:Name="Root" Background="{ThemeResource AppBackground}" Padding="20,14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Header: title + master switch + reset -->
+        <Grid Grid.Row="0">
+            <StackPanel Orientation="Horizontal" Spacing="14">
+                <TextBlock Text="音效" FontSize="20" FontWeight="SemiBold"
+                           Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
+                <ToggleSwitch x:Name="EnabledToggle" OnContent="开" OffContent="关"
+                              Margin="0,8,0,0" Toggled="EnabledToggle_Toggled"
+                              ToolTipService.ToolTip="开启后所有歌曲改用 FFmpeg 解码以应用音效；关闭后回到系统解码器。" />
+            </StackPanel>
+            <Button x:Name="ResetBtn" Content="重置全部" Click="ResetAll_Click"
+                    HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12"
+                    Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                    Background="{ThemeResource ButtonBackground}"
+                    BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+        </Grid>
+
+        <ScrollViewer Grid.Row="1" Margin="0,10,0,0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Spacing="14">
+
+                <!-- Style presets -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="推荐音效（均衡器预设）" Style="{StaticResource SettingsCardTitle}" />
+                        <StackPanel x:Name="PresetPanel" Spacing="8" />
+                    </StackPanel>
+                </Border>
+
+                <!-- 10-band graphic equalizer -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel Spacing="10">
+                        <Grid>
+                            <TextBlock Text="均衡器" Style="{StaticResource SettingsCardTitle}" />
+                            <TextBlock x:Name="EqHintText" HorizontalAlignment="Right"
+                                       Style="{StaticResource SettingsHint}"
+                                       Text="拖动滑杆调整各频段增益（-12 ~ +12 dB）" />
+                        </Grid>
+                        <!-- Band columns (rotated sliders) are built in code -->
+                        <StackPanel x:Name="EqPanel" Orientation="Horizontal"
+                                    HorizontalAlignment="Center" Spacing="4" />
+                        <TextBlock x:Name="EqDisabledHint" Style="{StaticResource SettingsHint}"
+                                   Text="音效未开启 — 打开顶部开关后生效" Visibility="Collapsed" />
+                    </StackPanel>
+                </Border>
+
+                <!-- Effect knobs (2-column grid built in code) -->
+                <Border Style="{StaticResource SettingsCard}">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="效果" Style="{StaticResource SettingsCardTitle}" />
+                        <Grid x:Name="FxGrid" ColumnSpacing="36" RowSpacing="14">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock Text="调节后当前歌曲会短暂重新载入以应用音效；“超重低音 / 动态推进”等效果与动态音量（响度均衡）可同时使用。"
+                           Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Window>
