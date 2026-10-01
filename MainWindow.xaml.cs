@@ -126,6 +126,14 @@ public sealed partial class MainWindow : Window
     // launch-resumes (which start past the threshold) never inflate counts.
     private Track? _pendingCountTrack;
     private double _pendingCountStartSec;
+    // Scrobble eligibility is tracked SEPARATELY from the play counter: the
+    // counter clears itself at the 30s threshold, which would make the
+    // halfway-point scrobble unreachable for any track longer than a minute —
+    // and the stale armed reference made every position tick re-enqueue the
+    // same scrobble (hundreds of duplicates per track). One-shot flag instead.
+    private Track? _pendingScrobbleTrack;
+    private double _pendingScrobbleStartSec;
+    private bool _scrobbleQueued;
     private bool _suppressNextRecent;
     // Consecutive playback failures (stop skipping when the whole queue is bad).
     private int _consecutiveFailures;
@@ -1324,11 +1332,16 @@ public sealed partial class MainWindow : Window
                 {
                     if (!byPath.TryGetValue(p, out var t))
                     {
-                        t = new Track(p);
-                        t.LyricPath = LyricBindingStore.Get(p);
-                        _library.Add(t);
+                        // Songs living only inside a playlist must pass the
+                        // same guards as the rest of the library: skip files
+                        // that no longer exist and entries the user removed
+                        // on purpose (LibraryExclusions) — otherwise both
+                        // kinds resurrected here on every launch. ResolveTrack
+                        // registers the new track in _library itself.
+                        t = ResolveTrack(p);
+                        if (t == null)
+                            continue;
                         byPath[p] = t;
-                        LoadMetadataFor(t);
                     }
                     pl.Tracks.Add(t);
                 }
@@ -2523,6 +2536,14 @@ public sealed partial class MainWindow : Window
         {
             _boundQueue = _playback.Queue;
             QueueList.ItemsSource = _playback.Queue;
+            // The queue is frequently the LIVE library itself (session
+            // restore, plain library play). Drag-reordering or removing from
+            // the queue panel then mutates the LIBRARY — without writing the
+            // removal to LibraryExclusions or persisting — while a snapshot
+            // queue should just reorder freely. Gate reordering by identity;
+            // removal goes through the library path in QueueRemove_Click.
+            QueueList.CanReorderItems = !ReferenceEquals(_playback.Queue, _library);
+            QueueList.AllowDrop = QueueList.CanReorderItems;
         }
 
         QueueList.SelectedIndex = _playback.CurrentIndex;
@@ -2870,6 +2891,16 @@ public sealed partial class MainWindow : Window
         if (_playback.Queue is not IList<Track> q)
             return; // no queue — nothing to remove from
 
+        // When the queue IS the library, "remove from queue" means the same
+        // thing to the user as "remove from library": go through the library
+        // path (exclude + persist + refresh) instead of silently mutating the
+        // live collection behind the UI's back.
+        if (ReferenceEquals(q, _library))
+        {
+            RemoveFromLibraryPermanently(track);
+            return;
+        }
+
         var idx = q.IndexOf(track);
         if (idx < 0)
             return;
@@ -2891,6 +2922,38 @@ public sealed partial class MainWindow : Window
                 ResetNowPlaying();
             }
         }
+    }
+
+    /// <summary>
+    /// Remove one track from the library the way the batch-remove path does:
+    /// exclusion list, persistence, UI refresh. Used by the queue panel when
+    /// the queue and the library are the same collection.
+    /// </summary>
+    private void RemoveFromLibraryPermanently(Track track)
+    {
+        var idx = _library.IndexOf(track);
+        if (idx < 0)
+            return;
+
+        if (!_settings.LibraryExclusions.Contains(track.Path, StringComparer.OrdinalIgnoreCase))
+            _settings.LibraryExclusions.Add(track.Path);
+        SettingsStore.Save(_settings);
+
+        _library.RemoveAt(idx);
+        PersistLibrary();
+
+        // The playing track itself: stop instead of silently continuing.
+        if (_playback.Queue != null && _playback.CurrentIndex >= 0
+            && _playback.CurrentIndex < _playback.Queue.Count
+            && ReferenceEquals(_playback.Queue[_playback.CurrentIndex], track))
+        {
+            _playback.Clear();
+            _boundQueue = null;
+            QueueList.ItemsSource = null;
+            ResetNowPlaying();
+        }
+
+        RefreshDisplay();
     }
 
     // ---------- Desktop lyrics ----------
@@ -3040,6 +3103,9 @@ public sealed partial class MainWindow : Window
                 {
                     _pendingCountTrack = t;
                     _pendingCountStartSec = _playback.Position.TotalSeconds;
+                    _pendingScrobbleTrack = t;
+                    _pendingScrobbleStartSec = _pendingCountStartSec;
+                    _scrobbleQueued = false;
                 }
 
                 // Recent-play bookkeeping (skip suppressed during session restore).
@@ -3161,11 +3227,15 @@ public sealed partial class MainWindow : Window
 
         // Scrobble: like the play counter, only when this play session started
         // before the halfway point and has now crossed it. Resumed sessions
-        // (starting past half) and sub-threshold skips never qualify.
-        if (_isPlaying && dur.TotalSeconds > 30 && _pendingCountTrack != null &&
-            pos.TotalSeconds >= dur.TotalSeconds / 2.0 && _pendingCountStartSec < dur.TotalSeconds / 2.0)
+        // (starting past half) and sub-threshold skips never qualify. Tracked
+        // independently of the play counter (which clears at 30s) and one-shot
+        // via _scrobbleQueued — the old shared-reference version re-enqueued
+        // the same track on every tick when resuming between 30s and half.
+        if (_isPlaying && !_scrobbleQueued && dur.TotalSeconds > 30 && _pendingScrobbleTrack != null &&
+            pos.TotalSeconds >= dur.TotalSeconds / 2.0 && _pendingScrobbleStartSec < dur.TotalSeconds / 2.0)
         {
-            EnqueueScrobble(_pendingCountTrack);
+            EnqueueScrobble(_pendingScrobbleTrack);
+            _scrobbleQueued = true;
         }
 
         if ((DateTime.Now - _lastProgressSave).TotalSeconds >= 3)
@@ -4006,10 +4076,16 @@ public sealed partial class MainWindow : Window
             return false;
         }
 
-        track.LyricPath = null; // drop an old manual binding; auto-detect the new file
         string? extraNote = null;
         try
         {
+            // Drop an old manual binding only AFTER the new file actually
+            // saved: LyricBindingStore wins over auto-detection on restart,
+            // so clearing it before the write would leave the user with NO
+            // lyrics at all when the save fails (read-only folder, ...).
+            track.LyricPath = null;
+            LyricBindingStore.Clear(track.Path);
+
             var fillMode = LyricPreferences.ParseFillMode(_settings.LyricFillMode);
             SaveLyricFiles(track, lyric.Value.Lyric, lyric.Value.Trans, lyric.Value.Roma, fillMode);
 
@@ -4211,25 +4287,36 @@ public sealed partial class MainWindow : Window
 
         foreach (var t in tracks)
         {
-            if (!HasLocalLyric(t))
+            try
             {
-                noLyric.Add(t);
-                continue;
-            }
+                if (!HasLocalLyric(t))
+                {
+                    noLyric.Add(t);
+                    continue;
+                }
 
-            var doc = LyricsParser.Parse(t.Path, t.LyricPath, forcedEnc);
-            if (doc == null || doc.Lines.Count == 0)
+                var doc = LyricsParser.Parse(t.Path, t.LyricPath, forcedEnc);
+                if (doc == null || doc.Lines.Count == 0)
+                {
+                    // A lyric file exists but could not be parsed — treat as missing
+                    // so the auto-download path can replace it.
+                    noLyric.Add(t);
+                    continue;
+                }
+
+                bool hasTrans = doc.Lines.Any(l => !string.IsNullOrWhiteSpace(l.Translation));
+                bool hasRoma = doc.Lines.Any(l => !string.IsNullOrWhiteSpace(l.Romaji));
+                if (!hasTrans || !hasRoma)
+                    incomplete.Add(t);
+            }
+            catch
             {
-                // A lyric file exists but could not be parsed — treat as missing
-                // so the auto-download path can replace it.
+                // A vanished/locked lyric file (TOCTOU between HasLocalLyric's
+                // File.Exists and the actual read) must not escape into the
+                // async-void caller as an unhandled exception. Treat as
+                // "no lyric" so the download path can rebuild it.
                 noLyric.Add(t);
-                continue;
             }
-
-            bool hasTrans = doc.Lines.Any(l => !string.IsNullOrWhiteSpace(l.Translation));
-            bool hasRoma = doc.Lines.Any(l => !string.IsNullOrWhiteSpace(l.Romaji));
-            if (!hasTrans || !hasRoma)
-                incomplete.Add(t);
         }
 
         return (noLyric, incomplete);
@@ -4315,10 +4402,28 @@ public sealed partial class MainWindow : Window
         // full parse of each lyric file), which is seconds of blocking I/O on a
         // large list — run it off the UI thread so the window stays responsive.
         LyricStatusText.Text = "正在扫描曲库…";
-        var (noLyric, incomplete) = await Task.Run(() => ClassifyLyricTracks(snapshot));
+        List<Track> noLyric, incomplete;
+        try
+        {
+            (noLyric, incomplete) = await Task.Run(() => ClassifyLyricTracks(snapshot));
+        }
+        catch (Exception ex)
+        {
+            // The scan reads every lyric file; one locked/vanished file used to
+            // escape as an unhandled async-void exception (app "crash" dialog)
+            // AND left _batchLyricRunning stuck, dead-locking the start button.
+            _batchLyricRunning = false;
+            UpdateLyricSummary();
+            LyricStatusText.Text = $"扫描歌词失败：{ex.Message}";
+            return;
+        }
 
         if (noLyric.Count == 0 && incomplete.Count == 0)
         {
+            // Early-out used to leave _batchLyricRunning set — the start
+            // button stayed disabled until the app was restarted.
+            _batchLyricRunning = false;
+            UpdateLyricSummary();
             LyricStatusText.Text = "所有歌曲的歌词（含翻译和罗马音）均已齐全。";
             ShowInfoBar("所有歌曲的歌词（含翻译和罗马音）均已齐全。");
             return;

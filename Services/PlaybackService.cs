@@ -492,9 +492,14 @@ public sealed class PlaybackService
                 source = nativeSource;
             }
 
-            SetTrackGain(LoudnessNormalization
+            // Resolve the gain BEFORE checking the token: a cold loudness-cache
+            // miss can run ffmpeg for up to two minutes, and applying the stale
+            // track's gain after a newer load already swapped sources (the old
+            // order did exactly that) polluted the live volume until the next
+            // track change.
+            var gainDb = LoudnessNormalization
                 ? await LoudnessCache.GetGainDbAsync(path)
-                : 0);
+                : 0;
 
             if (token != _loadToken)
             {
@@ -502,6 +507,8 @@ public sealed class PlaybackService
                 nativeSource?.Dispose();
                 return;
             }
+
+            SetTrackGain(gainDb);
 
             // Swap sources, then release the previous FFmpeg wrapper.
             var oldFfmpeg = _ffmpegSource;
@@ -972,10 +979,13 @@ public sealed class PlaybackService
                 _fadeElapsed = TimeSpan.Zero;
                 _fadeFrom = 0;
                 _fadeTo = _pendingTargetVolume;
+                // Stop here: the old source is still attached (LoadCurrent is
+                // async and can take hundreds of ms), and the next tick would
+                // otherwise start the fade-in against the OLD track — plus
+                // SetTrackGain would snap its volume straight to the target.
+                // OnMediaOpened restarts the timer for the fade-in.
+                _fadeTimer.Stop();
                 LoadCurrent(play: true);
-                // Fade-in will be driven by the same timer (restarted below).
-                // However, LoadCurrent is async; wait for MediaOpened to start
-                // the fade-in so the player has actually decoded the first frame.
                 return;
             }
         }
@@ -1023,7 +1033,12 @@ public sealed class PlaybackService
     {
         var gain = Math.Pow(10, Math.Clamp(gainDb, -12, 6) / 20.0);
         _trackGain = Math.Clamp(gain, 0.25, 2.0);
-        _player.Volume = _targetVolume * _trackGain;
+        // While a crossfade hand-off is pending (fade-out done, new source
+        // still loading) the OLD source is still attached — touching
+        // _player.Volume here would snap it back to full volume mid-hand-off.
+        // OnMediaOpened's fade-in applies _pendingTargetVolume instead.
+        if (_pendingCrossfadeIndex < 0)
+            _player.Volume = _targetVolume * _trackGain;
         if (!_fadingOut && _fadeTimer.IsEnabled)
             _fadeTo = _targetVolume * _trackGain;
         _pendingTargetVolume = _targetVolume * _trackGain;
