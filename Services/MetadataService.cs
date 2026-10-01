@@ -25,6 +25,9 @@ public static class MetadataService
 
     /// <summary>
     /// Resolve metadata for <paramref name="track"/> asynchronously.
+    /// Reads go through <see cref="MetadataCache"/>: a warm start serves
+    /// unchanged files from the persistent cache (no disk tag read at all)
+    /// and only new/modified files hit TagLib.
     /// </summary>
     public static async Task LoadAsync(Track track, DispatcherQueue dispatcher, CancellationToken ct = default)
     {
@@ -37,6 +40,19 @@ public static class MetadataService
         // --- Background: read tags (may touch disk / decode) ---
         await Task.Run(() =>
         {
+            long mtime = 0;
+            try
+            {
+                mtime = System.IO.File.GetLastWriteTimeUtc(track.Path).Ticks;
+            }
+            catch
+            {
+                // unreadable file → treated as cache miss, TagLib will fail the same way
+            }
+
+            if (MetadataCache.TryGet(track.Path, mtime, out title, out artist, out album, out duration))
+                return; // warm path: cover comes from the disk cache below
+
             try
             {
                 using var file = TagLib.File.Create(track.Path);
@@ -64,6 +80,9 @@ public static class MetadataService
             {
                 // Leave defaults on any read failure (unsupported format, DRM, ...).
             }
+
+            if (mtime != 0)
+                MetadataCache.Put(track.Path, mtime, title, artist, album, duration);
         }, ct);
 
         if (ct.IsCancellationRequested)
