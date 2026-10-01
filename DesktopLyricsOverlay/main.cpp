@@ -651,7 +651,10 @@ static void ApplyCommand(const std::string& line) {
         if (f && f->type == JsonVal::NUM)  g_state.font = (float)f->num;
         if (c && c->type == JsonVal::STR)  g_state.color = ParseColor(c->str);
         if (b && b->type == JsonVal::NUM)  g_state.bg = (float)b->num;
-        if (bo && bo->type == JsonVal::BOOL) g_state.bold = bo->boolean;
+        // bold arrives as a number (1/0) from the C# side — same compat as
+        // vertical/click below; BOOL-only parsing silently dropped every
+        // "bold on" toggle.
+        if (bo) g_state.bold = (bo->type == JsonVal::BOOL) ? bo->boolean : (bo->type == JsonVal::NUM && bo->num != 0);
         if (al && al->type == JsonVal::STR) g_state.alignLeft = (al->str == "Left");
         if (ve) g_state.vertical = (ve->type == JsonVal::BOOL ? ve->boolean : (ve->type == JsonVal::NUM && ve->num != 0));
         if (uw && uw->type == JsonVal::NUM) g_state.userWidth = (int)uw->num;
