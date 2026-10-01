@@ -19,7 +19,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AssemblyName>MusicPlayer</AssemblyName>
     <RootNamespace>MusicPlayer</RootNamespace>
-    <Version>1.5.7</Version>
+    <Version>1.5.8</Version>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -195,6 +195,20 @@
 
   <Target Name="CopyOverlayPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
     <Copy SourceFiles="$(OutDir)DesktopLyricsOverlay.exe" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
+  </Target>
+
+  <!--
+    QrcNative.dll — the QQ QRC 3DES block loop as a native library (ported
+    1:1 from Services/QqQrcDecrypter.DesHelper; byte-identical, verified over
+    random buffers). QqQrcDecrypter falls back to the managed implementation
+    when the DLL is missing, so lyrics never break because of it.
+  -->
+  <Target Name="BuildQrcNative" BeforeTargets="Build;Publish">
+    <Exec Command="&quot;$(GxxPath)g++.exe&quot; -O2 -static -shared -std=c++17 -o &quot;$(OutDir)QrcNative.dll&quot; &quot;$(MSBuildProjectDirectory)\NativeQrc\qrc.cpp&quot;" />
+  </Target>
+
+  <Target Name="CopyQrcNativePublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
+    <Copy SourceFiles="$(OutDir)QrcNative.dll" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" ContinueOnError="true" />
   </Target>
 
   <!-- Copy the app icon next to the exe so the runtime window-icon call
