@@ -231,6 +231,11 @@ public sealed partial class OnlineLyricWindow : Window
         var kw = (KeywordBox.Text ?? "").Trim();
         if (kw.Length == 0)
             return;
+        // Enter in the keyword box bypasses the disabled button — a second
+        // search racing the first interleaved Items mutations and let the
+        // SLOWER response overwrite the newer keyword's results.
+        if (!SearchBtn.IsEnabled)
+            return;
 
         SearchBtn.IsEnabled = false;
         StatusText.Text = $"搜索中…（{SourceCombo.SelectedIndex switch { 1 => "网易云", 2 => "LRCLIB", _ => "QQ音乐" }}）";
@@ -288,12 +293,27 @@ public sealed partial class OnlineLyricWindow : Window
 
     private void ResultsList_DoubleTapped(object sender, Microsoft.UI.Xaml.Input.DoubleTappedRoutedEventArgs e)
     {
-        // The double tap first selects the row — take the selection.
-        if (ResultsList.SelectedItem is LyricSearchRow row)
+        // Only confirm when the double tap landed ON a row: double-tapping
+        // empty space kept the previous selection and instantly downloaded it.
+        if (e.OriginalSource is FrameworkElement fe &&
+            FindAncestorListViewItem(fe) is { } container &&
+            container.Content is LyricSearchRow row)
         {
             _selected = row;
+            ResultsList.SelectedItem = row;
             Confirm();
         }
+    }
+
+    private static Microsoft.UI.Xaml.Controls.ListViewItem? FindAncestorListViewItem(Microsoft.UI.Xaml.DependencyObject? start)
+    {
+        while (start != null)
+        {
+            if (start is Microsoft.UI.Xaml.Controls.ListViewItem lvi)
+                return lvi;
+            start = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(start);
+        }
+        return null;
     }
 
     private void DownloadBtn_Click(object sender, RoutedEventArgs e) => Confirm();

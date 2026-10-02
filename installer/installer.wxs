@@ -3,7 +3,7 @@
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="MusicPlayer"
            Manufacturer="MusicPlayer"
-           Version="1.5.9.0"
+           Version="1.5.10.0"
            Language="1033"
            Codepage="65001"
            UpgradeCode="{6F3E8C2A-1B4D-4E7A-9C5B-2D8E0F1A3B4C}"
@@ -104,11 +104,17 @@
           <RegistryValue Root="HKLM" Key="SOFTWARE\MusicPlayer" Name="InstallPath"
                          Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         </Component>
-        <!-- Runtime log folder. Application logs are always written here. -->
+        <!-- Runtime log folder. Application logs are always written here.
+             PermissionEx grants Users modify access: the app runs asInvoker
+             under Program Files, and without this ACL every log write failed
+             silently (AppLog's fallback only kicks in when the directory
+             probe fails — writes here looked writable to CreateDirectory but
+             the app never ran elevated). -->
         <Directory Id="LogDir" Name="log">
           <!-- Fixed GUID: components with a directory KeyPath cannot use "*". -->
           <Component Id="LogFolder" Guid="A4C2E9F1-7B3D-4E58-9A61-C8D40E2F5B73">
               <CreateFolder />
+              <util:PermissionEx User="Users" GenericWrite="yes" GenericRead="yes" />
               <RemoveFile Id="RemoveLogFiles" Name="*" On="uninstall" />
             </Component>
         </Directory>

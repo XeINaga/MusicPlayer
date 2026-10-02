@@ -37,6 +37,11 @@ function Ensure-Ffmpeg {
 }
 
 Write-Host "1/4  dotnet publish -c Release (self-contained, trims locales) ..." -ForegroundColor Cyan
+# DeleteExistingFiles=false keeps incremental publish fast, but stale files
+# from older builds then leak into files.wxs and ship in the MSI. Wipe first.
+if (Test-Path $publishDir) {
+    Remove-Item "$publishDir/*" -Recurse -Force -ErrorAction SilentlyContinue
+}
 dotnet publish -c Release
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
 Ensure-Ffmpeg

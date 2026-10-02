@@ -63,14 +63,21 @@ internal static class SingleInstance
     /// </summary>
     private static void SignalExistingInstance()
     {
-        try
+        // The first instance may still be initializing (event not created yet):
+        // a single lost signal made the second launch exit without raising any
+        // window. Retry briefly before giving up.
+        for (var attempt = 0; attempt < 10; attempt++)
         {
-            using var evt = EventWaitHandle.OpenExisting(EventName);
-            evt.Set();
-        }
-        catch
-        {
-            // Event may not exist yet if the first instance is still initializing.
+            try
+            {
+                using var evt = EventWaitHandle.OpenExisting(EventName);
+                evt.Set();
+                return;
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+            {
+                Thread.Sleep(200);
+            }
         }
     }
 

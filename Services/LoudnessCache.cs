@@ -16,21 +16,45 @@ internal static class LoudnessCache
 {
     private static string CacheFile => Path.Combine(DataLocation.Root, "loudness.json");
 
+    // Shared in-memory copy: two overlapping loads (fast track switches) used
+    // to each load their own dictionary and the later full-file save wiped the
+    // earlier entry — those files were rescanned on every play. Keys compare
+    // case-insensitively (same file via different-case paths shares the entry).
+    private static readonly object Gate = new();
+    private static Dictionary<string, double>? _cache;
+
     public static async Task<double> GetGainDbAsync(string audioPath)
+    {
+        // Everything (stat + file IO + ffmpeg) runs off the caller's thread —
+        // the stat and cache-file read used to run on the UI thread per switch.
+        return await Task.Run(() => GetGainDbCore(audioPath));
+    }
+
+    private static double GetGainDbCore(string audioPath)
     {
         try
         {
-            var key = new LoudnessKey(audioPath, System.IO.File.GetLastWriteTimeUtc(audioPath).Ticks);
-            var cache = await LoadAsync();
-            if (cache.TryGetValue(key.ToString(), out var cached))
-                return cached;
+            var key = new LoudnessKey(audioPath, System.IO.File.GetLastWriteTimeUtc(audioPath).Ticks).ToString();
 
-            var gain = await Task.Run(() => ReadReplayGain(audioPath));
+            lock (Gate)
+            {
+                if (_cache == null)
+                    _cache = LoadSync();
+                if (_cache.TryGetValue(key, out var cached))
+                    return cached;
+            }
+
+            var gain = ReadReplayGain(audioPath);
             if (!gain.HasValue)
-                gain = await AnalyzeWithFfmpegAsync(audioPath);
-            cache[key.ToString()] = gain ?? 0;
-            await SaveAsync(cache);
-            return gain ?? 0;
+                gain = AnalyzeWithFfmpegAsync(audioPath).GetAwaiter().GetResult();
+            gain ??= 0;
+
+            lock (Gate)
+            {
+                _cache[key] = gain.Value;
+                SaveSync(_cache);
+            }
+            return gain.Value;
         }
         catch
         {
@@ -84,23 +108,34 @@ internal static class LoudnessCache
         {
             using var process = new Process { StartInfo = startInfo };
             process.Start();
-            var stderr = process.StandardError.ReadToEndAsync();
-            var stdout = process.StandardOutput.ReadToEndAsync();
-            await Task.WhenAll(stderr, stdout);
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(2));
+            try
+            {
+                var stderr = process.StandardError.ReadToEndAsync();
+                var stdout = process.StandardOutput.ReadToEndAsync();
+                await Task.WhenAll(stderr, stdout);
 
-            if (process.ExitCode != 0)
+                // Kill on timeout: the old version only abandoned the await,
+                // leaving a stuck ffmpeg.exe alive forever.
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromMinutes(2));
+
+                if (process.ExitCode != 0)
+                    return null;
+
+                var match = Regex.Match(stderr.Result, "\"input_i\"\\s*:\\s*\"(?<lufs>-?[0-9]+(?:\\.[0-9]+)?)\"");
+                if (!match.Success || !double.TryParse(
+                        match.Groups["lufs"].Value,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var inputLufs))
+                    return null;
+
+                return Math.Clamp(-14.0 - inputLufs, -12, 6);
+            }
+            catch (TimeoutException)
+            {
+                try { process.Kill(true); } catch { }
                 return null;
-
-            var match = Regex.Match(stderr.Result, "\"input_i\"\\s*:\\s*\"(?<lufs>-?[0-9]+(?:\\.[0-9]+)?)\"");
-            if (!match.Success || !double.TryParse(
-                    match.Groups["lufs"].Value,
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    out var inputLufs))
-                return null;
-
-            return Math.Clamp(-14.0 - inputLufs, -12, 6);
+            }
         }
         catch
         {
@@ -108,29 +143,31 @@ internal static class LoudnessCache
         }
     }
 
-    private static async Task<System.Collections.Generic.Dictionary<string, double>> LoadAsync()
+    private static Dictionary<string, double> LoadSync()
     {
         try
         {
             if (!System.IO.File.Exists(CacheFile))
-                return new();
-            await using var stream = System.IO.File.OpenRead(CacheFile);
-            return await JsonSerializer.DeserializeAsync<System.Collections.Generic.Dictionary<string, double>>(stream)
-                   ?? new();
+                return new Dictionary<string, double>(CaseInsensitiveComparer);
+            using var stream = System.IO.File.OpenRead(CacheFile);
+            return JsonSerializer.Deserialize<Dictionary<string, double>>(stream)
+                   ?? new Dictionary<string, double>(CaseInsensitiveComparer);
         }
         catch
         {
-            return new();
+            return new Dictionary<string, double>(CaseInsensitiveComparer);
         }
     }
 
-    private static async Task SaveAsync(System.Collections.Generic.Dictionary<string, double> cache)
+    private static readonly StringComparer CaseInsensitiveComparer = StringComparer.OrdinalIgnoreCase;
+
+    private static void SaveSync(Dictionary<string, double> cache)
     {
         try
         {
             Directory.CreateDirectory(DataLocation.Root);
             var json = JsonSerializer.Serialize(cache);
-            await Task.Run(() => AtomicFile.WriteAllText(CacheFile, json, System.Text.Encoding.UTF8));
+            AtomicFile.WriteAllText(CacheFile, json, System.Text.Encoding.UTF8);
         }
         catch
         {

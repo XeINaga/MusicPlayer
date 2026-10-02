@@ -20,7 +20,13 @@ public static class NetEaseLyricService
 
     private static HttpClient CreateClient()
     {
-        var c = new HttpClient();
+        var c = new HttpClient(new SocketsHttpHandler
+        {
+            // Long-running desktop app: drop pooled connections so a
+            // network/DNS change recovers on the next request instead of
+            // serving stale sockets until restart.
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
         c.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         c.DefaultRequestHeaders.Referrer = new Uri("https://music.163.com/");

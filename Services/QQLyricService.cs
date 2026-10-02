@@ -44,7 +44,13 @@ public static class QQLyricService
 
     private static HttpClient CreateClient()
     {
-        var c = new HttpClient();
+        var c = new HttpClient(new SocketsHttpHandler
+        {
+            // Long-running desktop app: drop pooled connections so a
+            // network/DNS change recovers on the next request instead of
+            // serving stale sockets until restart.
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
         c.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
         c.Timeout = TimeSpan.FromSeconds(10);
@@ -115,7 +121,19 @@ public static class QQLyricService
         if (json == null)
             return results;
 
-        using var doc = JsonDocument.Parse(json);
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(json);
+        }
+        catch (JsonException)
+        {
+            // Anti-bot HTML / empty 200 — show a readable message, not a raw
+            // JsonException from the depths of the parser.
+            throw new InvalidOperationException("QQ音乐返回了无法解析的响应（可能需要更新 Cookie）");
+        }
+        using (doc)
+        {
         var root = doc.RootElement;
         if (!root.TryGetProperty("req", out var req))
             return results;
@@ -160,6 +178,7 @@ public static class QQLyricService
 
             results.Add(new QQSong(title, artist, album, mid, duration, songId));
         }
+        }
 
         return results;
     }
@@ -188,12 +207,25 @@ public static class QQLyricService
         var json = await GetAsync(plainUrl, "https://music.qq.com/");
         if (json != null)
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            if (!(root.TryGetProperty("retcode", out var rc) && rc.ValueKind == JsonValueKind.Number && rc.GetInt32() != 0))
+            JsonDocument doc;
+            try
             {
-                lyric = NullIfEmpty(GetString(root, "lyric"));
-                trans = NullIfEmpty(GetString(root, "trans"));
+                doc = JsonDocument.Parse(json);
+            }
+            catch (JsonException)
+            {
+                // Anti-bot HTML or an empty 200: treat as "no plain lyric" and
+                // still let the QRC endpoint below run.
+                doc = JsonDocument.Parse("{}");
+            }
+            using (doc)
+            {
+                var root = doc.RootElement;
+                if (!(root.TryGetProperty("retcode", out var rc) && rc.ValueKind == JsonValueKind.Number && rc.GetInt32() != 0))
+                {
+                    lyric = NullIfEmpty(GetString(root, "lyric"));
+                    trans = NullIfEmpty(GetString(root, "trans"));
+                }
             }
         }
 

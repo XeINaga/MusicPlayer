@@ -46,7 +46,13 @@ public sealed class DesktopLyricsOverlay : IDisposable
     private NamedPipeClientStream? _pipe;
     private NamedPipeClientStream? _pipeRpt;
     private readonly object _gate = new();
-    private readonly SemaphoreSlim _sendQueue = new(1, 1);
+    // FIFO send queue: SemaphoreSlim wakeups don't preserve order, so a
+    // burst of style/click/pos/show/lyric commands could reach the overlay
+    // reordered. A single-reader Channel guarantees it.
+    private readonly System.Threading.Channels.Channel<string> _sendChannel =
+        System.Threading.Channels.Channel.CreateUnbounded<string>(
+            new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true });
+    private Task? _sendLoop;
     private bool _disposed;
 
     /// <summary>The overlay reports its window position (drag end / quit)
@@ -81,39 +87,40 @@ public sealed class DesktopLyricsOverlay : IDisposable
                 _proc.Dispose();
                 _proc = null;
             }
-        }
 
-        if (_proc == null && File.Exists(_exePath))
-        {
-            try
+            if (_proc == null && File.Exists(_exePath))
             {
-                _proc = new Process
+                try
                 {
-                    StartInfo = new ProcessStartInfo(_exePath)
+                    _proc = new Process
                     {
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        // The overlay rejects pipe clients whose process id
-                        // differs from the host (us).
-                        Arguments = $"--host-pid {Environment.ProcessId}",
-                    }
-                };
-                _proc.Start();
+                        StartInfo = new ProcessStartInfo(_exePath)
+                        {
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            // The overlay rejects pipe clients whose process id
+                            // differs from the host (us).
+                            Arguments = $"--host-pid {Environment.ProcessId}",
+                        }
+                    };
+                    _proc.Start();
+                }
+                catch
+                {
+                    _proc = null;
+                }
             }
-            catch
+
+            if (_proc == null || _proc.HasExited)
             {
-                _proc = null;
+                if (_disposed && _proc != null)
+                {
+                    try { _proc.Kill(); } catch { }
+                    _proc.Dispose();
+                    _proc = null;
+                }
+                return;
             }
-        }
-        if (_proc == null || _proc.HasExited)
-        {
-            if (_disposed && _proc != null)
-            {
-                try { _proc.Kill(); } catch { }
-                _proc.Dispose();
-                _proc = null;
-            }
-            return;
         }
 
         // The C++ side creates both pipes on startup; retry until ready.
@@ -144,8 +151,11 @@ public sealed class DesktopLyricsOverlay : IDisposable
         {
             try { main?.Dispose(); } catch { }
             try { rpt?.Dispose(); } catch { }
-            KillOrphan(_proc);
-            _proc = null;
+            lock (_gate)
+            {
+                KillOrphan(_proc);
+                _proc = null;
+            }
             return;
         }
 
@@ -247,17 +257,39 @@ public sealed class DesktopLyricsOverlay : IDisposable
     /// </summary>
     private void Send(string json)
     {
-        Task.Run(async () =>
+        if (_disposed)
+            return;
+        EnsureSendLoop();
+        _sendChannel.Writer.TryWrite(json);
+    }
+
+    private void EnsureSendLoop()
+    {
+        if (_sendLoop != null)
+            return;
+        _sendLoop = Task.Run(async () =>
         {
-            await _sendQueue.WaitAsync();
-            try
+            var reader = _sendChannel.Reader;
+            while (await reader.WaitToReadAsync())
             {
-                EnsureStarted();
-                WriteToPipe(json);
-            }
-            finally
-            {
-                _sendQueue.Release();
+                while (reader.TryRead(out var json))
+                {
+                    try
+                    {
+                        EnsureStarted();
+                        WriteToPipe(json);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // overlay closed mid-drain — drop the rest
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Surface instead of an unobserved task exception.
+                        AppLog.WriteLyricCompletion($"桌面歌词命令发送失败: {ex.Message}");
+                    }
+                }
             }
         });
     }
@@ -330,6 +362,7 @@ public sealed class DesktopLyricsOverlay : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _sendChannel.Writer.TryComplete(); // drain-and-exit the send loop
 
         // Write directly to an existing pipe only — going through Send() would
         // spin up a NEW overlay process just to tell it to quit.

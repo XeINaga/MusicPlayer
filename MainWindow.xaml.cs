@@ -58,6 +58,22 @@ public sealed partial class MainWindow : Window
     private int _loadedIndex = -1;
     private int _lyricsLoadToken; // invalidates in-flight background lyric parses
 
+    /// <summary>
+    /// Re-load the lyrics of the track that is playing RIGHT NOW. Callers that
+    /// react to lyric-file changes (encoding switch, manual assignment,
+    /// downloads) must resolve the index fresh: _loadedIndex goes stale after
+    /// SetIndexSilent (queue drag-reorder) or ReplaceQueueSilent (play-next),
+    /// and the old "LoadLyricsFor(_loadedIndex)" then loaded ANOTHER track's
+    /// lyrics over the now-playing panel.
+    /// </summary>
+    private void ReloadLyricsForCurrent()
+    {
+        var track = _currentTrack;
+        var q = _playback.Queue;
+        var idx = (track != null && q != null) ? q.IndexOf(track) : -1;
+        LoadLyricsFor(idx);
+    }
+
     private DesktopLyricsOverlay? _desktopLyrics;
     private readonly PlayMode[] _modeOrder = { PlayMode.Sequential, PlayMode.LoopAll, PlayMode.LoopOne, PlayMode.Random };
     private static readonly double[] _speedCycle = { 1.0, 1.25, 1.5, 2.0, 0.5, 0.75 };
@@ -167,7 +183,6 @@ public sealed partial class MainWindow : Window
         this.InitializeComponent();
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        _ = CoverCache.TrimAsync();
 
         // Sound-effect DSP state mirrors the persisted settings; PlaybackService
         // reads it every track load to decide the decoder route + filter chain.
@@ -244,6 +259,10 @@ public sealed partial class MainWindow : Window
         // Apply the persisted data/cache directory (default = %LOCALAPPDATA%\MusicPlayer).
         // Must run before any PlaylistStore / LyricBindingStore access below.
         DataLocation.Apply(_settings.CacheDir);
+        // AFTER the data dir is applied — CoverCache resolves its folder from
+        // DataLocation.Root, and a custom CacheDir used to make the trim scan
+        // the default location instead.
+        _ = CoverCache.TrimAsync();
 
         // Sync auto-start: registry is the source of truth on launch.
         _settings.AutoStart = AutoStart.IsAutoStartEnabled();
@@ -1190,6 +1209,7 @@ public sealed partial class MainWindow : Window
             var curPath = CurrentPath();
             foreach (var i in toRemove.AsEnumerable().Reverse())
                 _library.RemoveAt(i);
+            _groupCacheDirty = true;
 
             if (ReferenceEquals(_playback.Queue, _library))
             {
@@ -1250,7 +1270,7 @@ public sealed partial class MainWindow : Window
     /// Paths in LibraryExclusions (deliberately removed by the user) are never resurrected.</summary>
     private Track? ResolveTrack(string path)
     {
-        var existing = _library.FirstOrDefault(t => t.Path == path);
+        var existing = _library.FirstOrDefault(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
             return existing;
 
@@ -1287,6 +1307,7 @@ public sealed partial class MainWindow : Window
         QueueList.ItemsSource = null;
         ResetNowPlaying();
         PersistLibrary();
+        _groupCacheDirty = true; // album/artist grids must not show the cleared entries
         RefreshDisplay();
     }
 
@@ -1294,6 +1315,12 @@ public sealed partial class MainWindow : Window
     {
         _recent.Clear();
         PersistRecent();
+        // The recent view may currently be playing through a SNAPSHOT of
+        // _recent (StartPlayFromView snapshots to dodge the reindex race) —
+        // _activeTracks then points at stale copies and this clear appeared
+        // to do nothing on screen. Point it back at the live list.
+        if (_currentView == NavView.Recent)
+            _activeTracks = _recent;
         RefreshDisplay();
     }
 
@@ -1350,13 +1377,22 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    // Chains background recent-list saves (same rationale as
+    // PersistLibraryBackground: a synchronous serialize+replace on every
+    // track change stuttered playback on the UI thread).
+    private Task _recentSaveTask = Task.CompletedTask;
+
     private void PushRecent(Track track)
     {
         _recent.Remove(track);
         _recent.Insert(0, track);
         while (_recent.Count > 200)
             _recent.RemoveAt(_recent.Count - 1);
-        PersistRecent();
+
+        var snapshot = _recent.ToList();
+        _recentSaveTask = _recentSaveTask.ContinueWith(
+            _ => PlaylistStore.SaveRecent(snapshot),
+            TaskScheduler.Default);
     }
 
     // ---------- Playlists UI ----------
@@ -1580,9 +1616,18 @@ public sealed partial class MainWindow : Window
         if (indices.Contains(current))
         {
             // The playing track itself went away: take whatever slid into its
-            // slot, or stop if nothing is left.
+            // slot, or stop if nothing is left. The slot is the current index
+            // MINUS the removed entries that sat before it (each of those
+            // shifted the survivor one step up) — the old plain `current`
+            // skipped that many tracks whenever the batch also removed
+            // earlier entries.
             if (list.Count > 0)
-                _playback.TakeOverAfterRemoval(Math.Min(current, list.Count - 1));
+            {
+                var slot = Math.Clamp(
+                    current - indices.Count(i => i < current),
+                    0, list.Count - 1);
+                _playback.TakeOverAfterRemoval(slot);
+            }
             else
             {
                 _playback.Clear();
@@ -1590,6 +1635,10 @@ public sealed partial class MainWindow : Window
             }
             return;
         }
+
+        // Any removal reshuffles albums/artists — invalidate the grids or the
+        // removed entries lingered as ghosts until the next metadata reload.
+        _groupCacheDirty = true;
 
         // Later indices shifted down past the current one.
         var shift = indices.Count(i => i < current);
@@ -2068,7 +2117,7 @@ public sealed partial class MainWindow : Window
         LyricBindingStore.Set(track.Path, file.Path);
 
         if (_currentTrack == track)
-            LoadLyricsFor(_loadedIndex);
+            ReloadLyricsForCurrent();
         return true;
     }
 
@@ -2082,7 +2131,7 @@ public sealed partial class MainWindow : Window
         LyricBindingStore.Clear(track.Path);
 
         if (_currentTrack == track)
-            LoadLyricsFor(_loadedIndex);
+            ReloadLyricsForCurrent();
     }
 
     // ---------- "Play next" (insert into the queue after the current track) ----------
@@ -2589,6 +2638,15 @@ public sealed partial class MainWindow : Window
             return;
         _isSeeking = false;
         _playback.Seek(TimeSpan.FromSeconds(SeekSlider.Value));
+
+        // Re-anchor the play counter to where the seek landed: without this,
+        // a seek past the 30s threshold after a few seconds of listening
+        // counted a "play" on the very next tick (the start position still
+        // said 0s). Re-anchoring means the listener now owes the full
+        // threshold from the new position. The scrobble start re-anchors too,
+        // but a track that already scrobbled stays queued (no double report).
+        _pendingCountStartSec = SeekSlider.Value;
+        _pendingScrobbleStartSec = SeekSlider.Value;
     }
 
     private void SeekPointer_Canceled(object sender, PointerRoutedEventArgs e) => _isSeeking = false;
@@ -3606,8 +3664,20 @@ public sealed partial class MainWindow : Window
 
     private void PushDesktop(int idx)
     {
-        if (_desktopLyrics == null || idx < 0 || _lyrics == null)
+        if (_desktopLyrics == null)
             return;
+        if (idx < 0 || _lyrics == null)
+        {
+            // Before the first line (or no lyrics): clear the overlay instead
+            // of letting the PREVIOUS track's last line linger on screen.
+            if (_pushedTrack != null)
+            {
+                _desktopLyrics.UpdateLyric(_currentTrack, string.Empty, null, null);
+                _pushedTrack = null;
+                _pushedOriginal = _pushedRoma = _pushedTrans = null;
+            }
+            return;
+        }
         var line = _lyrics.Lines[idx];
         var roma = _settings.LyricShowRomaji ? line.Romaji : null;
         var trans = _settings.LyricShowTranslation ? line.Translation : null;
@@ -3752,7 +3822,7 @@ public sealed partial class MainWindow : Window
             if (await TryAutoDownloadAsync(track))
             {
                 if (_currentTrack == track)
-                    LoadLyricsFor(_loadedIndex);
+                    ReloadLyricsForCurrent();
                 ShowInfoBar($"已下载歌词：{track.Title}");
             }
             else
@@ -4128,7 +4198,7 @@ public sealed partial class MainWindow : Window
             return false;
         }
         if (_currentTrack == track)
-            LoadLyricsFor(_loadedIndex);
+            ReloadLyricsForCurrent();
         ShowInfoBar($"已保存歌词：{selected.Title} - {selected.Artist}{extraNote}");
         return true;
     }
@@ -4532,7 +4602,7 @@ public sealed partial class MainWindow : Window
             }
 
             if (refreshCurrent)
-                LoadLyricsFor(_loadedIndex);
+                ReloadLyricsForCurrent();
 
             var stopped = ct.IsCancellationRequested;
             var summary = stopped
@@ -4795,11 +4865,13 @@ public sealed partial class MainWindow : Window
 
         // Re-read the current lyrics with the new encoding, if any are shown.
         if (_loadedIndex >= 0)
-            LoadLyricsFor(_loadedIndex);
+            ReloadLyricsForCurrent();
     }
 
     private void LyricSourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressSettingEvents) return; // initialization assignment
+
         _settings.LyricSource = LyricPreferences.ToSetting(LyricSourceCombo.SelectedIndex switch
         {
             1 => LyricSourceKind.NetEase,
@@ -4813,6 +4885,8 @@ public sealed partial class MainWindow : Window
 
     private void LyricFillModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressSettingEvents) return; // initialization assignment
+
         _settings.LyricFillMode = LyricPreferences.ToSetting(LyricFillModeCombo.SelectedIndex switch
         {
             1 => LyricFillModeKind.MainOnly,
@@ -4898,6 +4972,8 @@ public sealed partial class MainWindow : Window
 
     private void CloseActionCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressSettingEvents) return; // initialization assignment
+
         _settings.CloseAction = CloseActionCombo.SelectedIndex == 1 ? "Tray" : "Exit";
         SettingsStore.Save(_settings);
     }
@@ -4995,6 +5071,7 @@ public sealed partial class MainWindow : Window
         var files = new[]
         {
             "playlist.json", "recent.json", "playlists.json", "progress.json", "lyricbindings.json",
+            "randombag.json", "lastfm_pending.json", "loudness.json", "metacache.json",
         };
 
         try { Directory.CreateDirectory(newRoot); } catch { /* best-effort */ }
@@ -5182,6 +5259,7 @@ public sealed partial class MainWindow : Window
 
     private void LyricColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
+            if (_suppressSettingEvents) return; // initialization assignment
         _settings.LyricColor = ToHex(args.NewColor);
         ScheduleSettingsSave();
         ApplyStyleLive();
@@ -5235,6 +5313,10 @@ public sealed partial class MainWindow : Window
     {
         _settings.LyricClickThroughDefault = ((ToggleSwitch)sender).IsOn;
         SettingsStore.Save(_settings);
+        // Apply live to an open overlay — the bottom-bar toggle does the same;
+        // the settings copy used to only write the default for next time.
+        if (_desktopLyrics != null)
+            _desktopLyrics.SetClickThrough(_settings.LyricClickThroughDefault);
     }
 
     private void LyricVerticalToggle_Toggled(object sender, RoutedEventArgs e)
@@ -5470,6 +5552,8 @@ public sealed partial class MainWindow : Window
 
     private void CrossfadeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_suppressSettingEvents) return; // initialization assignment
+
         // Index 0 = off, 1 = 1s, 2 = 2s, 3 = 3s.
         var ms = CrossfadeCombo.SelectedIndex switch
         {
@@ -5522,6 +5606,9 @@ public sealed partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, WindowEventArgs e)
     {
+        // Scrobbles sitting in the 2s debounce window (or mid-flight batch)
+        // used to be dropped on exit.
+        FlushScrobbleQueue();
         // "最小化到托盘": cancel the close, hide the window and keep running
         // (playback and the desktop lyrics stay alive). Real exit paths set
         // _forceExit first (tray menu) or use the "Exit" setting.
