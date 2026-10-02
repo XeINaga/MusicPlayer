@@ -104,17 +104,15 @@
           <RegistryValue Root="HKLM" Key="SOFTWARE\MusicPlayer" Name="InstallPath"
                          Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
         </Component>
-        <!-- Runtime log folder. Application logs are always written here.
-             PermissionEx grants Users modify access: the app runs asInvoker
-             under Program Files, and without this ACL every log write failed
-             silently (AppLog's fallback only kicks in when the directory
-             probe fails — writes here looked writable to CreateDirectory but
-             the app never ran elevated). -->
+        <!-- Runtime log folder. NOTE: per-machine installs put this under
+             Program Files, where a normal (asInvoker) process CANNOT write.
+             That is fine: AppLog probes the directory and falls back to
+             %LOCALAPPDATA%\MusicPlayer\log, so logs always land somewhere
+             writable. This folder only matters for elevated/custom setups. -->
         <Directory Id="LogDir" Name="log">
           <!-- Fixed GUID: components with a directory KeyPath cannot use "*". -->
           <Component Id="LogFolder" Guid="A4C2E9F1-7B3D-4E58-9A61-C8D40E2F5B73">
               <CreateFolder />
-              <util:PermissionEx User="Users" GenericWrite="yes" GenericRead="yes" />
               <RemoveFile Id="RemoveLogFiles" Name="*" On="uninstall" />
             </Component>
         </Directory>
