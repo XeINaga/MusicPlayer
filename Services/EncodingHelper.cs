@@ -74,20 +74,12 @@ public static class EncodingHelper
         if (IsValidUtf8(bytes))
             return new UTF8Encoding(false);
 
-        foreach (var name in new[] { "GBK", "shift_jis", "Big5" })
-        {
-            try
-            {
-                var enc = Encoding.GetEncoding(name);
-                // GBK/Shift-JIS cover every byte pair, so instead of relying on
-                // replacement chars, just prefer GBK (first) for this app's files.
-                return enc;
-            }
-            catch
-            {
-                // try next codepage
-            }
-        }
+        // NOTE: this is deliberately NOT a fallback chain — GBK decodes
+        // (as mojibake) nearly every Shift-JIS byte pair too, so trying code
+        // pages in order would always return the first one. GBK is used
+        // unconditionally as the dominant encoding for this app's files; users
+        // with Shift-JIS files pick it explicitly in 设置→歌词→编码.
+        return Encoding.GetEncoding("GBK");
 
         return Encoding.Default;
     }

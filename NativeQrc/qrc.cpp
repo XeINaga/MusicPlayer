@@ -12,6 +12,7 @@
 //       P/Invoke boundary only carries the block-cipher hot loop.
 
 #include <cstdint>
+#include <mutex>
 #include <cstring>
 
 namespace {
@@ -24,7 +25,11 @@ static_assert(sizeof(kQqKeyLiteral) == 25, "key must be 24 chars + NUL");
 struct Schedule { uint8_t sub[16][6]; };
 
 Schedule g_sched[3];
-bool g_ready = false;
+// std::call_once gives the lazy key schedule both initialization exclusivity
+// AND the happens-before edge concurrent decryptors rely on — a plain bool
+// flag let a racing thread see g_ready==true with a half-written schedule
+// and decrypt garbage (reported as success).
+std::once_flag g_schedOnce;
 
 inline uint32_t BitNum(const uint8_t* a, int b, int c)
 {
@@ -153,14 +158,13 @@ void Crypt(const uint8_t* input, uint8_t* output, const Schedule& sched)
 
 void EnsureSchedule()
 {
-    if (g_ready)
-        return;
-    // mode semantics copied from the managed TripleDesKeySetup (Decrypt path).
-    const uint8_t* key = reinterpret_cast<const uint8_t*>(kQqKeyLiteral);
-    KeySchedule(key + 0,  g_sched[2], Decrypt);
-    KeySchedule(key + 8,  g_sched[1], Encrypt);
-    KeySchedule(key + 16, g_sched[0], Decrypt);
-    g_ready = true;
+    std::call_once(g_schedOnce, [] {
+        // mode semantics copied from the managed TripleDesKeySetup (Decrypt path).
+        const uint8_t* key = reinterpret_cast<const uint8_t*>(kQqKeyLiteral);
+        KeySchedule(key + 0,  g_sched[2], Decrypt);
+        KeySchedule(key + 8,  g_sched[1], Encrypt);
+        KeySchedule(key + 16, g_sched[0], Decrypt);
+    });
 }
 
 } // namespace

@@ -98,6 +98,16 @@ internal static class CoverCache
                     total -= file.Length;
                     try { file.Delete(); } catch { }
                 }
+
+                // Orphaned partial writes (crash/kill mid-write) never match
+                // the *.png glob above and accumulated forever; they are older
+                // than an hour, they are garbage.
+                var cutoff = DateTime.UtcNow.AddHours(-1);
+                foreach (var tmp in new DirectoryInfo(CacheDir).EnumerateFiles("*.tmp"))
+                {
+                    if (tmp.LastWriteTimeUtc < cutoff)
+                        try { tmp.Delete(); } catch { }
+                }
             }
             catch
             {

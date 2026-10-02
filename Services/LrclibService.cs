@@ -19,7 +19,13 @@ public static class LrclibService
 
     private static HttpClient CreateClient()
     {
-        var c = new HttpClient();
+        var c = new HttpClient(new SocketsHttpHandler
+        {
+            // Long-running desktop app: drop pooled connections so a
+            // network/DNS change recovers on the next request instead of
+            // serving stale sockets until restart.
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
         c.DefaultRequestHeaders.UserAgent.ParseAdd(
             "MusicPlayer/1.0 (https://github.com/example/MusicPlayer)");
         c.Timeout = TimeSpan.FromSeconds(10);

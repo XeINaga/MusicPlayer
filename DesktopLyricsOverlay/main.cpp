@@ -528,7 +528,10 @@ static void ReportPosition() {
 // Report the user-set wrap width so the host can persist it.
 static void ReportSize() {
     char b[96];
-    snprintf(b, sizeof b, "{\"t\":\"size\",\"w\":%d}\n", g_state.userWidth);
+    EnterCriticalSection(&g_cs);
+    const int w = g_state.userWidth;
+    LeaveCriticalSection(&g_cs);
+    snprintf(b, sizeof b, "{\"t\":\"size\",\"w\":%d}\n", w);
     PipeWrite(b);
 }
 
@@ -683,9 +686,11 @@ static void ApplyCommand(const std::string& line) {
         auto* px = FindMember(root, "x");
         auto* py = FindMember(root, "y");
         if (px && px->type == JsonVal::NUM && py && py->type == JsonVal::NUM) {
+            EnterCriticalSection(&g_cs);
             g_x = (int)px->num;   // center of the lyric box
             g_y = (int)py->num;
             g_positioned = true;
+            LeaveCriticalSection(&g_cs);
             if (g_hwnd)
                 SetWindowPos(g_hwnd, HWND_TOPMOST, g_x - g_bmW / 2, g_y - g_bmH / 2, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
             PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
@@ -763,7 +768,11 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 // Host-death suicide: if the command pipe has no client for
                 // 10 s while we are showing lyrics, the host died without a
                 // quit command (crash / taskkill) — remove the stale window.
-                if (!g_pipeConnected && g_state.visible) {
+                bool visibleNow;
+                EnterCriticalSection(&g_cs);
+                visibleNow = g_state.visible;
+                LeaveCriticalSection(&g_cs);
+                if (!g_pipeConnected && visibleNow) {
                     FILETIME now;
                     GetSystemTimeAsFileTime(&now);
                     ULONGLONG now64 = ((ULONGLONG)now.dwHighDateTime << 32) | now.dwLowDateTime;
@@ -811,8 +820,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             }
             return DefWindowProc(h, m, w, l);
         }
-        case WM_LBUTTONDOWN:
-            if (!g_state.clickThrough) {
+        case WM_LBUTTONDOWN: {
+            bool clickThroughNow;
+            EnterCriticalSection(&g_cs);
+            clickThroughNow = g_state.clickThrough;
+            LeaveCriticalSection(&g_cs);
+            if (!clickThroughNow) {
                 if (InResizeZone(h, l)) {
                     g_resizing = true;
                     g_resizeStartX = (int)(short)LOWORD(l);
@@ -827,6 +840,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
                 SetCapture(h);
             }
             return 0;
+        }
         case WM_LBUTTONUP:
             if (g_resizing) {
                 g_resizing = false;
@@ -853,6 +867,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     InitializeCriticalSection(&g_cs);
     InitializeCriticalSection(&g_pipeCs);
+
+    // Per-monitor-v2 DPI awareness: without it the process runs DPI-unaware,
+    // GetDpiForSystem below always reports 96 and DWM stretches the rendered
+    // bitmap — visibly blurry lyrics on 125%/150% displays. Dynamically bound
+    // so the MinGW build does not need a newer SDK header.
+    if (HMODULE u32 = GetModuleHandleW(L"user32.dll")) {
+        using SetDpiCtxFn = BOOL(WINAPI*)(void*);
+        if (auto setDpiCtx = (SetDpiCtxFn)(void*)GetProcAddress(u32, "SetProcessDpiAwarenessContext")) {
+            // (void*)-4 == DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+            setDpiCtx((void*)(intptr_t)-4);
+        }
+    }
 
     g_dpiScale = GetDpiForSystem() / 96.0f;
 

@@ -197,6 +197,7 @@ public sealed class PlaybackService
         _randomHistory.Clear();
         _randomForward.Clear();
         ResetRandomBag();
+        CancelCrossfade();
         _queue = tracks;
 
         // A negative index means "just adopt the queue, load nothing" — clamping
@@ -386,6 +387,7 @@ public sealed class PlaybackService
         if (tracks == null || tracks.Count == 0)
             return;
         ResetRandomBag();
+        CancelCrossfade();
         _queue = tracks;
         _index = Math.Clamp(currentIndex, 0, tracks.Count - 1);
     }
@@ -542,8 +544,16 @@ public sealed class PlaybackService
                     var fallback = MediaSource.CreateFromStorageFile(file);
                     if (token != _loadToken) { fallback.Dispose(); return; }
 
+                    // Release the previous sources exactly like the success path
+                    // does — overwriting the fields directly used to leak the
+                    // old file handle (locked file, stranded COM objects).
+                    var oldFfmpegFallback = _ffmpegSource;
+                    var oldNativeFallback = _nativeSource;
+                    _ffmpegSource = null;
                     _nativeSource = fallback;
                     _player.Source = fallback;
+                    oldFfmpegFallback?.Dispose();
+                    oldNativeFallback?.Dispose();
                     HookSession();
                     UpdateSmtcDisplay();
                     if (play)
@@ -803,6 +813,31 @@ public sealed class PlaybackService
         if (_index < 0 || _index >= _queue.Count)
             return;
         stack.Push(_queue[_index]);
+        // Bound the history: an unbounded session used to accumulate a stack
+        // entry per navigation forever (the recent list caps at 200 — mirror
+        // that; the deepest entries are the least likely to be stepped back
+        // into anyway).
+        while (stack.Count > 200)
+        {
+            // Stack is LIFO — trim from the bottom.
+            var arr = stack.ToArray();
+            stack.Clear();
+            for (var i = 199; i >= 0; i--)
+                stack.Push(arr[i]);
+        }
+    }
+
+    /// <summary>
+    /// Abort any in-flight crossfade (fade-out timer, pending hand-off). Used
+    /// when the whole queue is replaced, so a stale fade can no longer grab
+    /// the volume of whatever loads next.
+    /// </summary>
+    private void CancelCrossfade()
+    {
+        _fadeTimer.Stop();
+        _fadingOut = false;
+        _pendingCrossfadeIndex = -1;
+        _player.Volume = _targetVolume * _trackGain;
     }
 
     /// <summary>

@@ -149,7 +149,7 @@ public partial class App : Application
             var detail = !string.IsNullOrEmpty(restricted)
                 ? restricted
                 : $"{ex.GetType().Name}: {ex.Message}";
-            var msg = "MusicPlayer 启动失败：\r\n" +
+            var msg = "MusicPlayer 遇到错误：\r\n" +
                       $"{detail}\r\n\r\n" +
                       $"详细错误已写入：\r\n{CrashLogPath}";
             MessageBoxW(IntPtr.Zero, msg, "MusicPlayer 错误", 0x10 /* MB_ICONERROR */);

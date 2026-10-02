@@ -34,7 +34,14 @@ public static class DataLocation
         if (string.IsNullOrWhiteSpace(customDir))
             _root = DefaultRoot;
         else
+        {
             _root = customDir.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // "D:\" trims to "D:" — Path.Combine then yields drive-relative
+            // paths ("D:playlist.json") that land in the drive's CURRENT
+            // directory, not the root. Keep the separator for bare drives.
+            if (_root.Length == 2 && _root[1] == ':')
+                _root += Path.DirectorySeparatorChar;
+        }
     }
 
     /// <summary>Ensure the current root directory exists.</summary>
