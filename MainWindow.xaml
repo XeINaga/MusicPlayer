@@ -640,6 +640,14 @@
                                     </Border>
                                     <TextBlock Text="文字颜色" Style="{StaticResource SettingsHint}" />
                                     <controls:ColorPicker x:Name="LyricColorPicker" ColorChanged="LyricColorPicker_ColorChanged" />
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="卡拉OK已播放颜色（逐字歌词扫过部分，与桌面歌词同步）" Style="{StaticResource SettingsHint}" />
+                                        <controls:ColorPicker x:Name="SungColorPicker" ColorChanged="SungColorPicker_ColorChanged" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="4">
+                                        <TextBlock Text="卡拉OK未播放颜色（逐字歌词尚未唱到部分，与桌面歌词同步）" Style="{StaticResource SettingsHint}" />
+                                        <controls:ColorPicker x:Name="UnsungColorPicker" ColorChanged="UnsungColorPicker_ColorChanged" />
+                                    </StackPanel>
                                     <TextBlock Text="歌词文件编码（日文歌词乱码可尝试 Shift-JIS）" Style="{StaticResource SettingsHint}" />
                                     <ComboBox x:Name="LyricEncodingCombo" Width="180" SelectionChanged="LyricEncodingCombo_SelectionChanged">
                                         <ComboBoxItem Content="自动检测" />

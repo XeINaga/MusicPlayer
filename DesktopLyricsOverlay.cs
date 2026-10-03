@@ -330,7 +330,8 @@ public sealed class DesktopLyricsOverlay : IDisposable
             order = LyricPreferences.ParseLineOrder(s.LyricLineOrder),
             vertical = s.LyricVertical ? 1 : 0,
             width = s.LyricBoxWidth,
-            accent = s.AccentColor ?? "#31c27c",
+            accent = s.LyricSungColor ?? "#31C27C",
+            unsung = s.LyricUnsungColor ?? "#FFFFFF",
         };
         Send(JsonSerializer.Serialize(payload, JsonOptions));
     }

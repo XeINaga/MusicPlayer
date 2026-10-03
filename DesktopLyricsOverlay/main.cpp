@@ -192,7 +192,8 @@ struct State {
     bool visible = false;
     bool clickThrough = false;
     int sungChars = -1;            // word-timed: chars already sung (-1 = not word-timed)
-    D2D1_COLOR_F accent = D2D1::ColorF(0.19f, 0.76f, 0.49f, 1.f); // karaoke sweep color
+    D2D1_COLOR_F accent = D2D1::ColorF(0.19f, 0.76f, 0.49f, 1.f); // karaoke sung color
+    D2D1_COLOR_F unsung = D2D1::ColorF(1, 1, 1, 1);               // karaoke unsung color
 };
 static State g_state;
 static CRITICAL_SECTION g_cs;
@@ -444,7 +445,9 @@ static void Render() {
         IDWriteTextLayout* lay = nullptr;
         if (fmt) g_dwriteFactory->CreateTextLayout(ln.text.c_str(), (UINT32)ln.text.size(), fmt, maxW, 10000.0f, &lay);
         ID2D1SolidColorBrush* tb = nullptr;
-        g_dcRT->CreateSolidColorBrush(st.color, &tb);
+        // Karaoke original line: the base layer is the unsung color.
+        g_dcRT->CreateSolidColorBrush(
+            (st.sungChars >= 0 && ln.role == 'O') ? st.unsung : st.color, &tb);
 
         // Karaoke sweep for the word-timed original line: draw the whole line
         // in the base color, then re-draw it clipped to the sung prefix in the
@@ -692,6 +695,8 @@ static void ApplyCommand(const std::string& line) {
         if (c && c->type == JsonVal::STR)  g_state.color = ParseColor(c->str);
         auto* ac = FindMember(root, "accent");
         if (ac && ac->type == JsonVal::STR) g_state.accent = ParseColor(ac->str);
+        auto* un = FindMember(root, "unsung");
+        if (un && un->type == JsonVal::STR) g_state.unsung = ParseColor(un->str);
         if (b && b->type == JsonVal::NUM)  g_state.bg = (float)b->num;
         // bold arrives as a number (1/0) from the C# side — same compat as
         // vertical/click below; BOOL-only parsing silently dropped every

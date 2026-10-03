@@ -78,6 +78,12 @@ public sealed class AppSettings
     /// <summary>Desktop lyrics wrap width (logical px); 0 = auto-fit.</summary>
     public int LyricBoxWidth { get; set; }
 
+    /// <summary>Karaoke colors: the sweep paints the sung prefix in
+    /// LyricSungColor over the LyricUnsungColor base. Shared by the in-app
+    /// lyrics panel and the desktop overlay.</summary>
+    public string LyricSungColor { get; set; } = "#31C27C";
+    public string LyricUnsungColor { get; set; } = "#FFFFFF";
+
     /// <summary>
     /// Prefer WORD-TIMED lyrics when downloading (QQ QRC / KuGou KRC): the
     /// saved file keeps per-word timing and the lyrics panel highlights the
