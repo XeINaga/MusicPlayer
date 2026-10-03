@@ -3552,6 +3552,10 @@ public sealed partial class MainWindow : Window
             {
                 switch (role)
                 {
+                    // Word-timed rows render via the karaoke Grid below —
+                    // a static copy here would show the line TWICE.
+                    case 'O' when line.Words is { Count: > 0 }:
+                        return null;
                     case 'O' when !string.IsNullOrWhiteSpace(line.Original):
                         return MakeTextBlock(line.Original, 22, Microsoft.UI.Colors.White);
                     case 'R' when showRoma && !string.IsNullOrWhiteSpace(line.Romaji):
@@ -3578,10 +3582,10 @@ public sealed partial class MainWindow : Window
             TextBlock? overlay = null;
             if (line.Words is { Count: > 0 })
             {
-                // The karaoke row is a Grid: base copy in unsung white + an
-                // accent copy clipped to the sung prefix (slide per tick).
-                var baseTb = MakeTextBlock(line.Original!, 22, Microsoft.UI.Colors.White);
-                overlay = MakeTextBlock(line.Original!, 22, AccentColor());
+                // The karaoke row is a Grid: base copy in the unsung color +
+                // an accent copy clipped to the sung prefix (slide per tick).
+                var baseTb = MakeTextBlock(line.Original!, 22, ParseHex(_settings.LyricUnsungColor));
+                overlay = MakeTextBlock(line.Original!, 22, ParseHex(_settings.LyricSungColor));
                 var host = new Grid();
                 host.Children.Add(baseTb);
                 host.Children.Add(overlay);
@@ -5140,6 +5144,8 @@ public sealed partial class MainWindow : Window
         LyricFontSlider.Value = _settings.LyricFontSize;
         UpdateLyricSizePreview();
         LyricColorPicker.Color = ParseHex(_settings.LyricColor);
+        SungColorPicker.Color = ParseHex(_settings.LyricSungColor);
+        UnsungColorPicker.Color = ParseHex(_settings.LyricUnsungColor);
         LyricOpacitySlider.Value = _settings.LyricBgOpacity * 100;
         LyricBoldToggle.IsOn = _settings.LyricBold;
         LyricAlignCombo.SelectedIndex = _settings.LyricAlign == "Left" ? 1 : 0;
@@ -5627,6 +5633,22 @@ public sealed partial class MainWindow : Window
     {
             if (_suppressSettingEvents) return; // initialization assignment
         _settings.LyricColor = ToHex(args.NewColor);
+        ScheduleSettingsSave();
+        ApplyStyleLive();
+    }
+
+    private void SungColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
+    {
+        if (_suppressSettingEvents) return; // initialization assignment
+        _settings.LyricSungColor = ToHex(args.NewColor);
+        ScheduleSettingsSave();
+        ApplyStyleLive();
+    }
+
+    private void UnsungColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
+    {
+        if (_suppressSettingEvents) return; // initialization assignment
+        _settings.LyricUnsungColor = ToHex(args.NewColor);
         ScheduleSettingsSave();
         ApplyStyleLive();
     }
