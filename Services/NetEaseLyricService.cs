@@ -124,6 +124,36 @@ public static class NetEaseLyricService
         return (Pick("lrc"), Pick("tlyric"), Pick("romalrc"));
     }
 
+    /// <summary>
+    /// Fetch the word-timed YRC lyric ("[start,dur]word(start,dur,0)...")
+    /// for one song id. Null when the song has no YRC version (most pre-2018
+    /// or non-Chinese tracks) or the endpoint doesn't serve it.
+    /// </summary>
+    public static async Task<string?> FetchYrcAsync(string songId)
+    {
+        var url = $"https://music.163.com/api/song/lyric?os=pc&id={Uri.EscapeDataString(songId)}" +
+                  "&lv=-1&kv=-1&tv=-1&rv=-1&yv=-1";
+
+        var json = await GetAsync(url);
+        if (json == null)
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("yrc", out var yrc))
+                return null;
+            if (!yrc.TryGetProperty("lyric", out var lyricEl) || lyricEl.ValueKind != JsonValueKind.String)
+                return null;
+            var v = lyricEl.GetString();
+            return string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static string? GetString(JsonElement el, string property) =>
         el.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString()

@@ -191,6 +191,8 @@ struct State {
     bool alignLeft = false;
     bool visible = false;
     bool clickThrough = false;
+    int sungChars = -1;            // word-timed: chars already sung (-1 = not word-timed)
+    D2D1_COLOR_F accent = D2D1::ColorF(0.19f, 0.76f, 0.49f, 1.f); // karaoke sweep color
 };
 static State g_state;
 static CRITICAL_SECTION g_cs;
@@ -266,15 +268,15 @@ static void Render() {
     State st;
     EnterCriticalSection(&g_cs); st = g_state; LeaveCriticalSection(&g_cs);
 
-    struct Line { std::wstring text; float size; float w = 0, h = 0; };
+    struct Line { std::wstring text; float size; float w = 0, h = 0; char role = 'O'; };
     std::vector<Line> lines;
-    auto addLine = [&](const std::wstring& text, float size) {
-        if (!text.empty()) lines.push_back({ text, size });
+    auto addLine = [&](const std::wstring& text, float size, char role) {
+        if (!text.empty()) lines.push_back({ text, size, 0, 0, role });
     };
     for (char role : st.order) {
-        if (role == 'O')      addLine(st.orig,  st.font);
-        else if (role == 'R') addLine(st.roma,  std::max(10.0f, st.font * 0.55f));
-        else if (role == 'T') addLine(st.trans, std::max(11.0f, st.font * 0.65f));
+        if (role == 'O')      addLine(st.orig,  st.font, 'O');
+        else if (role == 'R') addLine(st.roma,  std::max(10.0f, st.font * 0.55f), 'R');
+        else if (role == 'T') addLine(st.trans, std::max(11.0f, st.font * 0.65f), 'T');
     }
 
     const float gap = 6.0f;
@@ -443,9 +445,42 @@ static void Render() {
         if (fmt) g_dwriteFactory->CreateTextLayout(ln.text.c_str(), (UINT32)ln.text.size(), fmt, maxW, 10000.0f, &lay);
         ID2D1SolidColorBrush* tb = nullptr;
         g_dcRT->CreateSolidColorBrush(st.color, &tb);
+
+        // Karaoke sweep for the word-timed original line: draw the whole line
+        // in the base color, then re-draw it clipped to the sung prefix in the
+        // accent color. doneWidth uses the char-ratio approximation (lyric
+        // lines are CJK-dominated, so per-char width is near-uniform).
+        bool karaoke = st.sungChars >= 0 && ln.role == 'O';
+        float doneW = 0.0f;
+        if (karaoke && lay) {
+            // Cluster metrics give the exact pixel width of the sung prefix.
+            UINT32 maxClusters = (UINT32)ln.text.size() + 1;
+            std::vector<DWRITE_CLUSTER_METRICS> clusters(maxClusters);
+            std::vector<UINT16> clusterIdx(maxClusters);
+            UINT32 actual = 0;
+            if (SUCCEEDED(lay->GetClusterMetrics(clusters.data(), maxClusters, &actual))) {
+                UINT32 pos = 0;
+                for (UINT32 i = 0; i < actual && pos < (UINT32)st.sungChars; i++) {
+                    doneW += clusters[i].width;
+                    pos += clusters[i].length;
+                }
+            }
+        }
+
         if (tb) {
             if (lay) g_dcRT->DrawTextLayout(D2D1::Point2F(pad, y), lay, tb);
-            tb->Release();
+
+            if (karaoke && lay && doneW > 0.5f) {
+                ID2D1SolidColorBrush* hb = nullptr;
+                g_dcRT->CreateSolidColorBrush(st.accent, &hb);
+                if (hb) {
+                    D2D1_RECT_F lineRect = D2D1::RectF(pad, y, pad + doneW, y + ln.h);
+                    g_dcRT->PushAxisAlignedClip(lineRect, D2D1_ANTIALIAS_MODE_ALIASED);
+                    g_dcRT->DrawTextLayout(D2D1::Point2F(pad, y), lay, hb);
+                    g_dcRT->PopAxisAlignedClip();
+                    hb->Release();
+                }
+            }
         }
         y += ln.h + gap;
         if (lay) lay->Release();
@@ -639,6 +674,8 @@ static void ApplyCommand(const std::string& line) {
         g_state.orig  = Utf8ToWide(a && a->type == JsonVal::STR ? a->str : "");
         g_state.roma  = Utf8ToWide(r && r->type == JsonVal::STR ? r->str : "");
         g_state.trans = Utf8ToWide(tr && tr->type == JsonVal::STR ? tr->str : "");
+        auto* sg = FindMember(root, "sung");
+        g_state.sungChars = (sg && sg->type == JsonVal::NUM) ? (int)sg->num : -1;
         LeaveCriticalSection(&g_cs);
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
     } else if (type == "style") {
@@ -653,6 +690,8 @@ static void ApplyCommand(const std::string& line) {
         EnterCriticalSection(&g_cs);
         if (f && f->type == JsonVal::NUM)  g_state.font = (float)f->num;
         if (c && c->type == JsonVal::STR)  g_state.color = ParseColor(c->str);
+        auto* ac = FindMember(root, "accent");
+        if (ac && ac->type == JsonVal::STR) g_state.accent = ParseColor(ac->str);
         if (b && b->type == JsonVal::NUM)  g_state.bg = (float)b->num;
         // bold arrives as a number (1/0) from the C# side — same compat as
         // vertical/click below; BOOL-only parsing silently dropped every

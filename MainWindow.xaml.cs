@@ -53,6 +53,11 @@ public sealed partial class MainWindow : Window
 
     private LyricDocument? _lyrics;
     private readonly List<StackPanel> _lyricPanels = new();
+    // Word-timed (karaoke) rows, parallel to _lyricPanels: the source line and
+    // its gradient brush (null for plain LRC rows). UpdateWordHighlight slides
+    // the two-stop gradient across the line for the flowing karaoke sweep.
+    private readonly List<Models.LyricLine?> _wordLines = new();
+    private readonly List<TextBlock?> _wordOverlays = new(); // accent layer, clipped to sung prefix
     private FrameworkElement? _lyricScrollTarget;
     private int _currentLineIndex = -1;
     private int _loadedIndex = -1;
@@ -3045,7 +3050,7 @@ public sealed partial class MainWindow : Window
         if (_lyrics != null && _currentLineIndex >= 0)
         {
             var l = _lyrics.Lines[_currentLineIndex];
-            _desktopLyrics.UpdateLyric(_currentTrack, l.Original ?? string.Empty, l.Romaji, l.Translation);
+            _desktopLyrics.UpdateLyric(_currentTrack, l.Original ?? string.Empty, l.Romaji, l.Translation, 0);
         }
         else if (_currentTrack != null && _lyrics == null)
         {
@@ -3065,7 +3070,7 @@ public sealed partial class MainWindow : Window
         _pushedOriginal = "暂无歌词";
         _pushedRoma = null;
         _pushedTrans = null;
-        _desktopLyrics.UpdateLyric(track, "暂无歌词", null, null);
+        _desktopLyrics.UpdateLyric(track, "暂无歌词", null, null, 0);
     }
 
     private void BtnDesktopLyrics_Unchecked(object sender, RoutedEventArgs e)
@@ -3527,6 +3532,9 @@ public sealed partial class MainWindow : Window
         var showTrans = _settings.LyricShowTranslation;
         var order = LyricPreferences.ParseLineOrder(_settings.LyricLineOrder);
 
+        _wordLines.Clear();
+        _wordOverlays.Clear();
+
         foreach (var line in doc.Lines)
         {
             var panel = new StackPanel
@@ -3538,19 +3546,28 @@ public sealed partial class MainWindow : Window
 
             // Build each available line with its role, then append them in the
             // user's chosen order (same order the desktop overlay uses).
-            var parts = new List<(char Role, string Text, double Size, Windows.UI.Color Color)>();
-            if (!string.IsNullOrWhiteSpace(line.Original))
-                parts.Add(('O', line.Original, 22, Microsoft.UI.Colors.White));
-            if (showRoma && !string.IsNullOrWhiteSpace(line.Romaji))
-                parts.Add(('R', line.Romaji, 14, Microsoft.UI.Colors.SkyBlue));
-            if (showTrans && !string.IsNullOrWhiteSpace(line.Translation))
-                parts.Add(('T', line.Translation, 16, Microsoft.UI.Colors.LightGreen));
+            // Word-timed originals get a horizontal two-stop gradient
+            // (sung -> unsung) that UpdateWordHighlight slides karaoke-style.
+            TextBlock? MakePart(char role)
+            {
+                switch (role)
+                {
+                    case 'O' when !string.IsNullOrWhiteSpace(line.Original):
+                        return MakeTextBlock(line.Original, 22, Microsoft.UI.Colors.White);
+                    case 'R' when showRoma && !string.IsNullOrWhiteSpace(line.Romaji):
+                        return MakeTextBlock(line.Romaji, 14, Microsoft.UI.Colors.SkyBlue);
+                    case 'T' when showTrans && !string.IsNullOrWhiteSpace(line.Translation):
+                        return MakeTextBlock(line.Translation, 16, Microsoft.UI.Colors.LightGreen);
+                    default:
+                        return null;
+                }
+            }
 
             foreach (var role in order)
             {
-                var part = parts.FirstOrDefault(p => p.Role == role);
-                if (part.Text != null)
-                    panel.Children.Add(MakeTextBlock(part.Text, part.Size, part.Color));
+                var tb = MakePart(role);
+                if (tb != null)
+                    panel.Children.Add(tb);
             }
 
             if (panel.Children.Count == 0)
@@ -3558,7 +3575,40 @@ public sealed partial class MainWindow : Window
 
             LyricStack.Children.Add(panel);
             _lyricPanels.Add(panel);
+            TextBlock? overlay = null;
+            if (line.Words is { Count: > 0 })
+            {
+                // The karaoke row is a Grid: base copy in unsung white + an
+                // accent copy clipped to the sung prefix (slide per tick).
+                var baseTb = MakeTextBlock(line.Original!, 22, Microsoft.UI.Colors.White);
+                overlay = MakeTextBlock(line.Original!, 22, AccentColor());
+                var host = new Grid();
+                host.Children.Add(baseTb);
+                host.Children.Add(overlay);
+                panel.Children.Add(host);
+            }
+            _wordLines.Add(line);
+            _wordOverlays.Add(overlay);
         }
+    }
+
+    /// <summary>Accent color for the karaoke sweep — follows the saved theme
+    /// color so the sweep matches the rest of the UI.</summary>
+    private static Windows.UI.Color AccentColor()
+    {
+        try
+        {
+            var s = (SettingsStore.Load().AccentColor ?? "#31c27c").TrimStart('#');
+            if (s.Length == 6)
+                return Microsoft.UI.ColorHelper.FromArgb(255,
+                    Convert.ToByte(s[..2], 16), Convert.ToByte(s.Substring(2, 2), 16),
+                    Convert.ToByte(s.Substring(4, 2), 16));
+        }
+        catch
+        {
+            // fall through to the default accent
+        }
+        return Microsoft.UI.ColorHelper.FromArgb(255, 0x31, 0xc2, 0x7c);
     }
 
     /// <summary>Rebuild the lyrics panel (e.g. after toggling romaji/translation)
@@ -3567,6 +3617,8 @@ public sealed partial class MainWindow : Window
     {
         LyricStack.Children.Clear();
         _lyricPanels.Clear();
+        _wordLines.Clear();
+        _wordOverlays.Clear();
         _currentLineIndex = -1;
 
         if (_lyrics == null)
@@ -3612,7 +3664,8 @@ public sealed partial class MainWindow : Window
 
         if (idx == _currentLineIndex)
         {
-            PushDesktop(idx);
+            var cur = UpdateWordHighlight(idx, t);
+            PushDesktop(idx, cur);
             return;
         }
 
@@ -3624,11 +3677,90 @@ public sealed partial class MainWindow : Window
         if (idx >= 0 && idx < _lyricPanels.Count)
         {
             SetLineActive(_lyricPanels[idx], true);
+            var sung = UpdateWordHighlight(idx, t);
+            PushDesktop(idx, sung);
             _lyricScrollTarget = _lyricPanels[idx];
             _dispatcher.TryEnqueue(ScrollLyricToCurrent);
         }
 
         PushDesktop(idx);
+    }
+
+    /// <summary>Characters sung so far in line <paramref name="idx"/> — also
+    /// fed to the desktop overlay for its karaoke split.</summary>
+    private int CountSungChars(Models.LyricLine line, TimeSpan t)
+    {
+        int sung = 0;
+        if (line.Words == null)
+            return -1;
+        foreach (var w in line.Words)
+        {
+            if (w.Start <= t)
+                sung += w.Text.Length;
+            else
+                break;
+        }
+        return sung;
+    }
+
+    /// <summary>
+    /// Flowing karaoke sweep for a word-timed row: the accent overlay is
+    /// clipped to the sung prefix (char count from the word timing), so the
+    /// highlight washes over the line smoothly between word boundaries.
+    /// Returns the number of sung characters for the desktop overlay.
+    /// </summary>
+    private int UpdateWordHighlight(int idx, TimeSpan t)
+    {
+        if (idx < 0 || idx >= _wordOverlays.Count)
+            return -1;
+        var overlay = _wordOverlays[idx];
+        var line = _wordLines[idx];
+        if (overlay == null || line.Words == null || line.Words.Count == 0)
+            return -1;
+
+        int sungChars = 0;
+        int totalChars = 0;
+        double doneChars = 0; // fractional: current word contributes proportionally
+        Models.LyricWord? current = null;
+        foreach (var w in line.Words)
+        {
+            totalChars += w.Text.Length;
+            if (w.Start <= t)
+            {
+                sungChars += w.Text.Length;
+                doneChars = sungChars;
+                current = w;
+            }
+        }
+
+        double progress;
+        if (current == null)
+        {
+            progress = 0;
+        }
+        else
+        {
+            var charsBefore = doneChars - current.Text.Length;
+            var frac = current.Duration.TotalMilliseconds > 0
+                ? Math.Clamp((t - current.Start).TotalMilliseconds / current.Duration.TotalMilliseconds, 0, 1)
+                : 1;
+            progress = totalChars > 0
+                ? (charsBefore + current.Text.Length * frac) / totalChars
+                : 1;
+        }
+
+        // Clip the accent copy to the sung prefix. ActualWidth is only valid
+        // after layout — before that the clip stays zero (invisible), which is
+        // exactly the "not sung yet" state.
+        var wpx = overlay.ActualWidth;
+        if (wpx > 0)
+        {
+            overlay.Clip = new RectangleGeometry
+            {
+                Rect = new Windows.Foundation.Rect(0, 0, wpx * progress, overlay.ActualHeight + 8)
+            };
+        }
+        return sungChars;
     }
 
     /// <summary>
@@ -3661,8 +3793,9 @@ public sealed partial class MainWindow : Window
     private string? _pushedOriginal;
     private string? _pushedRoma;
     private string? _pushedTrans;
+    private int _pushedSungChars = -1;
 
-    private void PushDesktop(int idx)
+    private void PushDesktop(int idx, int sungChars = -1)
     {
         if (_desktopLyrics == null)
             return;
@@ -3672,7 +3805,7 @@ public sealed partial class MainWindow : Window
             // of letting the PREVIOUS track's last line linger on screen.
             if (_pushedTrack != null)
             {
-                _desktopLyrics.UpdateLyric(_currentTrack, string.Empty, null, null);
+                _desktopLyrics.UpdateLyric(_currentTrack, string.Empty, null, null, 0);
                 _pushedTrack = null;
                 _pushedOriginal = _pushedRoma = _pushedTrans = null;
             }
@@ -3688,14 +3821,16 @@ public sealed partial class MainWindow : Window
         if (ReferenceEquals(_currentTrack, _pushedTrack)
             && string.Equals(original, _pushedOriginal, StringComparison.Ordinal)
             && string.Equals(roma, _pushedRoma, StringComparison.Ordinal)
-            && string.Equals(trans, _pushedTrans, StringComparison.Ordinal))
+            && string.Equals(trans, _pushedTrans, StringComparison.Ordinal)
+            && sungChars == _pushedSungChars)
             return;
 
         _pushedTrack = _currentTrack;
         _pushedOriginal = original;
         _pushedRoma = roma;
         _pushedTrans = trans;
-        _desktopLyrics.UpdateLyric(_currentTrack, original, roma, trans);
+        _pushedSungChars = sungChars;
+        _desktopLyrics.UpdateLyric(_currentTrack, original, roma, trans, sungChars);
     }
 
     // ---------- Romaji / translation toggles (in-app + desktop overlay) ----------
@@ -3777,6 +3912,18 @@ public sealed partial class MainWindow : Window
         return File.Exists(basePath + ".lrc") || File.Exists(basePath + ".srt");
     }
 
+    /// <summary>True when a word-timed lyric file (.qrc/.yrc/.krc) exists for
+    /// the track's audio base name.</summary>
+    private static bool HasWordLyricFile(Track t)
+    {
+        var basePath = Path.Combine(
+            Path.GetDirectoryName(t.Path) ?? "",
+            Path.GetFileNameWithoutExtension(t.Path));
+        return File.Exists(basePath + ".qrc")
+            || File.Exists(basePath + ".yrc")
+            || File.Exists(basePath + ".krc");
+    }
+
     /// <summary>
     /// Write downloaded lyrics next to the audio: main .lrc plus companion
     /// .zh.lrc (translation) / .romaji.lrc — the exact names LyricsParser
@@ -3812,6 +3959,37 @@ public sealed partial class MainWindow : Window
         if (zh != null) AtomicFile.WriteAllText(basePath + ".zh.lrc", LyricsParser.RemoveBlankLines(zh), utf8);
         if (ro != null) AtomicFile.WriteAllText(basePath + ".romaji.lrc", LyricsParser.RemoveBlankLines(ro), utf8);
         return true;
+    }
+
+    /// <summary>
+    /// Save a WORD-TIMED main lyric (QRC/YRC/KRC) next to the audio, plus the
+    /// line-level translation/romaji companions. Any same-base .lrc main file
+    /// is removed: FindMainLyric prefers word-timed files anyway, and keeping
+    /// both would let a stale .lrc shadow a future line-level re-download.
+    /// </summary>
+    private static bool SaveWordLyricFile(
+        Track track, string content, string ext, string? trans, string? roma)
+    {
+        var basePath = Path.Combine(
+            Path.GetDirectoryName(track.Path) ?? "",
+            Path.GetFileNameWithoutExtension(track.Path));
+        var utf8 = new System.Text.UTF8Encoding(false);
+
+        try
+        {
+            AtomicFile.WriteAllText(basePath + ext, content, utf8);
+            if (File.Exists(basePath + ".lrc"))
+                File.Delete(basePath + ".lrc");
+            if (!string.IsNullOrWhiteSpace(trans))
+                AtomicFile.WriteAllText(basePath + ".zh.lrc", LyricsParser.RemoveBlankLines(trans), utf8);
+            if (!string.IsNullOrWhiteSpace(roma))
+                AtomicFile.WriteAllText(basePath + ".romaji.lrc", LyricsParser.RemoveBlankLines(roma), utf8);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private async Task AutoDownloadLyricForTrackAsync(Track track)
@@ -3863,10 +4041,51 @@ public sealed partial class MainWindow : Window
         var sourceKind = LyricPreferences.ParseSource(_settings.LyricSource);
         bool tryNetEase = sourceKind is LyricSourceKind.Auto or LyricSourceKind.NetEase;
         bool tryQq = sourceKind is LyricSourceKind.Auto or LyricSourceKind.QQ;
+        bool tryKugou = sourceKind is LyricSourceKind.Auto or LyricSourceKind.KuGou;
         bool tryLrclib = sourceKind is LyricSourceKind.Auto or LyricSourceKind.LRCLIB;
         var fillMode = LyricPreferences.ParseFillMode(_settings.LyricFillMode);
+        bool wordMode = _settings.LyricWordLyrics;
 
-        // 1) NetEase (full three-line set).
+        // 0) Karaoke-first pass: when word-timed download is on, the word
+        // sources are tried BEFORE the line-level ones — NetEase would almost
+        // always win with a plain LRC and the karaoke option would never be
+        // reached in Auto mode. Falls through to the normal chain on failure.
+        if (wordMode)
+        {
+            if (tryQq)
+            {
+                var wordQqResults = await QQLyricService.SearchAsync(keyword, 20);
+                var wordQqBest = BestMatch(wordQqResults, localTitle,
+                    Norm(track.Artist == "未知歌手" ? "" : track.Artist), durationSec);
+                if (wordQqBest != null)
+                {
+                    var raw = await QQLyricService.FetchLyricRawAsync(wordQqBest.SongMid, wordQqBest.SongId);
+                    if (raw != null && !string.IsNullOrWhiteSpace(raw.Value.Lyric) &&
+                        SaveWordLyricFile(track, raw.Value.Lyric!, ".qrc", raw.Value.Trans, raw.Value.Roma))
+                        return true;
+                }
+            }
+
+            if (tryKugou)
+            {
+                var wordKgResults = await KugouLyricService.SearchAsync(keyword, 20);
+                var wordKgBest = BestMatch(wordKgResults, localTitle,
+                    Norm(track.Artist == "未知歌手" ? "" : track.Artist), durationSec);
+                if (wordKgBest != null)
+                {
+                    var (_, wordKrc) = await KugouLyricService.FetchLyricAsync(wordKgBest.SongMid);
+                    if (!string.IsNullOrWhiteSpace(wordKrc) &&
+                        SaveWordLyricFile(track, wordKrc!, ".krc", null, null))
+                        return true;
+                }
+            }
+
+            // Word-timed pass failed — the chain below saves plain LRC.
+        }
+
+        // 1) NetEase (full three-line set). Word-timed YRC needs the encrypted
+        // eapi endpoint — the public one doesn't serve it — so NetEase stays
+        // line-level for now.
         var neSong = tryNetEase ? await MatchNetEaseAsync(keyword, track.Title, durationSec) : null;
         if (neSong != null)
         {
@@ -3874,6 +4093,25 @@ public sealed partial class MainWindow : Window
             if (ne != null &&
                 SaveLyricFiles(track, ne.Value.Lyric, ne.Value.Trans, ne.Value.Roma, fillMode))
                 return true;
+        }
+
+        // 1b) KuGou (word-timed KRC + plain LRC, no login). Tried before QQ
+        // because the public KRC endpoint works without cookies.
+        if (tryKugou)
+        {
+            var kgResults = await KugouLyricService.SearchAsync(keyword, 20);
+            var kgBest = BestMatch(kgResults, localTitle,
+                Norm(track.Artist == "未知歌手" ? "" : track.Artist), durationSec);
+            if (kgBest != null)
+            {
+                var (lrc, krc) = await KugouLyricService.FetchLyricAsync(kgBest.SongMid);
+                if (wordMode && !string.IsNullOrWhiteSpace(krc) &&
+                    SaveWordLyricFile(track, krc!, ".krc", null, null))
+                    return true;
+                if (!string.IsNullOrWhiteSpace(lrc) &&
+                    SaveLyricFiles(track, lrc, null, null, fillMode))
+                    return true;
+            }
         }
 
         // 2) QQ Music fallback (original + translation + romaji via QRC).
@@ -3921,6 +4159,15 @@ public sealed partial class MainWindow : Window
             // Require a real title match (>=10) to avoid saving wrong lyrics.
             if (best != null && bestScore >= 10)
             {
+                if (wordMode)
+                {
+                    // Karaoke mode: keep the raw QRC word timing, save as .qrc.
+                    var raw = await QQLyricService.FetchLyricRawAsync(best.SongMid, best.SongId);
+                    if (raw != null && !string.IsNullOrWhiteSpace(raw.Value.Lyric) &&
+                        SaveWordLyricFile(track, raw.Value.Lyric!, ".qrc", raw.Value.Trans, raw.Value.Roma))
+                        return true;
+                }
+
                 var lyric = await QQLyricService.FetchLyricAsync(best.SongMid, best.SongId);
                 if (lyric != null &&
                     SaveLyricFiles(track, lyric.Value.Lyric, lyric.Value.Trans, lyric.Value.Roma, fillMode))
@@ -3979,6 +4226,55 @@ public sealed partial class MainWindow : Window
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Shared match scoring for lyric search results: loose title match plus
+    /// artist bonus and duration proximity. Same rules every source branch
+    /// used to duplicate inline.
+    /// </summary>
+    private static QQSong? BestMatch(List<QQSong> results, string localTitle, string primaryArtist, int? durationSec)
+    {
+        QQSong? best = null;
+        var bestScore = int.MinValue;
+        var nt = Norm(localTitle);
+        if (nt.Length == 0)
+            return null;
+
+        foreach (var r in results)
+        {
+            var rt = Norm(r.Title);
+            if (rt.Length == 0)
+                continue;
+
+            int score;
+            if (rt == nt)
+                score = 10;
+            else if (rt.Contains(nt, StringComparison.Ordinal) ||
+                     nt.Contains(rt, StringComparison.Ordinal))
+                score = 6;
+            else
+                continue;
+
+            if (primaryArtist.Length > 0 && Norm(r.Artist).Contains(primaryArtist, StringComparison.Ordinal))
+                score += 5;
+
+            if (durationSec is > 0 && r.DurationSec > 0)
+            {
+                var delta = Math.Abs(durationSec.Value - r.DurationSec);
+                if (delta <= 3) score += 8;
+                else if (delta <= 8) score += 3;
+                else score -= 2;
+            }
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = r;
+            }
+        }
+
+        return bestScore >= 10 ? best : null;
     }
 
     /// <summary>Pick the best NetEase match: loose title match + closest duration.</summary>
@@ -4122,18 +4418,29 @@ public sealed partial class MainWindow : Window
             return false;
         var selected = picked.Value.Song;
         var source = picked.Value.SourceIndex;
-        var sourceName = source switch { 1 => "网易云", 2 => "LRCLIB", _ => "QQ音乐" };
+        var sourceName = source switch { 1 => "网易云", 2 => "LRCLIB", 3 => "酷狗", _ => "QQ音乐" };
 
         ShowInfoBar($"正在下载歌词（{sourceName}）：{selected.Title} - {selected.Artist}");
         (string? Lyric, string? Trans, string? Roma)? lyric;
+        bool wordModeForManual = _settings.LyricWordLyrics;
+        string? krcContent = null;
         try
         {
-            lyric = source switch
+            if (source == 3)
             {
-                1 => await NetEaseLyricService.FetchLyricAsync(selected.SongMid),
-                2 => await LrclibService.FetchLyricAsync(selected.SongMid),
-                _ => await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId),
-            };
+                var kg = await KugouLyricService.FetchLyricAsync(selected.SongMid);
+                krcContent = kg.Krc;
+                lyric = (kg.Lrc, null, null);
+            }
+            else
+            {
+                lyric = source switch
+                {
+                    1 => await NetEaseLyricService.FetchLyricAsync(selected.SongMid),
+                    2 => await LrclibService.FetchLyricAsync(selected.SongMid),
+                    _ => await QQLyricService.FetchLyricAsync(selected.SongMid, selected.SongId),
+                };
+            }
         }
         catch (Exception ex)
         {
@@ -4143,6 +4450,44 @@ public sealed partial class MainWindow : Window
         if (string.IsNullOrEmpty(lyric?.Lyric))
         {
             ShowInfoBar("该歌曲没有可用歌词。");
+            return false;
+        }
+
+        // QQ karaoke: keep the raw QRC word timing when enabled.
+        if (source == 0 && wordModeForManual && !string.IsNullOrWhiteSpace(lyric?.Lyric) &&
+            !string.IsNullOrWhiteSpace(selected.SongId))
+        {
+            var rawQq = await QQLyricService.FetchLyricRawAsync(selected.SongMid, selected.SongId);
+            if (rawQq != null && !string.IsNullOrWhiteSpace(rawQq.Value.Lyric) &&
+                SaveWordLyricFile(track, rawQq.Value.Lyric!, ".qrc", rawQq.Value.Trans, rawQq.Value.Roma))
+            {
+                if (_currentTrack == track)
+                    ReloadLyricsForCurrent();
+                ShowInfoBar($"已保存逐字歌词：{selected.Title} - {selected.Artist}");
+                return true;
+            }
+        }
+
+        // KuGou carries its own word-timed KRC: in karaoke mode save that
+        // instead of the plain LRC tuple above.
+        if (source == 3 && !string.IsNullOrWhiteSpace(lyric?.Lyric))
+        {
+            var fillMode = LyricPreferences.ParseFillMode(_settings.LyricFillMode);
+            if (wordModeForManual && !string.IsNullOrWhiteSpace(krcContent) &&
+                SaveWordLyricFile(track, krcContent!, ".krc", null, null))
+            {
+                if (_currentTrack == track)
+                    ReloadLyricsForCurrent();
+                ShowInfoBar($"已保存逐字歌词：{selected.Title} - {selected.Artist}");
+                return true;
+            }
+            if (SaveLyricFiles(track, lyric.Value.Lyric, null, null, fillMode))
+            {
+                if (_currentTrack == track)
+                    ReloadLyricsForCurrent();
+                ShowInfoBar($"已保存歌词：{selected.Title} - {selected.Artist}");
+                return true;
+            }
             return false;
         }
 
@@ -4355,11 +4700,23 @@ public sealed partial class MainWindow : Window
         var incomplete = new List<Track>();
         var forcedEnc = _settings.LyricEncoding == "auto" ? null : _settings.LyricEncoding;
 
+        var wordMode = _settings.LyricWordLyrics;
+
         foreach (var t in tracks)
         {
             try
             {
                 if (!HasLocalLyric(t))
+                {
+                    noLyric.Add(t);
+                    continue;
+                }
+
+                // Karaoke mode upgrade: a track that only has a line-level
+                // lyric (plain .lrc/.srt) is re-downloaded as word-timed
+                // (.qrc/.krc) — otherwise "补全歌词" would never upgrade an
+                // existing library to karaoke.
+                if (wordMode && !HasWordLyricFile(t))
                 {
                     noLyric.Add(t);
                     continue;
@@ -4868,6 +5225,13 @@ public sealed partial class MainWindow : Window
             ReloadLyricsForCurrent();
     }
 
+    private void WordLyricsToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents) return; // initialization assignment
+        _settings.LyricWordLyrics = WordLyricsToggle.IsOn;
+        SettingsStore.Save(_settings);
+    }
+
     private void LyricSourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressSettingEvents) return; // initialization assignment
@@ -4876,7 +5240,8 @@ public sealed partial class MainWindow : Window
         {
             1 => LyricSourceKind.NetEase,
             2 => LyricSourceKind.QQ,
-            3 => LyricSourceKind.LRCLIB,
+            3 => LyricSourceKind.KuGou,
+            4 => LyricSourceKind.LRCLIB,
             _ => LyricSourceKind.Auto
         });
         SettingsStore.Save(_settings);
@@ -4955,11 +5320,12 @@ public sealed partial class MainWindow : Window
         LyricFillMain.IsChecked = fill == LyricFillModeKind.MainOnly;
         LyricFillExtras.IsChecked = fill == LyricFillModeKind.ExtrasOnly;
 
+        WordLyricsToggle.IsOn = _settings.LyricWordLyrics;
         LyricSourceCombo.SelectedIndex = src switch
         {
             LyricSourceKind.NetEase => 1,
             LyricSourceKind.QQ => 2,
-            LyricSourceKind.LRCLIB => 3,
+            LyricSourceKind.KuGou => 3, LyricSourceKind.LRCLIB => 4,
             _ => 0
         };
         LyricFillModeCombo.SelectedIndex = fill switch

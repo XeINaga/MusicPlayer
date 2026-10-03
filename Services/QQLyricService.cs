@@ -184,6 +184,69 @@ public static class QQLyricService
     }
 
     /// <summary>
+    /// Same as <see cref="FetchLyricAsync"/> but the main lyric keeps its
+    /// ORIGINAL word-level QRC markup (no QRC→LRC downgrade) — for the
+    /// karaoke download option. Translation/romaji are line-level either way.
+    /// </summary>
+    public static async Task<(string? Lyric, string? Trans, string? Roma)?> FetchLyricRawAsync(
+        string songMid, string? songId = null)
+    {
+        string? lyric = null, trans = null, roma = null;
+
+        var plainUrl = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg" +
+                       $"?songmid={Uri.EscapeDataString(songMid)}&g_tk=5381&format=json&nobase64=1" +
+                       "&inCharset=utf8&outCharset=utf-8";
+
+        var json = await GetAsync(plainUrl, "https://music.qq.com/");
+        if (json != null)
+        {
+            JsonDocument doc;
+            try
+            {
+                doc = JsonDocument.Parse(json);
+            }
+            catch (JsonException)
+            {
+                doc = JsonDocument.Parse("{}");
+            }
+            using (doc)
+            {
+                var root = doc.RootElement;
+                if (!(root.TryGetProperty("retcode", out var rc) && rc.ValueKind == JsonValueKind.Number && rc.GetInt32() != 0))
+                {
+                    lyric = NullIfEmpty(GetString(root, "lyric"));
+                    trans = NullIfEmpty(GetString(root, "trans"));
+                }
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(songId))
+        {
+            try
+            {
+                var qrcUrl = "https://c.y.qq.com/qqmusic/fcgi-bin/lyric_download.fcg" +
+                             $"?version=15&miniversion=82&lrctype=4&musicid={Uri.EscapeDataString(songId)}";
+                var qrc = await GetAsync(qrcUrl, "https://c.y.qq.com/");
+                if (qrc != null)
+                {
+                    var (qLyric, qTrans, qRoma) = QqQrcDecrypter.ParseQrcKeepWords(qrc);
+                    if (qLyric != null) lyric = qLyric;
+                    if (qTrans != null) trans ??= qTrans;
+                    if (qRoma != null) roma ??= qRoma;
+                }
+            }
+            catch
+            {
+                // offline / blocked — caller falls back to the line-level path
+            }
+        }
+
+        if (lyric == null && trans == null && roma == null)
+            return null;
+        return (lyric, trans, roma);
+    }
+
+    /// <summary>
     /// Fetch lyrics (original / translation / romaji) for one song. Any of the
     /// three may be null/empty when QQ Music has no such version available.
     /// Original + translation come from the plain LRC endpoint (reliable);

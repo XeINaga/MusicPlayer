@@ -655,8 +655,13 @@
                                         <ComboBoxItem Content="自动" />
                                         <ComboBoxItem Content="网易云音乐" />
                                         <ComboBoxItem Content="QQ 音乐" />
+                                        <ComboBoxItem Content="酷狗音乐" />
                                         <ComboBoxItem Content="LRCLIB" />
                                     </ComboBox>
+                                    <ToggleSwitch x:Name="WordLyricsToggle" Header="下载逐字歌词（卡拉OK，QQ QRC / 酷狗 KRC）"
+                                                  OffContent="关" OnContent="开" Margin="0,8,0,0"
+                                                  Toggled="WordLyricsToggle_Toggled"
+                                                  ToolTipService.ToolTip="开启后补全/下载歌词时优先保存逐字时间（.qrc/.krc 文件），歌词面板会高亮当前演唱到的字；源没有逐字版本时自动回退普通 LRC。" />
                                     <TextBlock Text="QQ音乐 Cookie（可选）— QQ 已限制未登录搜索，粘贴 Cookie 后 QQ 源可用："
                                                Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
                                     <TextBox x:Name="QqCookieBox" HorizontalAlignment="Stretch" MaxWidth="640"
