@@ -70,6 +70,7 @@ public sealed partial class OnlineLyricWindow : Window
         {
             LyricSourceKind.NetEase => 1,
             LyricSourceKind.LRCLIB => 2,
+            LyricSourceKind.KuGou => 3,
             _ => 0, // Auto and QQ both open on QQ Music
         };
         _suppressSourceEvents = false;
@@ -203,6 +204,7 @@ public sealed partial class OnlineLyricWindow : Window
     {
         1 => 1,
         2 => 2,
+        3 => 3,
         _ => 0,
     };
 
@@ -246,6 +248,7 @@ public sealed partial class OnlineLyricWindow : Window
             {
                 1 => await NetEaseLyricService.SearchAsync(kw),
                 2 => await LrclibService.SearchAsync(kw),
+                3 => await KugouLyricService.SearchAsync(kw),
                 _ => await QQLyricService.SearchAsync(kw),
             };
         }
@@ -280,6 +283,7 @@ public sealed partial class OnlineLyricWindow : Window
         {
             1 => "NetEase",
             2 => "LRCLIB",
+            3 => "Kugou",
             _ => "QQ",
         };
         SettingsStore.Save(_settings);

@@ -330,6 +330,7 @@ public sealed class DesktopLyricsOverlay : IDisposable
             order = LyricPreferences.ParseLineOrder(s.LyricLineOrder),
             vertical = s.LyricVertical ? 1 : 0,
             width = s.LyricBoxWidth,
+            accent = s.AccentColor ?? "#31c27c",
         };
         Send(JsonSerializer.Serialize(payload, JsonOptions));
     }
@@ -339,14 +340,17 @@ public sealed class DesktopLyricsOverlay : IDisposable
         Send(JsonSerializer.Serialize(new { t = "click", on = on ? 1 : 0 }, JsonOptions));
 
     /// <summary>Push the current lyric line (original / romaji / translation).</summary>
-    public void UpdateLyric(MusicPlayer.Models.Track? track, string original, string? romaji, string? translation)
+    public void UpdateLyric(MusicPlayer.Models.Track? track, string original, string? romaji, string? translation, int sungChars = -1)
     {
+        // sungChars: characters already sung in the current word-timed line
+        // (-1 = not word-timed). The overlay paints the prefix karaoke-style.
         Send(JsonSerializer.Serialize(new
         {
             t = "lyric",
             orig = original ?? "",
             roma = romaji ?? "",
             trans = translation ?? "",
+            sung = sungChars,
         }, JsonOptions));
     }
 

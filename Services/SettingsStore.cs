@@ -77,6 +77,14 @@ public sealed class AppSettings
 
     /// <summary>Desktop lyrics wrap width (logical px); 0 = auto-fit.</summary>
     public int LyricBoxWidth { get; set; }
+
+    /// <summary>
+    /// Prefer WORD-TIMED lyrics when downloading (QQ QRC / KuGou KRC): the
+    /// saved file keeps per-word timing and the lyrics panel highlights the
+    /// current syllable karaoke-style. Plain LRC stays the fallback when a
+    /// source has no word-timed version.
+    /// </summary>
+    public bool LyricWordLyrics { get; set; }
     public string DefaultPlayMode { get; set; } = "Sequential"; // PlayMode name
 
     /// <summary>What the window close button does: "Exit" or "Tray" (minimize to tray).</summary>
@@ -194,10 +202,11 @@ public sealed class WatchedFolder
 /// <summary>Lyric sources the user can choose from.</summary>
 public enum LyricSourceKind
 {
-    /// <summary>NetEase → QQ → LRCLIB, first hit wins.</summary>
+    /// <summary>NetEase → QQ → KuGou → LRCLIB, first hit wins.</summary>
     Auto,
     NetEase,
     QQ,
+    KuGou,
     LRCLIB,
 }
 
@@ -230,6 +239,7 @@ public static class LyricPreferences
     {
         "netease" => LyricSourceKind.NetEase,
         "qq" => LyricSourceKind.QQ,
+        "kugou" => LyricSourceKind.KuGou,
         "lrclib" => LyricSourceKind.LRCLIB,
         _ => LyricSourceKind.Auto,
     };
@@ -245,6 +255,7 @@ public static class LyricPreferences
     {
         LyricSourceKind.NetEase => "NetEase",
         LyricSourceKind.QQ => "QQ",
+        LyricSourceKind.KuGou => "Kugou",
         LyricSourceKind.LRCLIB => "LRCLIB",
         _ => "Auto",
     };

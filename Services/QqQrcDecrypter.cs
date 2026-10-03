@@ -142,6 +142,69 @@ public static class QqQrcDecrypter
     }
 
     /// <summary>
+    /// Same as <see cref="ParseQrc"/> but keeps the ORIGINAL word-timed text
+    /// for the main lyric (no QRC→LRC downgrade) — for the "download karaoke
+    /// lyrics" option. Translation and romaji are line-level either way.
+    /// </summary>
+    public static (string? Lyric, string? Trans, string? Roma) ParseQrcKeepWords(string qrcXml)
+    {
+        qrcXml = qrcXml.Replace("<!--", "").Replace("-->", "");
+
+        string? DecodeTag(string tag)
+        {
+            try
+            {
+                var m = Regex.Match(
+                    qrcXml,
+                    "<" + tag + "\\b[^>]*>\\s*<!\\[CDATA\\[(.*?)\\]\\]>\\s*</" + tag + ">",
+                    RegexOptions.Singleline);
+                if (!m.Success)
+                    return null;
+
+                var raw = m.Groups[1].Value.Trim();
+                if (raw.Length == 0)
+                    return null;
+
+                var dec = Decrypt(raw);
+                return ToLrc(ExtractLyricContent(dec));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        string? DecodeTagRaw(string tag)
+        {
+            try
+            {
+                var m = Regex.Match(
+                    qrcXml,
+                    "<" + tag + "\\b[^>]*>\\s*<!\\[CDATA\\[(.*?)\\]\\]>\\s*</" + tag + ">",
+                    RegexOptions.Singleline);
+                if (!m.Success)
+                    return null;
+
+                var raw = m.Groups[1].Value.Trim();
+                if (raw.Length == 0)
+                    return null;
+
+                // Keep the word-level markup; only decode XML entities the way
+                // ExtractLyricContent does for the LyricContent attribute — the
+                // raw QRC body here is an inner document whose lines carry the
+                // [start,dur]word(start,dur) markup directly.
+                return ExtractLyricContent(Decrypt(raw));
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return (DecodeTagRaw("content"), DecodeTag("contentts"), DecodeTag("contentroma"));
+    }
+
+    /// <summary>
     /// Pull the lyric text out of the decrypted inner QRC document.
     /// The inner document is read with a regex (not XmlDocument) on purpose:
     /// XML attribute-value normalization would collapse the newlines that
