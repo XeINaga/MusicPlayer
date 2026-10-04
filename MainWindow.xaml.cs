@@ -257,10 +257,12 @@ public sealed partial class MainWindow : Window
         UpdateProfileSubtitle();
         UpdateQueueBadge();
 
-        // Title bar shows the app icon instead of a colour dot.
+        // Title bar + profile avatar show the app icon.
         try
         {
-            TitleAppIcon.Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "AppIcon.ico")));
+            var iconUri = new Uri(Path.Combine(AppContext.BaseDirectory, "AppIcon.ico"));
+            TitleAppIcon.Source = new BitmapImage(iconUri);
+            ProfileAvatarImage.Source = new BitmapImage(iconUri);
         }
         catch
         {
@@ -5354,6 +5356,10 @@ public sealed partial class MainWindow : Window
 
     private void ShowSettings()
     {
+        // Every open starts at the top — the ScrollViewer keeps its old pixel
+        // offset from the previous visit otherwise.
+        _dispatcher.TryEnqueue(() => SettingsScroll.ChangeView(null, 0, null, true));
+
         // Pushing persisted values into the controls must not echo back out
         // as "changes" (see _suppressSettingEvents).
         _suppressSettingEvents = true;
@@ -5374,6 +5380,7 @@ public sealed partial class MainWindow : Window
         LyricColorPicker.Color = ParseHex(_settings.LyricColor);
         SungColorPicker.Color = ParseHex(_settings.LyricSungColor);
         UnsungColorPicker.Color = ParseHex(_settings.LyricUnsungColor);
+        UpdateColorSwatches();
         LyricOpacitySlider.Value = _settings.LyricBgOpacity * 100;
         LyricBoldToggle.IsOn = _settings.LyricBold;
         LyricAlignCombo.SelectedIndex = _settings.LyricAlign == "Left" ? 1 : 0;
@@ -5409,6 +5416,7 @@ public sealed partial class MainWindow : Window
         AutoStartToggle.IsOn = _settings.AutoStart;
 
         AccentColorPicker.Color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#ef4444" : _settings.AccentColor);
+        UpdateColorSwatches();
 
         // Data/cache location.
         CacheDirBox.Text = DataLocation.Root;
@@ -5707,6 +5715,7 @@ public sealed partial class MainWindow : Window
 
     private void AccentColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
+        UpdateColorSwatches();
         if (_suppressSettingEvents)
             return;
         _settings.AccentColor = ToHex(args.NewColor);
@@ -5824,8 +5833,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>Applies the chosen theme color live by retinting the shared accent brushes
-    /// ("QqGreen" solid + "AccentGlow" gradient first stop) that the whole UI references,
-    /// plus the sidebar avatar gradient.</summary>
+    /// ("QqGreen" solid + "AccentGlow" gradient first stop) that the whole UI references.</summary>
     private void ApplyAccentColor()
     {
         var color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#ef4444" : _settings.AccentColor);
@@ -5833,8 +5841,6 @@ public sealed partial class MainWindow : Window
             qq.Color = color;
         if (FindResource("AccentGlow") is LinearGradientBrush glow && glow.GradientStops.Count > 0)
             glow.GradientStops[0].Color = color;
-        if (ProfileAvatarStopA != null)
-            ProfileAvatarStopA.Color = color;
     }
 
     private bool _coverCollapsed;
@@ -5877,14 +5883,31 @@ public sealed partial class MainWindow : Window
 
     private void LyricColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
-            if (_suppressSettingEvents) return; // initialization assignment
+        UpdateColorSwatches();
+        if (_suppressSettingEvents) return; // initialization assignment
         _settings.LyricColor = ToHex(args.NewColor);
         ScheduleSettingsSave();
         ApplyStyleLive();
     }
 
+    /// <summary>Mirrors the four colour pickers onto their sidebar swatch
+    /// buttons (the pickers themselves live inside flyouts).</summary>
+    private void UpdateColorSwatches()
+    {
+        void Tint(Border? swatch, Windows.UI.Color c)
+        {
+            if (swatch != null)
+                swatch.Background = new SolidColorBrush(c);
+        }
+        Tint(AccentSwatch, AccentColorPicker.Color);
+        Tint(LyricColorSwatch, LyricColorPicker.Color);
+        Tint(SungSwatch, SungColorPicker.Color);
+        Tint(UnsungSwatch, UnsungColorPicker.Color);
+    }
+
     private void SungColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
+        UpdateColorSwatches();
         if (_suppressSettingEvents) return; // initialization assignment
         _settings.LyricSungColor = ToHex(args.NewColor);
         ScheduleSettingsSave();
@@ -5893,6 +5916,7 @@ public sealed partial class MainWindow : Window
 
     private void UnsungColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
     {
+        UpdateColorSwatches();
         if (_suppressSettingEvents) return; // initialization assignment
         _settings.LyricUnsungColor = ToHex(args.NewColor);
         ScheduleSettingsSave();
