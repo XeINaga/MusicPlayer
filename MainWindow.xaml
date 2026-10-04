@@ -9,7 +9,7 @@
     xmlns:models="using:MusicPlayer.Models"
     Title="音乐播放器">
 
-    <Grid x:Name="RootGrid" Background="{ThemeResource AppBackground}" RequestedTheme="Dark" KeyDown="MainWindow_KeyDown">
+    <Grid x:Name="RootGrid" Background="{ThemeResource AppBackground}" RequestedTheme="Light" KeyDown="MainWindow_KeyDown">
 
         <Grid.Resources>
             <services:TimeSpanConverter x:Key="TimeSpanConverter" />
@@ -23,31 +23,32 @@
                  looks them up in this very dictionary and mutates their Color at
                  runtime from the saved setting. -->
 
-            <!-- Accent (primary) buttons keep the gradient and get their own
-                 hover/pressed steps, so they stay clearly the primary action
-                 instead of flattening to the neutral grey on hover. -->
+            <!-- Accent (primary) button resources: the WinUI built-in
+                 AccentButtonStyle (used by CirclePlayStyle below) reads these
+                 for its normal/hover/pressed states. EchoMusic look = white
+                 disc with an ink glyph in both themes. -->
             <LinearGradientBrush x:Key="AccentButtonBackground" StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#31c27c" Offset="0" />
-                <GradientStop Color="#1f9e9e" Offset="1" />
+                <GradientStop Color="#ffffff" Offset="0" />
+                <GradientStop Color="#fdfdfd" Offset="1" />
             </LinearGradientBrush>
             <LinearGradientBrush x:Key="AccentButtonBackgroundPointerOver" StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#3ad88a" Offset="0" />
-                <GradientStop Color="#26b0b0" Offset="1" />
+                <GradientStop Color="#f6f6f8" Offset="0" />
+                <GradientStop Color="#f2f2f5" Offset="1" />
             </LinearGradientBrush>
             <LinearGradientBrush x:Key="AccentButtonBackgroundPressed" StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#28a86a" Offset="0" />
-                <GradientStop Color="#1a8a8a" Offset="1" />
+                <GradientStop Color="#ececef" Offset="0" />
+                <GradientStop Color="#e8e8ec" Offset="1" />
             </LinearGradientBrush>
-            <SolidColorBrush x:Key="AccentButtonForeground" Color="White" />
-            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="White" />
-            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#e8f5f0" />
-            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="Transparent" />
-            <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="Transparent" />
-            <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="Transparent" />
+            <SolidColorBrush x:Key="AccentButtonForeground" Color="#1d1d1f" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#000000" />
+            <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#3a3a44" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrush" Color="#e5e5ea" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrushPointerOver" Color="#d8d8de" />
+            <SolidColorBrush x:Key="AccentButtonBorderBrushPressed" Color="#c9c9d1" />
 
             <LinearGradientBrush x:Key="AccentGlow" StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#31c27c" Offset="0" />
-                <GradientStop Color="#1f9e9e" Offset="1" />
+                <GradientStop Color="#ef4444" Offset="0" />
+                <GradientStop Color="#f97316" Offset="1" />
             </LinearGradientBrush>
 
             <Style x:Key="NavButtonStyle" TargetType="Button">
@@ -56,9 +57,16 @@
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Left" />
-                <Setter Property="Padding" Value="12,10" />
+                <Setter Property="Padding" Value="12,9" />
                 <Setter Property="FontSize" Value="13" />
-                <Setter Property="CornerRadius" Value="{StaticResource RadiusSmall}" />
+                <Setter Property="CornerRadius" Value="{StaticResource RadiusMedium}" />
+            </Style>
+
+            <!-- EchoMusic-style section label between sidebar groups. -->
+            <Style x:Key="NavGroupLabel" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="Foreground" Value="{ThemeResource TextSecondary}" />
+                <Setter Property="Margin" Value="22,10,0,4" />
             </Style>
 
             <Style x:Key="ActionButtonStyle" TargetType="Button">
@@ -92,16 +100,16 @@
                 <Setter Property="CornerRadius" Value="{StaticResource RadiusMedium}" />
             </Style>
 
-            <!-- Primary play button. Based on AccentButtonStyle so it reads the
-                 AccentButton* brushes above and keeps its gradient on hover,
-                 instead of flattening to the neutral button grey. -->
+            <!-- Primary transport play button: EchoMusic's white disc with an
+                 ink glyph and a hairline border (theme-aware via PlayBtn*). -->
             <Style x:Key="CirclePlayStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
-                <Setter Property="Background" Value="{StaticResource AccentGlow}" />
-                <Setter Property="Foreground" Value="White" />
-                <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="24" />
-                <Setter Property="Width" Value="48" />
-                <Setter Property="Height" Value="48" />
+                <Setter Property="Background" Value="{ThemeResource PlayBtnBg}" />
+                <Setter Property="Foreground" Value="{ThemeResource PlayBtnFg}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource PlayBtnBorder}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="20" />
+                <Setter Property="Width" Value="40" />
+                <Setter Property="Height" Value="40" />
             </Style>
 
             <Style x:Key="GhostIconButtonStyle" TargetType="Button">
@@ -112,12 +120,85 @@
                 <Setter Property="CornerRadius" Value="{StaticResource RadiusSmall}" />
             </Style>
 
+            <!-- Toggle buttons whose CHECKED state follows the runtime accent
+                 (the system default paints them with the OS accent colour,
+                 which clashes with the app accent). Works for the pill-shaped
+                 multi-select button and the round 词/穿 chips alike. -->
+            <Style x:Key="AccentToggleStyle" TargetType="primitives:ToggleButton">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{ThemeResource TextPrimary}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="{ThemeResource BorderSoft}" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="primitives:ToggleButton">
+                            <Grid x:Name="Root"
+                                  Background="{TemplateBinding Background}"
+                                  BorderBrush="{TemplateBinding BorderBrush}"
+                                  BorderThickness="{TemplateBinding BorderThickness}"
+                                  CornerRadius="{TemplateBinding CornerRadius}">
+                                <ContentPresenter x:Name="Content"
+                                                  Margin="{TemplateBinding Padding}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  Foreground="{TemplateBinding Foreground}" />
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="Root.Background" Value="{ThemeResource NavHover}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="Root.Background" Value="{ThemeResource NavHover}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="Content.Foreground" Value="{ThemeResource TextMuted}" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                    <VisualStateGroup x:Name="CheckStates">
+                                        <VisualState x:Name="Checked">
+                                            <VisualState.Setters>
+                                                <Setter Target="Root.Background" Value="{StaticResource QqGreen}" />
+                                                <Setter Target="Root.BorderBrush" Value="{StaticResource QqGreen}" />
+                                                <Setter Target="Content.Foreground" Value="White" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedPointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="Root.Background" Value="{StaticResource QqGreen}" />
+                                                <Setter Target="Root.BorderBrush" Value="{StaticResource QqGreen}" />
+                                                <Setter Target="Content.Foreground" Value="White" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedPressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="Root.Background" Value="{StaticResource QqGreen}" />
+                                                <Setter Target="Root.BorderBrush" Value="{StaticResource QqGreen}" />
+                                                <Setter Target="Content.Foreground" Value="White" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Indeterminate" />
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- Settings section card styles (SettingsCard/SettingsCardTitle/
                  SettingsHint) now live in Themes/SukiTheme.xaml — shared with
                  the SoundEffectWindow panel. -->
 
             <DataTemplate x:Key="TrackCardTemplate">
-                <Grid Width="164" Margin="10,10,10,8" RightTapped="TrackItem_RightTapped">
+                <!-- EchoMusic album card: white raised card, soft border. -->
+                <Grid Width="172" Margin="8,8,8,10" RightTapped="TrackItem_RightTapped">
                     <Grid.ContextFlyout>
                         <MenuFlyout>
                             <MenuFlyoutItem Text="打开所在文件夹" Click="OpenContainingFolder_Click">
@@ -133,17 +214,20 @@
                     </Grid.ContextFlyout>
 
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="164" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Grid Grid.Row="0" PointerEntered="Card_PointerEntered" PointerExited="Card_PointerExited">
-                        <Border Width="164" Height="164" CornerRadius="{StaticResource RadiusLarge}" Background="{ThemeResource CardPlaceholder}">
+                    <Border Background="{ThemeResource CardBg}" BorderBrush="{ThemeResource BorderSoft}"
+                            BorderThickness="1" CornerRadius="14" Grid.RowSpan="3" />
+
+                    <Grid Grid.Row="0" Margin="8" Height="156" PointerEntered="Card_PointerEntered" PointerExited="Card_PointerExited">
+                        <Border Width="156" Height="156" CornerRadius="12" Background="{ThemeResource CardPlaceholder}">
                             <Image Source="{Binding Cover}" Stretch="UniformToFill" />
                         </Border>
 
-                        <Border x:Name="Dim" Width="164" Height="164" CornerRadius="{StaticResource RadiusLarge}" Background="#000000" Opacity="0">
+                        <Border x:Name="Dim" Width="156" Height="156" CornerRadius="12" Background="#000000" Opacity="0">
                             <!-- Ease the hover dim instead of snapping to it. -->
                             <Border.OpacityTransition>
                                 <ScalarTransition Duration="0:0:0.18" />
@@ -168,10 +252,10 @@
                         </Button>
                     </Grid>
 
-                    <TextBlock Grid.Row="1" Text="{Binding Title}" Margin="2,9,2,0" FontSize="14"
+                    <TextBlock Grid.Row="1" Text="{Binding Title}" Margin="12,4,12,0" FontSize="14"
                                FontWeight="SemiBold" Foreground="{ThemeResource TextPrimary}"
                                TextTrimming="CharacterEllipsis" MaxLines="1" />
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="4" Margin="2,3,2,0">
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="4" Margin="12,3,12,10">
                         <TextBlock Text="{Binding Artist}" FontSize="12"
                                    Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" MaxLines="1" />
                         <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE768;" FontSize="10"
@@ -184,7 +268,7 @@
             </DataTemplate>
 
             <DataTemplate x:Key="TrackRowTemplate">
-                <Grid Height="56" Margin="4,3,16,3" CornerRadius="{StaticResource RadiusSmall}" ColumnSpacing="14"
+                <Grid Height="60" Margin="8,3,16,3" CornerRadius="10" ColumnSpacing="14"
                       RightTapped="TrackItem_RightTapped"
                       PointerEntered="TrackRow_PointerEntered" PointerExited="TrackRow_PointerExited">
                     <Grid.ContextFlyout>
@@ -251,24 +335,29 @@
             </DataTemplate>
 
             <DataTemplate x:Key="AlbumCardTemplate">
-                <Grid Width="172" Margin="10,10,10,8" Tapped="AlbumCard_Tapped"
-                      Background="Transparent" CornerRadius="{StaticResource RadiusMedium}"
+                <Grid Width="180" Margin="8,8,8,10" Tapped="AlbumCard_Tapped"
+                      Background="Transparent" CornerRadius="14"
                       PointerEntered="AlbumCard_PointerEntered" PointerExited="AlbumCard_PointerExited">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="172" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
-                    <Border Grid.Row="0" Width="172" Height="172" CornerRadius="{StaticResource RadiusMedium}"
-                            Background="{ThemeResource CardPlaceholder}">
-                        <Image Source="{Binding Cover}" Stretch="UniformToFill" />
-                    </Border>
+                    <Border Background="{ThemeResource CardBg}" BorderBrush="{ThemeResource BorderSoft}"
+                            BorderThickness="1" CornerRadius="14" Grid.RowSpan="3" />
 
-                    <TextBlock Grid.Row="1" Text="{Binding Name}" Margin="2,9,2,0" FontSize="14"
+                    <Grid Grid.Row="0" Margin="8" Height="164">
+                        <Border Width="164" Height="164" CornerRadius="12"
+                                Background="{ThemeResource CardPlaceholder}">
+                            <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                        </Border>
+                    </Grid>
+
+                    <TextBlock Grid.Row="1" Text="{Binding Name}" Margin="12,4,12,0" FontSize="14"
                                FontWeight="SemiBold" Foreground="{ThemeResource TextPrimary}"
                                TextTrimming="CharacterEllipsis" MaxLines="1" />
-                    <TextBlock Grid.Row="2" Text="{Binding TrackCount}" Margin="2,3,2,0" FontSize="12"
+                    <TextBlock Grid.Row="2" Text="{Binding TrackCount}" Margin="12,3,12,10" FontSize="12"
                                Foreground="{ThemeResource TextSecondary}" />
                 </Grid>
             </DataTemplate>
@@ -277,7 +366,6 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="100" />
         </Grid.RowDefinitions>
 
         <!-- Title bar strip: content extends into the caption area (see
@@ -285,7 +373,7 @@
              strip is the drag region; system caption buttons sit on the right. -->
         <Grid x:Name="AppTitleBar" Grid.Row="0" Height="48" Background="Transparent">
             <StackPanel Orientation="Horizontal" Spacing="10" Margin="16,0,0,0" VerticalAlignment="Center">
-                <Ellipse Width="20" Height="20" Fill="{StaticResource AccentGlow}" />
+                <Image x:Name="TitleAppIcon" Width="20" Height="20" />
                 <TextBlock Text="MusicPlayer" FontSize="14" FontWeight="SemiBold"
                            Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
             </StackPanel>
@@ -296,82 +384,125 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="224" />
                 <ColumnDefinition x:Name="CenterCol" Width="*" />
-            <ColumnDefinition x:Name="RightCol" Width="0" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left navigation sidebar -->
+            <!-- Left navigation sidebar (EchoMusic style: profile card on top,
+                 grouped nav, playlist list) -->
             <Grid Grid.Column="0" Background="{ThemeResource NavRailBg}" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="0,0,1,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Spacing="3" Margin="10,8,10,6">
+                <!-- Profile-style card: app avatar, name, and the settings
+                     gear exactly where EchoMusic puts it. The gear keeps the
+                     NavSettings x:Name so selection code keeps working. -->
+                <Border Grid.Row="0" Margin="12,12,12,4" Padding="12,10"
+                        Background="{ThemeResource CardBg}" BorderBrush="{ThemeResource BorderSoft}"
+                        BorderThickness="1" CornerRadius="16">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                    <GradientStop x:Name="ProfileAvatarStopA" Color="#ef4444" Offset="0" />
+                                    <GradientStop Color="#f97316" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D6;" FontSize="17" Foreground="White" />
+                        </Border>
+                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
+                            <TextBlock Text="MusicPlayer" FontSize="14" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextPrimary}" />
+                            <TextBlock x:Name="ProfileSubtitle" Text="本地音乐库" FontSize="11"
+                                       Foreground="{ThemeResource TextSecondary}" />
+                        </StackPanel>
+                        <Button x:Name="NavSettings" Grid.Column="2" Click="NavSettings_Click" Style="{StaticResource GhostIconButtonStyle}"
+                                Width="34" Height="34" Padding="0" VerticalAlignment="Center"
+                                ToolTipService.ToolTip="设置">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE713;" FontSize="15"
+                                      Foreground="{ThemeResource TextSecondary}" />
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Row="1" Spacing="2" Margin="10,6,10,0">
+                    <TextBlock Text="我的乐库" Style="{StaticResource NavGroupLabel}" />
                     <Button x:Name="NavRecent" Click="NavRecent_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" />
                             <TextBlock Text="最近播放" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavLocal" Click="NavLocal_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8B7;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8B7;" FontSize="16" />
                             <TextBlock Text="本地音乐" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavFavorites" Click="NavFavorites_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE734;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE734;" FontSize="16" />
                             <TextBlock Text="我的收藏" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavMostPlayed" Click="NavMostPlayed_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" />
                             <TextBlock Text="最常播放" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavArtists" Click="NavArtists_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE77B;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE77B;" FontSize="16" />
                             <TextBlock Text="歌手" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavAlbums" Click="NavAlbums_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D2;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D2;" FontSize="16" />
                             <TextBlock Text="专辑" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+
+                    <TextBlock Text="工具" Style="{StaticResource NavGroupLabel}" Margin="12,12,0,4" />
                     <Button x:Name="NavLyricFill" Click="NavLyricFill_Click" Style="{StaticResource NavButtonStyle}"
                             ToolTipService.ToolTip="批量下载缺失的歌词并补齐翻译 / 罗马音">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8A5;" FontSize="16" Foreground="{StaticResource QqGreen}" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8A5;" FontSize="16" />
                             <TextBlock Text="歌词补全" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
 
-                <Grid Grid.Row="1" Margin="10,4,10,0">
+                <Grid Grid.Row="2" Margin="10,4,10,12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Margin="6,0,4,6">
+                    <Grid Grid.Row="0" Margin="12,8,4,6">
                         <TextBlock Text="我的歌单" Foreground="{ThemeResource TextSecondary}" FontSize="12" VerticalAlignment="Center" />
                         <Button x:Name="BtnNewPlaylist" HorizontalAlignment="Right" Width="30" Height="30" Padding="0"
-                                Background="{StaticResource QqGreen}" CornerRadius="15" BorderThickness="0"
+                                Background="Transparent" BorderThickness="0" CornerRadius="15"
                                 Click="BtnNewPlaylist_Click" ToolTipService.ToolTip="新建歌单">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE710;" FontSize="15" Foreground="White" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE710;" FontSize="14"
+                                      Foreground="{ThemeResource TextSecondary}" />
                         </Button>
                     </Grid>
                     <ListView x:Name="PlaylistsList" Grid.Row="1" Background="Transparent" BorderThickness="0"
                               IsItemClickEnabled="True" ItemClick="PlaylistsList_ItemClick" SelectionMode="None">
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Orientation="Horizontal" Spacing="10" Margin="6,6" RightTapped="PlaylistItem_RightTapped">
-                                    <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE93C;" FontSize="14" Foreground="{ThemeResource TextSecondary}" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" Spacing="10" Margin="6,5" RightTapped="PlaylistItem_RightTapped">
+                                    <Border Width="26" Height="26" CornerRadius="7" Background="{ThemeResource Surface2}">
+                                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE93C;" FontSize="11"
+                                                  Foreground="{ThemeResource TextSecondary}" HorizontalAlignment="Center" />
+                                    </Border>
                                     <TextBlock Text="{Binding Name}" Foreground="{ThemeResource TextPrimary}" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     <TextBlock Text="{Binding Tracks.Count}" Foreground="{ThemeResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
                                 </StackPanel>
@@ -379,32 +510,36 @@
                         </ListView.ItemTemplate>
                     </ListView>
                 </Grid>
-
-                <Button x:Name="NavSettings" Grid.Row="2" Click="NavSettings_Click" Style="{StaticResource NavButtonStyle}"
-                        Margin="10,0,10,12">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE713;" FontSize="16" Foreground="{ThemeResource TextSecondary}" />
-                        <TextBlock Text="设置" VerticalAlignment="Center" />
-                    </StackPanel>
-                </Button>
             </Grid>
 
             <!-- Center content area (transparent: Mica / RootGrid fallback shows through) -->
-            <Grid Grid.Column="1" x:Name="CenterGrid">
+            <Grid Grid.Column="1" x:Name="RightArea">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="94" />
+                </Grid.RowDefinitions>
+
+                <Grid x:Name="CenterGrid">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <StackPanel Grid.Row="0" Margin="22,18,22,4" Spacing="12">
+                <StackPanel Grid.Row="0" Margin="26,20,26,4" Spacing="12">
                     <Grid>
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="ContentTitle" Text="本地音乐" FontSize="22" FontWeight="Bold"
-                                   Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
-                        <StackPanel Grid.Column="1" x:Name="LibraryHeader" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                            <TextBlock x:Name="ContentTitle" Text="本地音乐" FontSize="26" FontWeight="Bold"
+                                       Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
+                            <TextBlock x:Name="ContentSubtitle" Text="" FontSize="13"
+                                       Foreground="{ThemeResource TextSecondary}" VerticalAlignment="Center"
+                                       Margin="2,4,0,0" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2" x:Name="LibraryHeader" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                             <ComboBox x:Name="ViewCombo" Width="96"
                                       SelectionChanged="ViewCombo_SelectionChanged" Visibility="Collapsed">
                                 <ComboBoxItem Content="大图标" />
@@ -496,8 +631,8 @@
                             </controls:DropDownButton.Flyout>
                         </controls:DropDownButton>
 
-                        <primitives:ToggleButton x:Name="BtnSelectMode" Content="多选" Background="Transparent"
-                                                 BorderBrush="{ThemeResource BorderSoft}" CornerRadius="{StaticResource RadiusMedium}" Padding="14,7" FontSize="12"
+                        <primitives:ToggleButton x:Name="BtnSelectMode" Content="多选" Style="{StaticResource AccentToggleStyle}"
+                                                 CornerRadius="{StaticResource RadiusMedium}" Padding="14,7" FontSize="12"
                                                  Visibility="Collapsed" Checked="BtnSelectMode_Checked" Unchecked="BtnSelectMode_Unchecked"
                                                  ToolTipService.ToolTip="进入多选模式，批量添加到歌单（Ctrl+A 全选）" />
 
@@ -907,109 +1042,239 @@
                 </Grid>
             </Grid>
 
-            <!-- Right now-playing + lyrics (toggled from the bottom bar).
-                 Cover + track info on the left, lyrics on the right.
-                 Slides in from the right — see AnimatePanelIn. -->
-            <Grid x:Name="NowPlayingPanel" Grid.Column="2" Background="{ThemeResource NowPanelBg}"
-                  BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1,0,0,0" Visibility="Collapsed">
-                <Grid.RenderTransform>
-                    <CompositeTransform x:Name="NowPanelTransform" />
-                </Grid.RenderTransform>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
 
-                <Grid>
-                    <TextBlock Text="正在播放" FontSize="13" Foreground="{ThemeResource TextSecondary}"
-                               Margin="20,18,0,0" VerticalAlignment="Center" />
-                    <Button x:Name="BtnCollapseCover" HorizontalAlignment="Right" Margin="0,12,16,0"
-                            Style="{StaticResource GhostIconButtonStyle}" Click="BtnCollapseCover_Click"
-                            ToolTipService.ToolTip="收起 / 展开 封面">
-                        <FontIcon FontFamily="Segoe MDL2 Assets" x:Name="CoverChevron" Glyph="&#xE74E;" FontSize="14"
-                                  Foreground="{ThemeResource TextSecondary}" />
-                    </Button>
-                </Grid>
+                <!-- Immersive now-playing + lyrics (EchoMusic style): overlays the
+                     title bar and the whole body while the floating player bar stays
+                     usable underneath. Fixed dark ambience; ApplyCover retints the
+                     background gradient from the artwork colours at runtime. -->
+                <Grid x:Name="NowPlayingPanel" RequestedTheme="Dark"
+                      Background="{ThemeResource NowPanelBg}" Visibility="Collapsed">
+                    <Grid.RenderTransform>
+                        <CompositeTransform x:Name="NowPanelTransform" />
+                    </Grid.RenderTransform>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
 
-                <Grid Grid.Row="1">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
+                    <!-- Top strip: exit chevron (left) + fold-cover toggle (right) -->
+                    <Grid Grid.Row="0" Margin="16,14,16,0">
+                        <Button x:Name="BtnExitNowPlaying" Style="{StaticResource GhostIconButtonStyle}"
+                                Width="34" Height="34" Padding="0" HorizontalAlignment="Left"
+                                Click="BtnExitNowPlaying_Click" ToolTipService.ToolTip="退出正在播放">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE70E;" FontSize="14"
+                                      Foreground="{ThemeResource TextSecondary}" />
+                        </Button>
+                        <Button x:Name="BtnCollapseCover" HorizontalAlignment="Right"
+                                Style="{StaticResource GhostIconButtonStyle}" Width="34" Height="34" Padding="0"
+                                Click="BtnCollapseCover_Click" ToolTipService.ToolTip="收起 / 展开 封面">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" x:Name="CoverChevron" Glyph="&#xE74E;" FontSize="14"
+                                      Foreground="{ThemeResource TextSecondary}" />
+                        </Button>
+                    </Grid>
 
-                    <!-- Left: cover + track info -->
-                    <StackPanel x:Name="NowCoverColumn" Grid.Column="0" MinWidth="264" MaxWidth="320" Margin="16,0,4,0"
-                                VerticalAlignment="Center">
-                        <Grid x:Name="CoverDisc" Width="232" Height="232" Margin="0,12,0,0" HorizontalAlignment="Center">
-                            <Ellipse Width="232" Height="232" Fill="{ThemeResource Surface2}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2" />
-                            <Ellipse x:Name="NowCoverEllipse" Width="232" Height="232" Fill="{ThemeResource Surface2}" />
-                            <!-- Second layer for the cover crossfade (see ApplyCover) -->
-                            <Ellipse x:Name="NowCoverEllipseB" Width="232" Height="232" Fill="{ThemeResource Surface2}" Opacity="0" />
-                            <!-- Vinyl groove shimmer over the cover -->
-                            <Ellipse Width="232" Height="232" IsHitTestVisible="False">
-                                <Ellipse.Fill>
-                                    <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
-                                        <GradientStop Color="#00000000" Offset="0.55" />
-                                        <GradientStop Color="#1fffffff" Offset="0.72" />
-                                        <GradientStop Color="#00000000" Offset="0.82" />
-                                        <GradientStop Color="#14ffffff" Offset="0.92" />
-                                        <GradientStop Color="#40000000" Offset="1" />
-                                    </RadialGradientBrush>
-                                </Ellipse.Fill>
-                            </Ellipse>
-                            <Ellipse Width="46" Height="46" Fill="{ThemeResource Surface}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2"
-                                     HorizontalAlignment="Center" VerticalAlignment="Center" />
-                            <Ellipse Width="10" Height="10" Fill="{StaticResource QqGreen}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Left: cover + track info. EchoMusic rounded-square by
+                             default; the vinyl disc returns when cover spin is on. -->
+                        <StackPanel x:Name="NowCoverColumn" Grid.Column="0" MinWidth="300" MaxWidth="340" Margin="20,0,8,0"
+                                    VerticalAlignment="Center">
+                            <Border x:Name="SquareCover" Width="272" Height="272" CornerRadius="20"
+                                    HorizontalAlignment="Center" Margin="0,12,0,0"
+                                    Background="{ThemeResource CardPlaceholder}"
+                                    BorderBrush="#26ffffff" BorderThickness="1" />
+
+                            <Grid x:Name="CoverDisc" Width="232" Height="232" Margin="0,32,0,0" HorizontalAlignment="Center" Visibility="Collapsed">
+                                <Ellipse Width="232" Height="232" Fill="{ThemeResource Surface2}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2" />
+                                <Ellipse x:Name="NowCoverEllipse" Width="232" Height="232" Fill="{ThemeResource Surface2}" />
+                                <!-- Second layer for the cover crossfade (see ApplyCover) -->
+                                <Ellipse x:Name="NowCoverEllipseB" Width="232" Height="232" Fill="{ThemeResource Surface2}" Opacity="0" />
+                                <!-- Vinyl groove shimmer over the cover -->
+                                <Ellipse Width="232" Height="232" IsHitTestVisible="False">
+                                    <Ellipse.Fill>
+                                        <RadialGradientBrush Center="0.5,0.5" GradientOrigin="0.5,0.5" RadiusX="0.5" RadiusY="0.5">
+                                            <GradientStop Color="#00000000" Offset="0.55" />
+                                            <GradientStop Color="#1fffffff" Offset="0.72" />
+                                            <GradientStop Color="#00000000" Offset="0.82" />
+                                            <GradientStop Color="#14ffffff" Offset="0.92" />
+                                            <GradientStop Color="#40000000" Offset="1" />
+                                        </RadialGradientBrush>
+                                    </Ellipse.Fill>
+                                </Ellipse>
+                                <Ellipse Width="46" Height="46" Fill="{ThemeResource Surface}" Stroke="{ThemeResource BorderSoft}" StrokeThickness="2"
+                                         HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <Ellipse Width="10" Height="10" Fill="{StaticResource QqGreen}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <StackPanel x:Name="NowInfoPanel" HorizontalAlignment="Center" Spacing="5" Margin="12,16,12,8">
+                                <TextBlock x:Name="NowTitle" Text="未在播放" FontSize="22" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextPrimary}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="320" />
+                                <TextBlock x:Name="NowArtist" Text="" FontSize="13" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
+                                <TextBlock x:Name="NowAlbum" Text="" FontSize="11" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+
+                        <!-- Right: lyric calibration bar + scrolling lyrics -->
+                        <Grid Grid.Column="1">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Lyric offset calibration + romaji/translation toggles -->
+                            <StackPanel x:Name="LyricOffsetBar" Orientation="Horizontal" Spacing="6"
+                                        HorizontalAlignment="Center" Margin="10,8,10,4">
+                                <Button x:Name="BtnLyricOffsetDown" Content="-0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
+                                        Click="BtnLyricOffsetDown_Click" ToolTipService.ToolTip="歌词提前 0.5 秒" />
+                                <TextBlock x:Name="LyricOffsetText" Text="0.0s" FontSize="11" Foreground="{ThemeResource TextSecondary}"
+                                           VerticalAlignment="Center" MinWidth="38" TextAlignment="Center" />
+                                <Button x:Name="BtnLyricOffsetUp" Content="+0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
+                                        Click="BtnLyricOffsetUp_Click" ToolTipService.ToolTip="歌词延后 0.5 秒" />
+                                <Button x:Name="BtnLyricOffsetReset" Content="重置" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
+                                        Click="BtnLyricOffsetReset_Click" />
+                                <primitives:ToggleButton x:Name="LyricRomajiToggle" Content="罗马音" Padding="9,3" FontSize="11"
+                                                         Style="{StaticResource AccentToggleStyle}"
+                                                         CornerRadius="{StaticResource RadiusSmall}"
+                                                         Checked="LyricRomajiToggle_Changed" Unchecked="LyricRomajiToggle_Changed" />
+                                <primitives:ToggleButton x:Name="LyricTransToggle" Content="翻译" Padding="9,3" FontSize="11"
+                                                         Style="{StaticResource AccentToggleStyle}"
+                                                         CornerRadius="{StaticResource RadiusSmall}"
+                                                         Checked="LyricTransToggle_Changed" Unchecked="LyricTransToggle_Changed" />
+                            </StackPanel>
+
+                            <!-- Scrollbar hidden: the view auto-centers on every line
+                                 change, a visible bar only added clutter. Wheel /
+                                 touch scrolling still work. -->
+                            <ScrollViewer x:Name="LyricScroll" Grid.Row="1" Margin="4,2,10,12" VerticalScrollBarVisibility="Hidden">
+                                <StackPanel x:Name="LyricStack" HorizontalAlignment="Center" Padding="10" />
+                            </ScrollViewer>
                         </Grid>
-
-                        <StackPanel x:Name="NowInfoPanel" HorizontalAlignment="Center" Spacing="5" Margin="12,14,12,8">
-                            <TextBlock x:Name="NowTitle" Text="未在播放" FontSize="20" FontWeight="SemiBold"
-                                       Foreground="{ThemeResource TextPrimary}" TextWrapping="Wrap" TextAlignment="Center" MaxWidth="300" />
-                            <TextBlock x:Name="NowArtist" Text="" FontSize="13" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
-                            <TextBlock x:Name="NowAlbum" Text="" FontSize="11" Foreground="{ThemeResource TextSecondary}" TextAlignment="Center" />
-                        </StackPanel>
-                    </StackPanel>
-
-                    <!-- Right: lyric calibration bar + scrolling lyrics -->
-                    <Grid Grid.Column="1">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-
-                        <!-- Lyric offset calibration + romaji/translation toggles -->
-                        <StackPanel x:Name="LyricOffsetBar" Orientation="Horizontal" Spacing="6"
-                                    HorizontalAlignment="Center" Margin="10,8,10,4">
-                            <Button x:Name="BtnLyricOffsetDown" Content="-0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
-                                    Click="BtnLyricOffsetDown_Click" ToolTipService.ToolTip="歌词提前 0.5 秒" />
-                            <TextBlock x:Name="LyricOffsetText" Text="0.0s" FontSize="11" Foreground="{ThemeResource TextSecondary}"
-                                       VerticalAlignment="Center" MinWidth="38" TextAlignment="Center" />
-                            <Button x:Name="BtnLyricOffsetUp" Content="+0.5s" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
-                                    Click="BtnLyricOffsetUp_Click" ToolTipService.ToolTip="歌词延后 0.5 秒" />
-                            <Button x:Name="BtnLyricOffsetReset" Content="重置" Padding="9,3" FontSize="11" CornerRadius="{StaticResource RadiusSmall}"
-                                    Click="BtnLyricOffsetReset_Click" />
-                            <primitives:ToggleButton x:Name="LyricRomajiToggle" Content="罗马音" Padding="9,3" FontSize="11"
-                                                     CornerRadius="{StaticResource RadiusSmall}" Background="Transparent"
-                                                     BorderBrush="{ThemeResource BorderSoft}"
-                                                     Checked="LyricRomajiToggle_Changed" Unchecked="LyricRomajiToggle_Changed" />
-                            <primitives:ToggleButton x:Name="LyricTransToggle" Content="翻译" Padding="9,3" FontSize="11"
-                                                     CornerRadius="{StaticResource RadiusSmall}" Background="Transparent"
-                                                     BorderBrush="{ThemeResource BorderSoft}"
-                                                     Checked="LyricTransToggle_Changed" Unchecked="LyricTransToggle_Changed" />
-                        </StackPanel>
-
-                        <!-- Scrollbar hidden: the view auto-centers on every line
-                             change, a visible bar only added clutter. Wheel /
-                             touch scrolling still work. -->
-                        <ScrollViewer x:Name="LyricScroll" Grid.Row="1" Margin="4,2,10,12" VerticalScrollBarVisibility="Hidden">
-                            <StackPanel x:Name="LyricStack" HorizontalAlignment="Center" Padding="10" />
-                        </ScrollViewer>
                     </Grid>
                 </Grid>
-            </Grid>
+
+    
+
+                <!-- Bottom transport bar: EchoMusic floating rounded card. -->
+                <Grid x:Name="BottomBarHost" Grid.Row="1" Background="Transparent">
+                    <Border x:Name="PlayerBarBorder" Margin="10,0,10,10" Padding="14,10,14,10"
+                            Background="{ThemeResource Surface}" BorderBrush="{ThemeResource BorderSoft}"
+                            BorderThickness="1" CornerRadius="14">
+                        <Border.Shadow>
+                            <ThemeShadow />
+                        </Border.Shadow>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" MaxWidth="560" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                                <Button x:Name="BtnToggleNowPlaying" Background="Transparent" BorderThickness="0"
+                                        HorizontalContentAlignment="Left" Padding="0"
+                                        Click="BtnToggleNowPlaying_Click" ToolTipService.ToolTip="显示/隐藏 正在播放">
+                                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                                        <Grid Width="52" Height="52">
+                                            <Border Background="{ThemeResource Surface3}" CornerRadius="10" />
+                                            <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource TextSecondary}"
+                                                      Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Image x:Name="MiniCover" Stretch="UniformToFill" />
+                                        </Grid>
+                                        <StackPanel VerticalAlignment="Center" MaxWidth="200" Spacing="2">
+                                            <TextBlock x:Name="MiniTitle" Text="未在播放" FontSize="14" FontWeight="SemiBold"
+                                                       Foreground="{StaticResource QqGreen}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock x:Name="MiniArtist" Text="" FontSize="11" Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="BtnBarFav" Style="{StaticResource GhostIconButtonStyle}"
+                                        Width="34" Height="34" Padding="0" VerticalAlignment="Center"
+                                        Click="BtnBarFav_Click" ToolTipService.ToolTip="收藏 / 取消收藏当前歌曲">
+                                    <FontIcon x:Name="BarFavIcon" FontFamily="Segoe MDL2 Assets" FontSize="15"
+                                              Foreground="{ThemeResource TextSecondary}" Glyph="&#xE734;" />
+                                </Button>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4" Margin="12,0,12,0">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="16">
+                                    <Button x:Name="BtnPlayMode" Width="36" Height="32" Padding="0"
+                                            Background="Transparent" BorderThickness="0"
+                                            Click="BtnPlayMode_Click" ToolTipService.ToolTip="顺序播放">
+                                        <FontIcon FontFamily="Segoe MDL2 Assets" x:Name="PlayModeIcon" Glyph="&#xE8FD;" FontSize="16" Foreground="{ThemeResource TextPrimary}" />
+                                    </Button>
+                                    <Button x:Name="BtnPrev" Width="38" Height="34" Background="Transparent" BorderThickness="0" Padding="0" Click="BtnPrev_Click">
+                                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE100;" FontSize="16" Foreground="{ThemeResource TextPrimary}" />
+                                    </Button>
+                                    <Button x:Name="BtnPlay" Style="{StaticResource CirclePlayStyle}" Click="BtnPlay_Click">
+                                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE102;" FontSize="16" />
+                                    </Button>
+                                    <Button x:Name="BtnNext" Width="38" Height="34" Background="Transparent" BorderThickness="0" Padding="0" Click="BtnNext_Click">
+                                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE101;" FontSize="16" Foreground="{ThemeResource TextPrimary}" />
+                                    </Button>
+                                    <Grid x:Name="VolumeIconArea" VerticalAlignment="Center" ToolTipService.ToolTip="音量">
+                                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE767;" FontSize="15" Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="88"
+                                            Foreground="{StaticResource QqGreen}" ValueChanged="VolumeSlider_ValueChanged"
+                                            VerticalAlignment="Center" ToolTipService.ToolTip="音量" />
+                                </StackPanel>
+                                <Grid Margin="6,0,6,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock x:Name="TimeCurrent" Text="00:00" Foreground="{ThemeResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
+                                    <Slider x:Name="SeekSlider" Grid.Column="1" Minimum="0" Maximum="100" StepFrequency="0.5" Value="0"
+                                            Margin="8,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource QqGreen}"
+                                            ValueChanged="SeekSlider_ValueChanged" />
+                                    <TextBlock x:Name="TimeTotal" Grid.Column="2" Text="00:00" Foreground="{ThemeResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
+                                </Grid>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Right">
+                                <Button x:Name="BtnSpeed" Width="44" Height="34" Padding="0"
+                                        Background="Transparent" BorderThickness="0"
+                                        Click="BtnSpeed_Click" ToolTipService.ToolTip="播放速度">
+                                    <TextBlock x:Name="SpeedText" Text="1.0x" FontSize="12" FontWeight="SemiBold"
+                                               Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
+                                </Button>
+                                <primitives:ToggleButton x:Name="BtnDesktopLyrics" Width="34" Height="34"
+                                                         Style="{StaticResource AccentToggleStyle}" CornerRadius="17" ToolTipService.ToolTip="在桌面顶部显示歌词悬浮窗"
+                                                         Checked="BtnDesktopLyrics_Checked" Unchecked="BtnDesktopLyrics_Unchecked">
+                                    <TextBlock Text="词" FontSize="13" TextLineBounds="Tight" />
+                                </primitives:ToggleButton>
+                                <primitives:ToggleButton x:Name="BtnClickThrough" Width="34" Height="34" IsEnabled="False"
+                                                         Style="{StaticResource AccentToggleStyle}" CornerRadius="17" ToolTipService.ToolTip="开启后鼠标点击会穿过歌词悬浮窗"
+                                                         Checked="BtnClickThrough_Checked" Unchecked="BtnClickThrough_Unchecked">
+                                    <TextBlock Text="穿" FontSize="13" TextLineBounds="Tight" />
+                                </primitives:ToggleButton>
+                                <Button x:Name="BtnQueueToggle" Width="44" Height="34" Padding="0"
+                                        Background="Transparent" BorderThickness="0"
+                                        Click="BtnQueueToggle_Click" ToolTipService.ToolTip="显示 / 隐藏播放队列">
+                                    <Grid>
+                                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE142;" FontSize="15" Foreground="{ThemeResource TextPrimary}" />
+                                        <Border x:Name="QueueBadge" HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                Margin="0,-2,-15,0" MinWidth="22" Height="14" CornerRadius="7"
+                                                Background="{StaticResource QqGreen}" BorderBrush="{ThemeResource Surface}"
+                                                BorderThickness="1" Padding="3,0" Visibility="Collapsed">
+                                            <TextBlock x:Name="QueueBadgeText" Text="0" FontSize="8" Foreground="White"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" TextLineBounds="Tight" />
+                                        </Border>
+                                    </Grid>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+        </Grid>
         </Grid>
 
-            <!-- Click-outside light-dismiss layer: sits under QueuePanel (later
+        <!-- Click-outside light-dismiss layer: sits under QueuePanel (later
                  sibling wins z-order) and covers the whole window while the
                  queue is open. -->
             <Border x:Name="QueueDismissLayer" Grid.Row="0" Grid.RowSpan="2" Grid.Column="0" Grid.ColumnSpan="3"
@@ -1100,88 +1365,5 @@
                           HorizontalAlignment="Center" VerticalAlignment="Top" Margin="12,10,12,0"
                           Visibility="Visible" IsOpen="False" />
 
-        <!-- Bottom transport bar -->
-        <Grid Grid.Row="2" Background="{ThemeResource Surface}" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="0,1,0,0">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="300" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="320" />
-            </Grid.ColumnDefinitions>
-
-            <Button x:Name="BtnToggleNowPlaying" Grid.Column="0" Background="Transparent" BorderThickness="0"
-                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="0"
-                    Click="BtnToggleNowPlaying_Click" ToolTipService.ToolTip="显示/隐藏 正在播放">
-                <StackPanel Orientation="Horizontal" Spacing="12" Margin="16,0,0,0" VerticalAlignment="Center">
-                    <Grid Width="54" Height="54">
-                        <Border Background="{ThemeResource Surface3}" CornerRadius="{StaticResource RadiusSmall}" />
-                        <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource TextSecondary}"
-                                  Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        <Image x:Name="MiniCover" Stretch="UniformToFill" />
-                    </Grid>
-                    <StackPanel VerticalAlignment="Center" MaxWidth="210" Spacing="2">
-                        <TextBlock x:Name="MiniTitle" Text="未在播放" FontSize="13" FontWeight="SemiBold" Foreground="{ThemeResource TextPrimary}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="MiniArtist" Text="" FontSize="11" Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                </StackPanel>
-            </Button>
-
-            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="6" Margin="0,0,8,0">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Spacing="18">
-                    <Button x:Name="BtnPlayMode" Width="36" Height="30" Padding="0"
-                            Background="Transparent" BorderThickness="0"
-                            Click="BtnPlayMode_Click" ToolTipService.ToolTip="顺序播放">
-                        <FontIcon FontFamily="Segoe MDL2 Assets" x:Name="PlayModeIcon" Glyph="&#xE8FD;" FontSize="16" Foreground="{ThemeResource TextPrimary}" />
-                    </Button>
-                    <Button x:Name="BtnPrev" Width="38" Height="34" Background="Transparent" BorderThickness="0" Padding="0" Click="BtnPrev_Click">
-                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE100;" FontSize="16" Foreground="White" />
-                    </Button>
-                    <Button x:Name="BtnPlay" Style="{StaticResource CirclePlayStyle}" Click="BtnPlay_Click">
-                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE102;" FontSize="18" />
-                    </Button>
-                    <Button x:Name="BtnNext" Width="38" Height="34" Background="Transparent" BorderThickness="0" Padding="0" Click="BtnNext_Click">
-                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE101;" FontSize="16" Foreground="White" />
-                    </Button>
-                    <Button x:Name="BtnQueueToggle" Width="74" Height="30" Background="Transparent" BorderThickness="0" Padding="0"
-                            Click="BtnQueueToggle_Click" ToolTipService.ToolTip="显示 / 隐藏播放队列">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE142;" FontSize="15" Foreground="{ThemeResource TextPrimary}" />
-                            <TextBlock Text="队列" Foreground="{ThemeResource TextPrimary}" FontSize="12" VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="BtnSpeed" Width="54" Height="30" Padding="0"
-                            Background="Transparent" BorderThickness="0"
-                            Click="BtnSpeed_Click" ToolTipService.ToolTip="播放速度">
-                        <TextBlock x:Name="SpeedText" Text="1.0x" FontSize="12" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
-                    </Button>
-                </StackPanel>
-                <Grid Margin="28,0,28,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="TimeCurrent" Text="00:00" Foreground="{ThemeResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
-                    <Slider x:Name="SeekSlider" Grid.Column="1" Minimum="0" Maximum="100" StepFrequency="0.5" Value="0"
-                            Margin="8,0,8,0" VerticalAlignment="Center" Foreground="{StaticResource QqGreen}"
-                            ValueChanged="SeekSlider_ValueChanged" />
-                    <TextBlock x:Name="TimeTotal" Grid.Column="2" Text="00:00" Foreground="{ThemeResource TextSecondary}" FontSize="11" VerticalAlignment="Center" />
-                </Grid>
-            </StackPanel>
-
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center" Margin="0,0,14,0" HorizontalAlignment="Right">
-                <primitives:ToggleButton x:Name="BtnDesktopLyrics" Content="桌面歌词" Checked="BtnDesktopLyrics_Checked" Unchecked="BtnDesktopLyrics_Unchecked"
-                                         Background="Transparent" BorderBrush="{ThemeResource BorderSoft}" CornerRadius="{StaticResource RadiusMedium}"
-                                         ToolTipService.ToolTip="在桌面顶部显示歌词悬浮窗" />
-                <primitives:ToggleButton x:Name="BtnClickThrough" Content="鼠标穿透" IsEnabled="False"
-                                         Background="Transparent" BorderBrush="{ThemeResource BorderSoft}" CornerRadius="{StaticResource RadiusMedium}"
-                                         ToolTipService.ToolTip="开启后鼠标点击会穿过歌词悬浮窗"
-                                         Checked="BtnClickThrough_Checked" Unchecked="BtnClickThrough_Unchecked" />
-                <Grid x:Name="VolumeIconArea" VerticalAlignment="Center">
-                    <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE767;" FontSize="15" Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
-                </Grid>
-                <Slider x:Name="VolumeSlider" Minimum="0" Maximum="100" Width="92" Foreground="{StaticResource QqGreen}" ValueChanged="VolumeSlider_ValueChanged" VerticalAlignment="Center" ToolTipService.ToolTip="音量" />
-            </StackPanel>
-        </Grid>
     </Grid>
 </Window>

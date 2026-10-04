@@ -6,13 +6,22 @@ namespace MusicPlayer.Services;
 
 /// <summary>
 /// True → the brush passed as ConverterParameter (the accent brush), false →
-/// null (inherits the default foreground). Marks the currently playing row in
-/// the track lists without needing a per-theme resource lookup in code.
+/// <see cref="Fallback"/> — the theme-aware TextPrimary brush the main window
+/// injects on startup / theme switch. UnsetValue or null is NOT usable here:
+/// in this host the template TextBlock's default foreground resolves to white,
+/// which is invisible on the light theme.
 /// </summary>
 public sealed partial class CurrentTrackBrushConverter : IValueConverter
 {
+    /// <summary>Theme-aware default foreground, set by MainWindow.ApplyThemeMode.</summary>
+    public static Brush? Fallback { get; set; }
+
     public object Convert(object value, Type targetType, object parameter, string language)
-        => value is true && parameter is Brush accent ? accent : null!;
+    {
+        if (value is true && parameter is Brush accent)
+            return accent;
+        return Fallback ?? DependencyProperty.UnsetValue;
+    }
 
     public object ConvertBack(object value, Type targetType, object parameter, string language)
         => throw new NotSupportedException();

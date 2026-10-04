@@ -15,13 +15,21 @@ public sealed class AppSettings
 {
     public double LyricFontSize { get; set; } = 24;
     public string LyricColor { get; set; } = "#FFFFFFFF";
-    public string AccentColor { get; set; } = "#31c27c"; // app theme / accent color
+    public string AccentColor { get; set; } = "#ef4444"; // app theme / accent color (EchoMusic crimson)
 
     /// <summary>
     /// Colour theme: "Dark" | "Light". Applied to RootGrid.RequestedTheme, which
     /// is what makes every {ThemeResource} in Themes/SukiTheme.xaml re-evaluate.
     /// </summary>
-    public string ThemeMode { get; set; } = "Dark";
+    public string ThemeMode { get; set; } = "Light";
+
+    /// <summary>
+    /// One-shot migration flag: pre-EchoMusic installs stored the old defaults
+    /// (Dark + QQ green). On first load after the UI rework they are switched
+    /// to the EchoMusic look once; anything the user customised afterwards is
+    /// left alone.
+    /// </summary>
+    public bool UiEchoMigrated { get; set; }
 
     /// <summary>Custom data/cache directory. Empty = default %LOCALAPPDATA%\MusicPlayer.</summary>
     public string CacheDir { get; set; } = "";
@@ -294,6 +302,7 @@ public sealed class SettingsStore
                     // User scope). Plaintext values from older versions are
                     // transparently migrated on the next Save.
                     data.QqCookie = Unprotect(data.QqCookie);
+                    MigrateToEchoLook(data);
                     return data;
                 }
             }
@@ -331,6 +340,24 @@ public sealed class SettingsStore
     }
 
     private const string CookiePrefix = "dpapi:";
+
+    /// <summary>
+    /// One-time switch to the EchoMusic look for installs created before the
+    /// UI rework: theme to Light, and the accent to the new default crimson —
+    /// but only when it still holds the old QQ-green default (a colour the
+    /// user picked deliberately is never touched).
+    /// </summary>
+    private static void MigrateToEchoLook(AppSettings data)
+    {
+        if (data.UiEchoMigrated)
+            return;
+        data.UiEchoMigrated = true;
+        data.ThemeMode = "Light";
+        var accent = (data.AccentColor ?? "").Trim();
+        if (accent.Length == 0 || accent.Equals("#31c27c", StringComparison.OrdinalIgnoreCase))
+            data.AccentColor = "#ef4444";
+        try { Save(data); } catch { /* best effort */ }
+    }
 
     private static string Protect(string plain)
     {

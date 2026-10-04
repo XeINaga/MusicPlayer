@@ -3,112 +3,133 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!--
-      Design tokens in the spirit of SukiUI: layered surfaces, generous corner
-      radii, soft elevation.
+      Design tokens modelled after EchoMusic: a warm paper-white main area,
+      pure-white sidebar/cards, soft borders and generous corner radii. Dark
+      mode mirrors EchoMusic's graphite palette.
 
       Colours live in ThemeDictionaries so flipping RequestedTheme re-evaluates
       every {ThemeResource} reference in the app. Geometry (radii, padding) does
       not change between themes and keeps using {StaticResource}.
 
-      Accent brushes are deliberately absent here. QqGreen and AccentGlow stay
-      in MainWindow's own resource dictionary because ApplyAccentColor() looks
-      them up there and mutates their Color at runtime from the saved setting.
+      Accent brushes are deliberately absent here. QqGreen (the runtime accent,
+      name kept for compatibility) and AccentGlow stay in MainWindow's own
+      resource dictionary because ApplyAccentColor() looks them up there and
+      mutates their Color at runtime from the saved setting. NavSelected is also
+      retinted from ApplyAccentColor(); the values below are only the fallback
+      before that runs.
     -->
 
     <ResourceDictionary.ThemeDictionaries>
 
-        <!-- ===================== Dark ===================== -->
-        <ResourceDictionary x:Key="Dark">
-            <!-- Layered surfaces, each step reading as a level above the last.
-                 Surface keeps alpha so the Mica material shows through. -->
-            <SolidColorBrush x:Key="AppBackground" Color="#0b0b11" />
-            <SolidColorBrush x:Key="Surface" Color="#e6101017" />
-            <SolidColorBrush x:Key="Surface2" Color="#16161f" />
-            <SolidColorBrush x:Key="Surface3" Color="#1f1f2b" />
-            <SolidColorBrush x:Key="CardBg" Color="#1a1a24" />
-            <SolidColorBrush x:Key="BorderSoft" Color="#20202b" />
-
-            <SolidColorBrush x:Key="TextPrimary" Color="#f2f2f5" />
-            <SolidColorBrush x:Key="TextSecondary" Color="#8b8b97" />
-            <!-- Task outcome colours for the lyric-completion list. -->
-            <SolidColorBrush x:Key="TextSuccess" Color="#31c27c" />
-            <SolidColorBrush x:Key="TextDanger" Color="#e5484d" />
-            <SolidColorBrush x:Key="TextMuted" Color="#6d6d7a" />
-
-            <!-- Accent-tinted navigation states: a translucent pill. -->
-            <SolidColorBrush x:Key="NavHover" Color="#1a1a24" />
-            <SolidColorBrush x:Key="NavSelected" Color="#1f2a27" />
-            <SolidColorBrush x:Key="NavRailBg" Color="#d90a0a10" />
-
-            <!-- WinUI's Button template reads these, so defining them once gives
-                 every button consistent hover / pressed feedback. -->
-            <SolidColorBrush x:Key="ButtonBackground" Color="#17171f" />
-            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#23232f" />
-            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#101018" />
-            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#262633" />
-            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#3a3a52" />
-            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#2c2c3e" />
-            <SolidColorBrush x:Key="ButtonForeground" Color="#f2f2f5" />
-            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#ffffff" />
-            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#d8d8e0" />
-
-            <LinearGradientBrush x:Key="CardPlaceholder" StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#2c2c3a" Offset="0" />
-                <GradientStop Color="#191922" Offset="1" />
-            </LinearGradientBrush>
-
-            <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#d8181820" Offset="0" />
-                <GradientStop Color="#d80c0c12" Offset="1" />
-            </LinearGradientBrush>
-
-            <AcrylicBrush x:Key="QueueAcrylic"
-                          TintColor="#15151d" TintOpacity="0.82" TintLuminosityOpacity="0.7"
-                          FallbackColor="#15151d" />
-        </ResourceDictionary>
-
-        <!-- ===================== Light ===================== -->
+        <!-- ===================== Light (EchoMusic default) ===================== -->
         <ResourceDictionary x:Key="Light">
-            <SolidColorBrush x:Key="AppBackground" Color="#f3f3f6" />
-            <SolidColorBrush x:Key="Surface" Color="#f7f7fa" />
-            <SolidColorBrush x:Key="Surface2" Color="#ffffff" />
-            <SolidColorBrush x:Key="Surface3" Color="#ececf2" />
+            <!-- Main area paper-grey, sidebar and cards pure white. -->
+            <SolidColorBrush x:Key="AppBackground" Color="#f5f5f7" />
+            <SolidColorBrush x:Key="Surface" Color="#ffffff" />
+            <SolidColorBrush x:Key="Surface2" Color="#f2f2f5" />
+            <SolidColorBrush x:Key="Surface3" Color="#ececf0" />
             <SolidColorBrush x:Key="CardBg" Color="#ffffff" />
-            <SolidColorBrush x:Key="BorderSoft" Color="#dcdce5" />
+            <SolidColorBrush x:Key="BorderSoft" Color="#e5e5ea" />
 
-            <SolidColorBrush x:Key="TextPrimary" Color="#16161c" />
-            <SolidColorBrush x:Key="TextSecondary" Color="#61616e" />
+            <SolidColorBrush x:Key="TextPrimary" Color="#1d1d1f" />
+            <SolidColorBrush x:Key="TextSecondary" Color="#4b5563" />
+            <!-- Task outcome colours for the lyric-completion list. -->
             <SolidColorBrush x:Key="TextSuccess" Color="#12a05f" />
             <SolidColorBrush x:Key="TextDanger" Color="#c62a30" />
             <SolidColorBrush x:Key="TextMuted" Color="#8a8a99" />
 
-            <SolidColorBrush x:Key="NavHover" Color="#ebebf1" />
-            <SolidColorBrush x:Key="NavSelected" Color="#dcf0e7" />
-            <SolidColorBrush x:Key="NavRailBg" Color="#fbfbfd" />
+            <!-- Accent-tinted navigation states. -->
+            <SolidColorBrush x:Key="NavHover" Color="#f0f0f2" />
+            <SolidColorBrush x:Key="NavSelected" Color="#fdeaea" />
+            <SolidColorBrush x:Key="NavRailBg" Color="#ffffff" />
 
+            <!-- List-row hover: EchoMusic's 5% ink wash. -->
+            <SolidColorBrush x:Key="RowHover" Color="#0d000000" />
+
+            <!-- Round transport play button: white disc, ink glyph, hairline. -->
+            <SolidColorBrush x:Key="PlayBtnBg" Color="#ffffff" />
+            <SolidColorBrush x:Key="PlayBtnBgPointerOver" Color="#f6f6f8" />
+            <SolidColorBrush x:Key="PlayBtnFg" Color="#1d1d1f" />
+            <SolidColorBrush x:Key="PlayBtnBorder" Color="#e5e5ea" />
+
+            <!-- WinUI's Button template reads these, so defining them once gives
+                 every button consistent hover / pressed feedback. -->
             <SolidColorBrush x:Key="ButtonBackground" Color="#ffffff" />
-            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#f2f2f7" />
-            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#e6e6ee" />
-            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#dcdce5" />
-            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#c2c2d2" />
-            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#adadbf" />
-            <SolidColorBrush x:Key="ButtonForeground" Color="#16161c" />
+            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#f3f4f6" />
+            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#e9eaee" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#e5e5ea" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#c9cad2" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#b4b5c0" />
+            <SolidColorBrush x:Key="ButtonForeground" Color="#1d1d1f" />
             <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#000000" />
             <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#3a3a44" />
 
             <LinearGradientBrush x:Key="CardPlaceholder" StartPoint="0,0" EndPoint="1,1">
-                <GradientStop Color="#e2e2ea" Offset="0" />
-                <GradientStop Color="#f0f0f5" Offset="1" />
+                <GradientStop Color="#ececf0" Offset="0" />
+                <GradientStop Color="#f5f5f7" Offset="1" />
             </LinearGradientBrush>
 
+            <!-- Now-playing overlay: fixed dark ambience (cover-tinted at
+                 runtime), independent of the app theme. -->
             <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#f7f7fa" Offset="0" />
-                <GradientStop Color="#ebebf1" Offset="1" />
+                <GradientStop Color="#f2191b22" Offset="0" />
+                <GradientStop Color="#f80e0f14" Offset="1" />
             </LinearGradientBrush>
 
             <AcrylicBrush x:Key="QueueAcrylic"
                           TintColor="#ffffff" TintOpacity="0.85" TintLuminosityOpacity="0.75"
                           FallbackColor="#fbfbfd" />
+        </ResourceDictionary>
+
+        <!-- ===================== Dark (EchoMusic graphite) ===================== -->
+        <ResourceDictionary x:Key="Dark">
+            <SolidColorBrush x:Key="AppBackground" Color="#26262a" />
+            <SolidColorBrush x:Key="Surface" Color="#e636363a" />
+            <SolidColorBrush x:Key="Surface2" Color="#313135" />
+            <SolidColorBrush x:Key="Surface3" Color="#3c3c41" />
+            <SolidColorBrush x:Key="CardBg" Color="#36363a" />
+            <SolidColorBrush x:Key="BorderSoft" Color="#3a3a3d" />
+
+            <SolidColorBrush x:Key="TextPrimary" Color="#f5f5f7" />
+            <SolidColorBrush x:Key="TextSecondary" Color="#a8b0bf" />
+            <SolidColorBrush x:Key="TextSuccess" Color="#31c27c" />
+            <SolidColorBrush x:Key="TextDanger" Color="#e5484d" />
+            <SolidColorBrush x:Key="TextMuted" Color="#6d6d7a" />
+
+            <SolidColorBrush x:Key="NavHover" Color="#2c2c30" />
+            <SolidColorBrush x:Key="NavSelected" Color="#4a2a2c" />
+            <SolidColorBrush x:Key="NavRailBg" Color="#d936363a" />
+
+            <SolidColorBrush x:Key="RowHover" Color="#14ffffff" />
+
+            <SolidColorBrush x:Key="PlayBtnBg" Color="#ffffff" />
+            <SolidColorBrush x:Key="PlayBtnBgPointerOver" Color="#f0f0f2" />
+            <SolidColorBrush x:Key="PlayBtnFg" Color="#1d1d1f" />
+            <SolidColorBrush x:Key="PlayBtnBorder" Color="#ffffff" />
+
+            <SolidColorBrush x:Key="ButtonBackground" Color="#3c3c41" />
+            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#47474d" />
+            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#333338" />
+            <SolidColorBrush x:Key="ButtonBorderBrush" Color="#454549" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="#58585f" />
+            <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="#4a4a52" />
+            <SolidColorBrush x:Key="ButtonForeground" Color="#f5f5f7" />
+            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#ffffff" />
+            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#d8d8e0" />
+
+            <LinearGradientBrush x:Key="CardPlaceholder" StartPoint="0,0" EndPoint="1,1">
+                <GradientStop Color="#3c3c42" Offset="0" />
+                <GradientStop Color="#2c2c31" Offset="1" />
+            </LinearGradientBrush>
+
+            <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Color="#f2191b22" Offset="0" />
+                <GradientStop Color="#f80e0f14" Offset="1" />
+            </LinearGradientBrush>
+
+            <AcrylicBrush x:Key="QueueAcrylic"
+                          TintColor="#2f2f34" TintOpacity="0.82" TintLuminosityOpacity="0.7"
+                          FallbackColor="#2f2f34" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 
