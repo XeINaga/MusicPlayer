@@ -191,7 +191,11 @@ struct State {
     bool alignLeft = false;
     bool visible = false;
     bool clickThrough = false;
-    int sungChars = -1;            // word-timed: chars already sung (-1 = not word-timed)
+    double prog = -1.0;            // word-timed karaoke progress 0..1 (-1 = not word-timed)
+    double progPrev = -1.0;        // previous sample (for local interpolation)
+    double progRate = 0.0;         // progress per second, from the last two samples
+    LARGE_INTEGER progPrevAt{};    // timestamp of the previous sample
+    LARGE_INTEGER progAt{};        // timestamp of the latest sample
     D2D1_COLOR_F accent = D2D1::ColorF(0.19f, 0.76f, 0.49f, 1.f); // karaoke sung color
     D2D1_COLOR_F unsung = D2D1::ColorF(1, 1, 1, 1);               // karaoke unsung color
 };
@@ -263,6 +267,30 @@ static size_t ClusterLen(const std::wstring& t, size_t i) {
     }
     return len;
 }
+
+// ---------- karaoke interpolation ----------
+// Local 60 fps extrapolation of the karaoke progress between pipe samples:
+// the sweep then runs as smoothly as the in-app panel even though the host
+// only streams updates at ~25 Hz over the pipe.
+static double EffectiveProg() {
+    if (g_state.prog < 0)
+        return -1.0;
+    LARGE_INTEGER now{}, freq{};
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    double dt = (double)(now.QuadPart - g_state.progAt.QuadPart) / (double)freq.QuadPart;
+    // Extrapolate with the measured rate, capped at half a second of coasting
+    // so a stalled host cannot push the sweep past the line.
+    double coast = dt > 0 ? g_state.progRate * dt : 0.0;
+    if (coast > 0.5) coast = 0.5;
+    if (coast < -0.5) coast = -0.5;
+    double p = g_state.prog + coast;
+    if (p < 0) p = 0;
+    if (p > 1) p = 1;
+    return p;
+}
+
+
 
 static void Render() {
     if (!g_hwnd) return;
@@ -447,13 +475,14 @@ static void Render() {
         ID2D1SolidColorBrush* tb = nullptr;
         // Karaoke original line: the base layer is the unsung color.
         g_dcRT->CreateSolidColorBrush(
-            (st.sungChars >= 0 && ln.role == 'O') ? st.unsung : st.color, &tb);
+            (st.prog >= 0.0 && ln.role == 'O') ? st.unsung : st.color, &tb);
 
-        // Karaoke sweep for the word-timed original line: draw the whole line
-        // in the base color, then re-draw it clipped to the sung prefix in the
-        // accent color. doneWidth uses the char-ratio approximation (lyric
+        // Karaoke sweep: when a word-timed line is playing (prog >= 0), draw
+        // the whole line in the unsung color, then re-draw it clipped to the
+        // sung prefix in the accent color. Applies to orig/roma/trans alike —
+        // companion lines ride the same progress as their main line. doneWidth uses the char-ratio approximation (lyric
         // lines are CJK-dominated, so per-char width is near-uniform).
-        bool karaoke = st.sungChars >= 0 && ln.role == 'O';
+        bool karaoke = st.prog >= 0.0 && ln.role == 'O';
         float doneW = 0.0f;
         if (karaoke && lay) {
             // Cluster metrics give the exact pixel width of the sung prefix.
@@ -463,7 +492,8 @@ static void Render() {
             UINT32 actual = 0;
             if (SUCCEEDED(lay->GetClusterMetrics(clusters.data(), maxClusters, &actual))) {
                 UINT32 pos = 0;
-                for (UINT32 i = 0; i < actual && pos < (UINT32)st.sungChars; i++) {
+                auto target = (UINT32)(EffectiveProg() * (double)ln.text.size() + 0.5);
+                for (UINT32 i = 0; i < actual && pos < target; i++) {
                     doneW += clusters[i].width;
                     pos += clusters[i].length;
                 }
@@ -677,10 +707,43 @@ static void ApplyCommand(const std::string& line) {
         g_state.orig  = Utf8ToWide(a && a->type == JsonVal::STR ? a->str : "");
         g_state.roma  = Utf8ToWide(r && r->type == JsonVal::STR ? r->str : "");
         g_state.trans = Utf8ToWide(tr && tr->type == JsonVal::STR ? tr->str : "");
-        auto* sg = FindMember(root, "sung");
-        g_state.sungChars = (sg && sg->type == JsonVal::NUM) ? (int)sg->num : -1;
+        auto* sg = FindMember(root, "prog");
+        double newProg = (sg && sg->type == JsonVal::NUM) ? sg->num : -1.0;
+        // Keep the last two samples so the render timer can interpolate the
+        // sweep locally (40 Hz pipe updates judder; 60 Hz local extrapolation
+        // is as smooth as the in-app panel).
+        LARGE_INTEGER now{}, freq{};
+        QueryPerformanceCounter(&now);
+        QueryPerformanceFrequency(&freq);
+        EnterCriticalSection(&g_cs);
+        if (newProg >= 0 && g_state.prog >= 0 && g_state.progPrev >= 0)
+        {
+            double dt = (double)(g_state.progAt.QuadPart - g_state.progPrevAt.QuadPart) / (double)freq.QuadPart;
+            double dp = g_state.prog - g_state.progPrev;
+            if (dt > 0.005 && dp > -0.5 && dp < 0.5)
+                g_state.progRate = dp / dt;
+        }
+        if (newProg >= 0 && g_state.prog < 0)
+        {
+            // new line: reset interpolation history
+            g_state.progPrev = -1;
+            g_state.progRate = 0;
+        }
+        else
+        {
+            g_state.progPrev = g_state.prog;
+            g_state.progPrevAt = g_state.progAt;
+        }
+        g_state.prog = newProg;
+        g_state.progAt = now;
+        LeaveCriticalSection(&g_cs);
         LeaveCriticalSection(&g_cs);
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
+        // Local 60 fps interpolation timer while a word-timed line plays.
+        if (g_state.prog >= 0)
+            SetTimer(g_hwnd, 2, 16, nullptr);
+        else
+            KillTimer(g_hwnd, 2);
     } else if (type == "style") {
         auto* f = FindMember(root, "font");
         auto* c = FindMember(root, "color");
@@ -807,6 +870,12 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             Render();
             return 0;
         case WM_TIMER:
+            if (w == 2) {
+                // Karaoke interpolation tick (~60 fps): redraw with the
+                // locally extrapolated progress.
+                Render();
+                return 0;
+            }
             if (w == 1) {
                 UpdateFullscreenHide();
                 // Host-death suicide: if the command pipe has no client for
@@ -898,6 +967,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return 0;
         case WM_DESTROY:
             KillTimer(h, 1);
+            KillTimer(h, 2);
             ReportPosition();       // last chance: where the user left it
             PostQuitMessage(0);
             return 0;
