@@ -224,7 +224,7 @@
 
                     <Grid Grid.Row="0" Margin="8" Height="156" PointerEntered="Card_PointerEntered" PointerExited="Card_PointerExited">
                         <Border Width="156" Height="156" CornerRadius="12" Background="{ThemeResource CardPlaceholder}">
-                            <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                            <Image Source="{Binding Cover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
 
                         <Border x:Name="Dim" Width="156" Height="156" CornerRadius="12" Background="#000000" Opacity="0">
@@ -298,7 +298,7 @@
                         <Border Background="{ThemeResource Surface3}" CornerRadius="{StaticResource RadiusSmall}" />
                         <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource TextSecondary}"
                                   Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                        <Image Source="{Binding Cover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Grid>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
                         <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold"
@@ -350,7 +350,7 @@
                     <Grid Grid.Row="0" Margin="8" Height="164">
                         <Border Width="164" Height="164" CornerRadius="12"
                                 Background="{ThemeResource CardPlaceholder}">
-                            <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                            <Image Source="{Binding Cover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                     </Grid>
 
@@ -407,14 +407,9 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20">
-                            <Border.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop x:Name="ProfileAvatarStopA" Color="#ef4444" Offset="0" />
-                                    <GradientStop Color="#f97316" Offset="1" />
-                                </LinearGradientBrush>
-                            </Border.Background>
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D6;" FontSize="17" Foreground="White" />
+                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20"
+                                Background="{ThemeResource Surface3}" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
+                            <Image x:Name="ProfileAvatarImage" Stretch="Uniform" />
                         </Border>
                         <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
                             <TextBlock Text="MusicPlayer" FontSize="14" FontWeight="SemiBold"
@@ -736,146 +731,401 @@
                     </Grid>
 
                     <ScrollViewer x:Name="SettingsScroll" Visibility="Collapsed" Margin="22,6,22,14">
-                        <StackPanel x:Name="SettingsPanel" Spacing="14" MaxWidth="640" HorizontalAlignment="Left">
+                        <StackPanel x:Name="SettingsPanel" Spacing="14" MaxWidth="720" HorizontalAlignment="Left">
 
+                            <!-- ============ 外观 ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="12">
+                                <StackPanel>
                                     <TextBlock Text="外观" Style="{StaticResource SettingsCardTitle}" />
-                                    <TextBlock Text="主题模式" Style="{StaticResource SettingsHint}" />
-                                    <ComboBox x:Name="ThemeModeCombo" Width="220"
-                                              SelectionChanged="ThemeModeCombo_SelectionChanged">
-                                        <ComboBoxItem Content="深色" />
-                                        <ComboBoxItem Content="浅色" />
-                                    </ComboBox>
-                                    <ToggleSwitch x:Name="TitlePreferFilenameToggle" Header="显示标题优先用文件名"
-                                                  Margin="0,8,0,0" Toggled="TitlePreferFilenameToggle_Toggled"
-                                                  ToolTipService.ToolTip="开启后列表显示音频文件名中的标题，而不是文件内嵌标签里的标题（内嵌标签有误时使用，切换后自动刷新曲库）。" />
-                                    <TextBlock Text="主题色（用于高亮、按钮、进度条等）" Style="{StaticResource SettingsHint}" />
-                                    <controls:ColorPicker x:Name="AccentColorPicker" ColorChanged="AccentColorPicker_ColorChanged" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="主题模式" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="选择您喜欢的主题外观" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="ThemeModeCombo" Grid.Column="1" Width="180" VerticalAlignment="Center"
+                                                  SelectionChanged="ThemeModeCombo_SelectionChanged">
+                                            <ComboBoxItem Content="深色" />
+                                            <ComboBoxItem Content="浅色" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="显示标题优先用文件名" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="列表显示文件名中的标题而不是内嵌标签（内嵌标签有误时使用，切换后刷新曲库）" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="TitlePreferFilenameToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="TitlePreferFilenameToggle_Toggled"
+                                                      ToolTipService.ToolTip="开启后列表显示音频文件名中的标题，而不是文件内嵌标签里的标题。" />
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="主题色" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="用于高亮、按钮、进度条等，点击色块修改" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Width="44" Height="36" Padding="0" CornerRadius="10"
+                                                Background="Transparent" BorderThickness="0" VerticalAlignment="Center">
+                                            <Border x:Name="AccentSwatch" Width="24" Height="24" CornerRadius="12" Background="#ef4444" />
+                                            <Button.Flyout>
+                                                <Flyout>
+                                                    <controls:ColorPicker x:Name="AccentColorPicker" ColorChanged="AccentColorPicker_ColorChanged" />
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
+                            <!-- ============ 桌面歌词样式 ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="14">
+                                <StackPanel>
                                     <TextBlock Text="桌面歌词样式" Style="{StaticResource SettingsCardTitle}" />
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="桌面歌词大小" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />
-                                        <TextBlock x:Name="LyricFontSizeText" Text="24" FontSize="12"
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="桌面歌词大小" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="拖动滑杆实时调整；罗马音和翻译行会按比例缩放" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <TextBlock x:Name="LyricFontSizeText" Text="24" Grid.Column="1" FontSize="14"
                                                    Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
-                                    </StackPanel>
-                                    <TextBlock Text="拖动滑杆实时调整；罗马音和翻译行会按比例缩放" Style="{StaticResource SettingsHint}" />
-                                    <Slider x:Name="LyricFontSlider" Width="340" HorizontalAlignment="Left"
+                                    </Grid>
+                                    <Slider x:Name="LyricFontSlider" HorizontalAlignment="Stretch" Margin="0,0,0,12"
                                             Foreground="{StaticResource QqGreen}" ValueChanged="LyricFontSlider_ValueChanged" />
-                                    <Border Background="{ThemeResource Surface2}" CornerRadius="{StaticResource RadiusSmall}" Padding="14,10" HorizontalAlignment="Left">
+                                    <Border Background="{ThemeResource Surface2}" CornerRadius="{StaticResource RadiusSmall}" Padding="14,10"
+                                            HorizontalAlignment="Left" Margin="0,0,0,12">
                                         <StackPanel Spacing="2">
                                             <TextBlock x:Name="LyricSizePreviewMain" Text="预览：桌面歌词" FontSize="24" />
                                             <TextBlock x:Name="LyricSizePreviewRoma" Text="pureryu: desktop lyrics" FontSize="13"
                                                        Opacity="0.55" />
                                         </StackPanel>
                                     </Border>
-                                    <TextBlock Text="文字颜色" Style="{StaticResource SettingsHint}" />
-                                    <controls:ColorPicker x:Name="LyricColorPicker" ColorChanged="LyricColorPicker_ColorChanged" />
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="卡拉OK已播放颜色（逐字歌词扫过部分，与桌面歌词同步）" Style="{StaticResource SettingsHint}" />
-                                        <controls:ColorPicker x:Name="SungColorPicker" ColorChanged="SungColorPicker_ColorChanged" />
-                                    </StackPanel>
-                                    <StackPanel Spacing="4">
-                                        <TextBlock Text="卡拉OK未播放颜色（逐字歌词尚未唱到部分，与桌面歌词同步）" Style="{StaticResource SettingsHint}" />
-                                        <controls:ColorPicker x:Name="UnsungColorPicker" ColorChanged="UnsungColorPicker_ColorChanged" />
-                                    </StackPanel>
-                                    <TextBlock Text="歌词文件编码（日文歌词乱码可尝试 Shift-JIS）" Style="{StaticResource SettingsHint}" />
-                                    <ComboBox x:Name="LyricEncodingCombo" Width="180" SelectionChanged="LyricEncodingCombo_SelectionChanged">
-                                        <ComboBoxItem Content="自动检测" />
-                                        <ComboBoxItem Content="GBK" />
-                                        <ComboBoxItem Content="Shift-JIS" />
-                                        <ComboBoxItem Content="Big5" />
-                                        <ComboBoxItem Content="UTF-8" />
-                                    </ComboBox>
-                                    <TextBlock Text="歌词下载源（自动 = 网易云 → QQ → LRCLIB 依次尝试；指定某一源时不回退）"
-                                               Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
-                                    <ComboBox x:Name="LyricSourceCombo" Width="220"
-                                              SelectionChanged="LyricSourceCombo_SelectionChanged">
-                                        <ComboBoxItem Content="自动" />
-                                        <ComboBoxItem Content="网易云音乐" />
-                                        <ComboBoxItem Content="QQ 音乐" />
-                                        <ComboBoxItem Content="酷狗音乐" />
-                                        <ComboBoxItem Content="LRCLIB" />
-                                    </ComboBox>
-                                    <ToggleSwitch x:Name="WordLyricsToggle" Header="下载逐字歌词（卡拉OK，QQ QRC / 酷狗 KRC）"
-                                                  OffContent="关" OnContent="开" Margin="0,8,0,0"
-                                                  Toggled="WordLyricsToggle_Toggled"
-                                                  ToolTipService.ToolTip="开启后补全/下载歌词时优先保存逐字时间（.qrc/.krc 文件），歌词面板会高亮当前演唱到的字；源没有逐字版本时自动回退普通 LRC。" />
-                                    <TextBlock Text="QQ音乐 Cookie（可选）— QQ 已限制未登录搜索，粘贴 Cookie 后 QQ 源可用："
-                                               Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
-                                    <TextBox x:Name="QqCookieBox" HorizontalAlignment="Stretch" MaxWidth="640"
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="文字颜色" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="桌面歌词与歌词面板的歌词文字颜色，点击色块修改" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Width="44" Height="36" Padding="0" CornerRadius="10"
+                                                Background="Transparent" BorderThickness="0" VerticalAlignment="Center">
+                                            <Border x:Name="LyricColorSwatch" Width="24" Height="24" CornerRadius="12" Background="#ffffff" />
+                                            <Button.Flyout>
+                                                <Flyout>
+                                                    <controls:ColorPicker x:Name="LyricColorPicker" ColorChanged="LyricColorPicker_ColorChanged" />
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="卡拉OK已播放颜色" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="逐字歌词扫过部分的颜色，与桌面歌词同步" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Width="44" Height="36" Padding="0" CornerRadius="10"
+                                                Background="Transparent" BorderThickness="0" VerticalAlignment="Center">
+                                            <Border x:Name="SungSwatch" Width="24" Height="24" CornerRadius="12" Background="#31c27c" />
+                                            <Button.Flyout>
+                                                <Flyout>
+                                                    <controls:ColorPicker x:Name="SungColorPicker" ColorChanged="SungColorPicker_ColorChanged" />
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="卡拉OK未播放颜色" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="逐字歌词尚未唱到部分的颜色，与桌面歌词同步" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Width="44" Height="36" Padding="0" CornerRadius="10"
+                                                Background="Transparent" BorderThickness="0" VerticalAlignment="Center">
+                                            <Border x:Name="UnsungSwatch" Width="24" Height="24" CornerRadius="12" Background="#ffffff" />
+                                            <Button.Flyout>
+                                                <Flyout>
+                                                    <controls:ColorPicker x:Name="UnsungColorPicker" ColorChanged="UnsungColorPicker_ColorChanged" />
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="歌词文件编码" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="日文歌词乱码可尝试 Shift-JIS" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="LyricEncodingCombo" Grid.Column="1" Width="160" VerticalAlignment="Center"
+                                                  SelectionChanged="LyricEncodingCombo_SelectionChanged">
+                                            <ComboBoxItem Content="自动检测" />
+                                            <ComboBoxItem Content="GBK" />
+                                            <ComboBoxItem Content="Shift-JIS" />
+                                            <ComboBoxItem Content="Big5" />
+                                            <ComboBoxItem Content="UTF-8" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="歌词下载源" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="自动 = 网易云 → QQ → LRCLIB 依次尝试；指定某一源时不回退" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="LyricSourceCombo" Grid.Column="1" Width="160" VerticalAlignment="Center"
+                                                  SelectionChanged="LyricSourceCombo_SelectionChanged">
+                                            <ComboBoxItem Content="自动" />
+                                            <ComboBoxItem Content="网易云音乐" />
+                                            <ComboBoxItem Content="QQ 音乐" />
+                                            <ComboBoxItem Content="酷狗音乐" />
+                                            <ComboBoxItem Content="LRCLIB" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="下载逐字歌词" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="卡拉OK逐字（QQ QRC / 酷狗 KRC）；源没有逐字版本时自动回退普通 LRC" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="WordLyricsToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="WordLyricsToggle_Toggled"
+                                                      ToolTipService.ToolTip="开启后补全/下载歌词时优先保存逐字时间（.qrc/.krc 文件），歌词面板会高亮当前演唱到的字。" />
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3">
+                                            <TextBlock Text="QQ音乐 Cookie（可选）" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="QQ 已限制未登录搜索，粘贴 Cookie 后 QQ 源可用" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBox x:Name="QqCookieBox" HorizontalAlignment="Stretch" Margin="0,0,0,12"
                                              PlaceholderText="浏览器登录 y.qq.com → F12 → 应用 → Cookie → 复制全部（含 qm_keyst/uin）"
                                              TextChanged="QqCookieBox_TextChanged" TextWrapping="Wrap" AcceptsReturn="False"
-                                             MinHeight="52" MaxHeight="96" Margin="0,0,10,0" />
-                                    <TextBlock Text="一键补全歌词写入的内容"
-                                               Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
-                                    <ComboBox x:Name="LyricFillModeCombo" Width="220"
-                                              SelectionChanged="LyricFillModeCombo_SelectionChanged">
-                                        <ComboBoxItem Content="全部（原文 + 翻译 + 罗马音）" />
-                                        <ComboBoxItem Content="仅原文歌词" />
-                                        <ComboBoxItem Content="仅补充翻译 / 罗马音" />
-                                    </ComboBox>
-                                    <TextBlock Text="背景不透明度（0 = 完全透明）" Style="{StaticResource SettingsHint}" />
-                                    <Slider x:Name="LyricOpacitySlider" Minimum="0" Maximum="100" Value="0" Width="340" HorizontalAlignment="Left"
-                                            Foreground="{StaticResource QqGreen}" ValueChanged="LyricOpacitySlider_ValueChanged" />
-                                    <StackPanel Orientation="Horizontal" Spacing="20">
-                                        <ToggleSwitch x:Name="LyricBoldToggle" Header="加粗文字" OffContent="关" OnContent="开"
-                                                      Toggled="LyricBoldToggle_Toggled" />
-                                        <StackPanel Spacing="8">
-                                            <TextBlock Text="对齐方式" Style="{StaticResource SettingsHint}" />
-                                            <ComboBox x:Name="LyricAlignCombo" SelectionChanged="LyricAlignCombo_SelectionChanged">
-                                                <ComboBoxItem Content="居中" />
-                                                <ComboBoxItem Content="居左" />
-                                            </ComboBox>
+                                             MinHeight="52" MaxHeight="96" />
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="一键补全歌词写入的内容" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
                                         </StackPanel>
-                                        <StackPanel Spacing="8">
-                                            <TextBlock Text="歌词行顺序（同步桌面歌词）" Style="{StaticResource SettingsHint}" />
-                                            <ComboBox x:Name="LyricLineOrderCombo" SelectionChanged="LyricLineOrderCombo_SelectionChanged">
-                                                <ComboBoxItem Content="原文 / 罗马音 / 翻译" />
-                                                <ComboBoxItem Content="原文 / 翻译 / 罗马音" />
-                                                <ComboBoxItem Content="罗马音 / 原文 / 翻译" />
-                                                <ComboBoxItem Content="翻译 / 原文 / 罗马音" />
-                                                <ComboBoxItem Content="罗马音 / 翻译 / 原文" />
-                                                <ComboBoxItem Content="翻译 / 罗马音 / 原文" />
-                                            </ComboBox>
+                                        <ComboBox x:Name="LyricFillModeCombo" Grid.Column="1" Width="200" VerticalAlignment="Center"
+                                                  SelectionChanged="LyricFillModeCombo_SelectionChanged">
+                                            <ComboBoxItem Content="全部（原文 + 翻译 + 罗马音）" />
+                                            <ComboBoxItem Content="仅原文歌词" />
+                                            <ComboBoxItem Content="仅补充翻译 / 罗马音" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="背景不透明度" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="0 = 完全透明" Style="{StaticResource SettingsHint}" />
                                         </StackPanel>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="20">
-                                        <ToggleSwitch x:Name="LyricClickThroughToggle" Header="默认开启鼠标穿透" OffContent="关" OnContent="开"
-                                                      Toggled="LyricClickThroughToggle_Toggled" />
-                                        <ToggleSwitch x:Name="LyricVerticalToggle" Header="竖排显示" OffContent="关" OnContent="开"
-                                                      Toggled="LyricVerticalToggle_Toggled"
-                                                      ToolTipService.ToolTip="桌面歌词改为竖排（逐字纵向排列）。鼠标悬停在歌词上会出现边框，拖动右边缘可调整宽度；鼠标离开后边框自动隐藏；鼠标穿透模式下不显示边框；全屏应用（如游戏）运行时自动隐藏桌面歌词。" />
-                                    </StackPanel>
+                                        <Slider x:Name="LyricOpacitySlider" Grid.Column="1" Width="220" VerticalAlignment="Center"
+                                                Foreground="{StaticResource QqGreen}" ValueChanged="LyricOpacitySlider_ValueChanged" />
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="加粗文字" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="LyricBoldToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="LyricBoldToggle_Toggled" />
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="对齐方式" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="LyricAlignCombo" Grid.Column="1" Width="140" VerticalAlignment="Center"
+                                                  SelectionChanged="LyricAlignCombo_SelectionChanged">
+                                            <ComboBoxItem Content="居中" />
+                                            <ComboBoxItem Content="居左" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="歌词行顺序" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="同步应用到桌面歌词" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="LyricLineOrderCombo" Grid.Column="1" Width="190" VerticalAlignment="Center"
+                                                  SelectionChanged="LyricLineOrderCombo_SelectionChanged">
+                                            <ComboBoxItem Content="原文 / 罗马音 / 翻译" />
+                                            <ComboBoxItem Content="原文 / 翻译 / 罗马音" />
+                                            <ComboBoxItem Content="罗马音 / 原文 / 翻译" />
+                                            <ComboBoxItem Content="翻译 / 原文 / 罗马音" />
+                                            <ComboBoxItem Content="罗马音 / 翻译 / 原文" />
+                                            <ComboBoxItem Content="翻译 / 罗马音 / 原文" />
+                                        </ComboBox>
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="默认开启鼠标穿透" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="鼠标点击会穿过歌词悬浮窗" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="LyricClickThroughToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="LyricClickThroughToggle_Toggled" />
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="竖排显示" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="逐字纵向成列；全屏应用运行时自动隐藏桌面歌词" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="LyricVerticalToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="LyricVerticalToggle_Toggled"
+                                                      ToolTipService.ToolTip="桌面歌词改为竖排（逐字纵向排列）。鼠标悬停在歌词上会出现边框，拖动右边缘可调整宽度；鼠标穿透模式下不显示边框；全屏应用（如游戏）运行时自动隐藏桌面歌词。" />
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
+                            <!-- ============ 播放 ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="12">
+                                <StackPanel>
                                     <TextBlock Text="播放" Style="{StaticResource SettingsCardTitle}" />
-                                    <ToggleSwitch x:Name="CoverSpinToggle" Header="歌曲封面旋转（黑胶转动效果）" OffContent="关" OnContent="开"
-                                                  Toggled="CoverSpinToggle_Toggled" />
-                                    <ToggleSwitch x:Name="DynamicVolumeToggle" Header="动态音量（自动均衡歌曲响度）" OffContent="关" OnContent="开"
-                                                  Margin="0,8,0,0" Toggled="DynamicVolumeToggle_Toggled"
-                                                  ToolTipService.ToolTip="使用歌曲预先保存的 ReplayGain 响度信息，在播放时应用固定增益，不改变歌曲时间轴。" />
-                                    <StackPanel Spacing="6" Margin="18,6,0,0">
-                                        <TextBlock Text="使用歌曲内嵌的 ReplayGain 信息；没有该信息的歌曲保持原始音量。播放时只应用固定增益，不会跳过歌曲结尾。" Style="{StaticResource SettingsHint}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
-                                        <TextBlock Text="音效（均衡器 / 混响 / 环绕 / 超重低音）" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />
-                                        <Button Content="打开音效面板" Click="SoundFxOpen_Click" FontSize="12"
-                                                Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="歌曲封面旋转" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="黑胶转动效果（歌词页封面显示为唱片）" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="CoverSpinToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="CoverSpinToggle_Toggled" />
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="动态音量" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="按歌曲内嵌 ReplayGain 自动均衡响度，只应用固定增益，不会跳过歌曲结尾" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="DynamicVolumeToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="DynamicVolumeToggle_Toggled"
+                                                      ToolTipService.ToolTip="使用歌曲预先保存的 ReplayGain 响度信息，在播放时应用固定增益，不改变歌曲时间轴。" />
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="音效" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="均衡器 / 混响 / 环绕 / 超重低音等效果" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="打开音效面板" Click="SoundFxOpen_Click" FontSize="12"
+                                                Padding="14,6" CornerRadius="{StaticResource RadiusMedium}" VerticalAlignment="Center"
                                                 Background="{ThemeResource ButtonBackground}"
                                                 BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1"
                                                 ToolTipService.ToolTip="10 段图形均衡器与风格预设、超重低音、混响、环绕等效果" />
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="定时停止播放" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />
-                                        <ComboBox x:Name="SleepTimerCombo" Width="130"
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="定时停止播放" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="SleepTimerCombo" Grid.Column="1" Width="130" VerticalAlignment="Center"
                                                   SelectionChanged="SleepTimerCombo_SelectionChanged">
                                             <ComboBoxItem Content="关" />
                                             <ComboBoxItem Content="15 分钟" />
@@ -883,72 +1133,127 @@
                                             <ComboBoxItem Content="60 分钟" />
                                             <ComboBoxItem Content="90 分钟" />
                                         </ComboBox>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="淡入淡出（Crossfade）" Style="{StaticResource SettingsHint}" VerticalAlignment="Center" />
-                                        <ComboBox x:Name="CrossfadeCombo" Width="110"
+                                    </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="淡入淡出（Crossfade）" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="CrossfadeCombo" Grid.Column="1" Width="130" VerticalAlignment="Center"
                                                   SelectionChanged="CrossfadeCombo_SelectionChanged">
                                             <ComboBoxItem Content="关" />
                                             <ComboBoxItem Content="1 秒" />
                                             <ComboBoxItem Content="2 秒" />
                                             <ComboBoxItem Content="3 秒" />
                                         </ComboBox>
-                                    </StackPanel>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
+                            <!-- ============ 关闭行为 ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="8">
+                                <StackPanel>
                                     <TextBlock Text="关闭行为" Style="{StaticResource SettingsCardTitle}" />
-                                    <TextBlock Text="点击窗口右上角关闭按钮时：" Style="{StaticResource SettingsHint}" />
-                                    <ComboBox x:Name="CloseActionCombo" Width="220" SelectionChanged="CloseActionCombo_SelectionChanged">
-                                        <ComboBoxItem Content="直接退出" />
-                                        <ComboBoxItem Content="最小化到托盘" />
-                                    </ComboBox>
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="点击窗口关闭按钮时" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                        </StackPanel>
+                                        <ComboBox x:Name="CloseActionCombo" Grid.Column="1" Width="160" VerticalAlignment="Center"
+                                                  SelectionChanged="CloseActionCombo_SelectionChanged">
+                                            <ComboBoxItem Content="直接退出" />
+                                            <ComboBoxItem Content="最小化到托盘" />
+                                        </ComboBox>
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
+                            <!-- ============ 全局快捷键 ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="8">
+                                <StackPanel>
                                     <TextBlock Text="全局快捷键" Style="{StaticResource SettingsCardTitle}" />
-                                    <ToggleSwitch x:Name="GlobalHotkeysToggle" Header="启用全局快捷键" OffContent="关" OnContent="开"
-                                                  Toggled="GlobalHotkeysToggle_Toggled" />
-                                    <TextBlock Text="Ctrl+Alt+Space 播放/暂停 · Ctrl+Alt+← 上一首 · Ctrl+Alt+→ 下一首" Style="{StaticResource SettingsHint}" />
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="启用全局快捷键" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="Ctrl+Alt+Space 播放/暂停 · Ctrl+Alt+← 上一首 · Ctrl+Alt+→ 下一首" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="GlobalHotkeysToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="GlobalHotkeysToggle_Toggled" />
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
+                            <!-- ============ 系统 ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="8">
+                                <StackPanel>
                                     <TextBlock Text="系统" Style="{StaticResource SettingsCardTitle}" />
-                                    <ToggleSwitch x:Name="AutoStartToggle" Header="开机自动启动" OffContent="关" OnContent="开"
-                                                   Toggled="AutoStartToggle_Toggled" />
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Text="开机自动启动" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="AutoStartToggle" Grid.Column="1" VerticalAlignment="Center"
+                                                      OffContent="" OnContent="" Toggled="AutoStartToggle_Toggled" />
+                                    </Grid>
                                 </StackPanel>
                             </Border>
 
+                            <!-- ============ 数据与缓存 ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="8">
+                                <StackPanel>
                                     <TextBlock Text="数据与缓存" Style="{StaticResource SettingsCardTitle}" />
-                                    <TextBlock Text="数据/缓存存储位置（自动歌单、最近播放、歌单、进度、歌词绑定）。留空则使用默认 %LOCALAPPDATA%\MusicPlayer。"
-                                               Style="{StaticResource SettingsHint}" />
-                                    <TextBox x:Name="CacheDirBox" Width="460" HorizontalAlignment="Left" PlaceholderText="留空使用默认位置" />
-                                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,4,0,0">
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3">
+                                            <TextBlock Text="数据/缓存存储位置" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="自动歌单、最近播放、歌单、进度、歌词绑定。留空则使用默认 %LOCALAPPDATA%\MusicPlayer" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBox x:Name="CacheDirBox" HorizontalAlignment="Stretch" PlaceholderText="留空使用默认位置" />
+                                    <StackPanel Orientation="Horizontal" Spacing="10" Margin="0,10,0,0">
                                         <Button x:Name="CacheDirBrowse" Content="浏览..." Click="CacheDirBrowse_Click" CornerRadius="{StaticResource RadiusMedium}" />
                                         <Button x:Name="CacheDirApply" Content="应用" Click="CacheDirApply_Click" CornerRadius="{StaticResource RadiusMedium}" />
                                         <Button x:Name="CacheDirReset" Content="恢复默认" Click="CacheDirReset_Click" CornerRadius="{StaticResource RadiusMedium}" />
                                     </StackPanel>
-                                    <TextBlock x:Name="CacheDirStatus" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondary}" />
+                                    <TextBlock x:Name="CacheDirStatus" FontSize="12" TextWrapping="Wrap" Foreground="{ThemeResource TextSecondary}"
+                                               Margin="0,8,0,0" />
                                 </StackPanel>
                             </Border>
 
+                            <!-- ============ Last.fm ============ -->
                             <Border Style="{StaticResource SettingsCard}">
-                                <StackPanel Spacing="10">
+                                <StackPanel>
                                     <TextBlock Text="Last.fm" Style="{StaticResource SettingsCardTitle}" />
-                                    <TextBlock Text="自动将播放记录 scrobble 到 Last.fm。需要注册应用获取 API Key 和 Secret：https://www.last.fm/api/account/create"
-                                               Style="{StaticResource SettingsHint}" />
-                                    <TextBox x:Name="LastFmApiKeyBox" Width="460" HorizontalAlignment="Left"
-                                             PlaceholderText="API Key" />
-                                    <TextBox x:Name="LastFmApiSecretBox" Width="460" HorizontalAlignment="Left"
-                                             PlaceholderText="API Secret" />
+                                    <Grid Padding="0,12" ColumnSpacing="16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="3">
+                                            <TextBlock Text="Scrobble 播放记录" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="自动将播放记录提交到 Last.fm，需要注册应用获取 API Key 和 Secret（last.fm/api/account/create）" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                    </Grid>
+                                    <TextBox x:Name="LastFmApiKeyBox" PlaceholderText="API Key" Margin="0,0,0,8" />
+                                    <TextBox x:Name="LastFmApiSecretBox" PlaceholderText="API Secret" Margin="0,0,0,10" />
                                     <StackPanel x:Name="LastFmConnectPanel" Orientation="Horizontal" Spacing="10">
                                         <Button x:Name="LastFmConnectBtn" Content="连接 Last.fm" Click="LastFmConnectBtn_Click"
                                                 CornerRadius="{StaticResource RadiusMedium}" />
@@ -1182,7 +1487,7 @@
                                             <Border Background="{ThemeResource Surface3}" CornerRadius="10" />
                                             <FontIcon Glyph="&#xE8D6;" FontSize="14" Foreground="{ThemeResource TextSecondary}"
                                                       Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                            <Image x:Name="MiniCover" Stretch="UniformToFill" />
+                                            <Image x:Name="MiniCover" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Grid>
                                         <StackPanel VerticalAlignment="Center" MaxWidth="200" Spacing="2">
                                             <TextBlock x:Name="MiniTitle" Text="未在播放" FontSize="14" FontWeight="SemiBold"
@@ -1339,7 +1644,7 @@
                                 <Border Background="{ThemeResource Surface3}" CornerRadius="{StaticResource RadiusSmall}" />
                                 <FontIcon Glyph="&#xE8D6;" FontSize="12" Foreground="{ThemeResource TextSecondary}"
                                           Opacity="0.45" HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                <Image Source="{Binding Cover}" Stretch="UniformToFill" />
+                                <Image Source="{Binding Cover}" Stretch="UniformToFill" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Grid>
                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding Title}" FontSize="13" TextTrimming="CharacterEllipsis"
