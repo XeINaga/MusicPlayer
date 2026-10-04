@@ -3070,7 +3070,7 @@ public sealed partial class MainWindow : Window
         _pushedOriginal = "暂无歌词";
         _pushedRoma = null;
         _pushedTrans = null;
-        _desktopLyrics.UpdateLyric(track, "暂无歌词", null, null, 0);
+        _desktopLyrics.UpdateLyric(track, "暂无歌词", null, null, -1);
     }
 
     private void BtnDesktopLyrics_Unchecked(object sender, RoutedEventArgs e)
@@ -3558,10 +3558,13 @@ public sealed partial class MainWindow : Window
                         return null;
                     case 'O' when !string.IsNullOrWhiteSpace(line.Original):
                         return MakeTextBlock(line.Original, 22, Microsoft.UI.Colors.White);
+                    // Romaji/translation follow the desktop-lyric text color
+                    // (the old hard-coded SkyBlue/LightGreen clashed with
+                    // user themes).
                     case 'R' when showRoma && !string.IsNullOrWhiteSpace(line.Romaji):
-                        return MakeTextBlock(line.Romaji, 14, Microsoft.UI.Colors.SkyBlue);
+                        return MakeTextBlock(line.Romaji, 14, ParseHex(_settings.LyricColor));
                     case 'T' when showTrans && !string.IsNullOrWhiteSpace(line.Translation):
-                        return MakeTextBlock(line.Translation, 16, Microsoft.UI.Colors.LightGreen);
+                        return MakeTextBlock(line.Translation, 16, ParseHex(_settings.LyricColor));
                     default:
                         return null;
                 }
@@ -3668,8 +3671,9 @@ public sealed partial class MainWindow : Window
 
         if (idx == _currentLineIndex)
         {
-            var cur = UpdateWordHighlight(idx, t);
-            PushDesktop(idx, cur);
+            var prog = CalcWordProgress(_lyrics.Lines[idx], t);
+            UpdateWordHighlight(idx, t);
+            PushDesktop(idx, prog);
             return;
         }
 
@@ -3681,13 +3685,49 @@ public sealed partial class MainWindow : Window
         if (idx >= 0 && idx < _lyricPanels.Count)
         {
             SetLineActive(_lyricPanels[idx], true);
-            var sung = UpdateWordHighlight(idx, t);
-            PushDesktop(idx, sung);
+            var prog = CalcWordProgress(_lyrics.Lines[idx], t);
+            UpdateWordHighlight(idx, t);
+            PushDesktop(idx, prog);
             _lyricScrollTarget = _lyricPanels[idx];
             _dispatcher.TryEnqueue(ScrollLyricToCurrent);
         }
 
         PushDesktop(idx);
+    }
+
+    /// <summary>
+    /// Continuous karaoke progress (0..1) of a word-timed line at time t —
+    /// linear inside the current word so the sweep flows smoothly between
+    /// word boundaries. -1 for lines without word timing.
+    /// </summary>
+    private double CalcWordProgress(Models.LyricLine line, TimeSpan t)
+    {
+        if (line.Words == null || line.Words.Count == 0)
+            return -1;
+
+        int totalChars = 0;
+        double doneChars = 0;
+        Models.LyricWord? current = null;
+        foreach (var w in line.Words)
+        {
+            totalChars += w.Text.Length;
+            if (w.Start <= t)
+            {
+                doneChars += w.Text.Length;
+                current = w;
+            }
+        }
+
+        if (totalChars == 0)
+            return -1;
+        if (current == null)
+            return 0;
+
+        var charsBefore = doneChars - current.Text.Length;
+        var frac = current.Duration.TotalMilliseconds > 0
+            ? Math.Clamp((t - current.Start).TotalMilliseconds / current.Duration.TotalMilliseconds, 0, 1)
+            : 1;
+        return (charsBefore + current.Text.Length * frac) / totalChars;
     }
 
     /// <summary>Characters sung so far in line <paramref name="idx"/> — also
@@ -3711,47 +3751,19 @@ public sealed partial class MainWindow : Window
     /// Flowing karaoke sweep for a word-timed row: the accent overlay is
     /// clipped to the sung prefix (char count from the word timing), so the
     /// highlight washes over the line smoothly between word boundaries.
-    /// Returns the number of sung characters for the desktop overlay.
     /// </summary>
-    private int UpdateWordHighlight(int idx, TimeSpan t)
+    private void UpdateWordHighlight(int idx, TimeSpan t)
     {
         if (idx < 0 || idx >= _wordOverlays.Count)
-            return -1;
+            return;
         var overlay = _wordOverlays[idx];
         var line = _wordLines[idx];
         if (overlay == null || line.Words == null || line.Words.Count == 0)
-            return -1;
+            return;
 
-        int sungChars = 0;
-        int totalChars = 0;
-        double doneChars = 0; // fractional: current word contributes proportionally
-        Models.LyricWord? current = null;
-        foreach (var w in line.Words)
-        {
-            totalChars += w.Text.Length;
-            if (w.Start <= t)
-            {
-                sungChars += w.Text.Length;
-                doneChars = sungChars;
-                current = w;
-            }
-        }
-
-        double progress;
-        if (current == null)
-        {
+        var progress = CalcWordProgress(line, t);
+        if (progress < 0)
             progress = 0;
-        }
-        else
-        {
-            var charsBefore = doneChars - current.Text.Length;
-            var frac = current.Duration.TotalMilliseconds > 0
-                ? Math.Clamp((t - current.Start).TotalMilliseconds / current.Duration.TotalMilliseconds, 0, 1)
-                : 1;
-            progress = totalChars > 0
-                ? (charsBefore + current.Text.Length * frac) / totalChars
-                : 1;
-        }
 
         // Clip the accent copy to the sung prefix. ActualWidth is only valid
         // after layout — before that the clip stays zero (invisible), which is
@@ -3764,7 +3776,6 @@ public sealed partial class MainWindow : Window
                 Rect = new Windows.Foundation.Rect(0, 0, wpx * progress, overlay.ActualHeight + 8)
             };
         }
-        return sungChars;
     }
 
     /// <summary>
@@ -3797,9 +3808,9 @@ public sealed partial class MainWindow : Window
     private string? _pushedOriginal;
     private string? _pushedRoma;
     private string? _pushedTrans;
-    private int _pushedSungChars = -1;
+    private double _pushedProgress = -1;
 
-    private void PushDesktop(int idx, int sungChars = -1)
+    private void PushDesktop(int idx, double progress = -1)
     {
         if (_desktopLyrics == null)
             return;
@@ -3809,7 +3820,7 @@ public sealed partial class MainWindow : Window
             // of letting the PREVIOUS track's last line linger on screen.
             if (_pushedTrack != null)
             {
-                _desktopLyrics.UpdateLyric(_currentTrack, string.Empty, null, null, 0);
+                _desktopLyrics.UpdateLyric(_currentTrack, string.Empty, null, null, -1);
                 _pushedTrack = null;
                 _pushedOriginal = _pushedRoma = _pushedTrans = null;
             }
@@ -3826,15 +3837,15 @@ public sealed partial class MainWindow : Window
             && string.Equals(original, _pushedOriginal, StringComparison.Ordinal)
             && string.Equals(roma, _pushedRoma, StringComparison.Ordinal)
             && string.Equals(trans, _pushedTrans, StringComparison.Ordinal)
-            && sungChars == _pushedSungChars)
+            && Math.Abs(progress - _pushedProgress) < 0.002)
             return;
 
         _pushedTrack = _currentTrack;
         _pushedOriginal = original;
         _pushedRoma = roma;
         _pushedTrans = trans;
-        _pushedSungChars = sungChars;
-        _desktopLyrics.UpdateLyric(_currentTrack, original, roma, trans, sungChars);
+        _pushedProgress = progress;
+        _desktopLyrics.UpdateLyric(_currentTrack, original, roma, trans, progress);
     }
 
     // ---------- Romaji / translation toggles (in-app + desktop overlay) ----------

@@ -341,17 +341,18 @@ public sealed class DesktopLyricsOverlay : IDisposable
         Send(JsonSerializer.Serialize(new { t = "click", on = on ? 1 : 0 }, JsonOptions));
 
     /// <summary>Push the current lyric line (original / romaji / translation).</summary>
-    public void UpdateLyric(MusicPlayer.Models.Track? track, string original, string? romaji, string? translation, int sungChars = -1)
+    public void UpdateLyric(MusicPlayer.Models.Track? track, string original, string? romaji, string? translation, double progress = -1)
     {
-        // sungChars: characters already sung in the current word-timed line
-        // (-1 = not word-timed). The overlay paints the prefix karaoke-style.
+        // progress: continuous karaoke position of the current word-timed line
+        // (0..1, interpolated inside words; -1 = not word-timed). The overlay
+        // clips ALL lines (original/romaji/translation) to this fraction.
         Send(JsonSerializer.Serialize(new
         {
             t = "lyric",
             orig = original ?? "",
             roma = romaji ?? "",
             trans = translation ?? "",
-            sung = sungChars,
+            prog = progress,
         }, JsonOptions));
     }
 
