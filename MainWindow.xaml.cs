@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
@@ -251,6 +252,21 @@ public sealed partial class MainWindow : Window
         // Switch the whole visual language (dark / light) before the first paint.
         ApplyThemeMode();
 
+        // EchoMusic look: square cover by default, sidebar subtitle, queue badge.
+        ApplyCoverMode();
+        UpdateProfileSubtitle();
+        UpdateQueueBadge();
+
+        // Title bar shows the app icon instead of a colour dot.
+        try
+        {
+            TitleAppIcon.Source = new BitmapImage(new Uri(Path.Combine(AppContext.BaseDirectory, "AppIcon.ico")));
+        }
+        catch
+        {
+            // cosmetic only
+        }
+
         // Mica window backdrop (Windows 11+): the desktop material tints the
         // whole window. The layered fills in XAML are semi-transparent for
         // exactly this case; on unsupported systems the opaque RootGrid
@@ -372,7 +388,14 @@ public sealed partial class MainWindow : Window
     {
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
+        ApplyTitleBarTheme(string.Equals(_settings.ThemeMode, "Light", StringComparison.OrdinalIgnoreCase));
+    }
 
+    /// <summary>Caption button colours must follow the app theme: the old
+    /// hardcoded light-on-dark values made the close/max/min glyphs invisible
+    /// on the light title bar.</summary>
+    private void ApplyTitleBarTheme(bool light)
+    {
         try
         {
             var hwnd = WindowNative.GetWindowHandle(this);
@@ -380,13 +403,26 @@ public sealed partial class MainWindow : Window
             var titleBar = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId).TitleBar;
 
             titleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
-            titleBar.ButtonForegroundColor = ParseHex("#f2f2f5");
-            titleBar.ButtonHoverBackgroundColor = ParseHex("#23232f");
-            titleBar.ButtonHoverForegroundColor = Microsoft.UI.Colors.White;
-            titleBar.ButtonPressedBackgroundColor = ParseHex("#2c2c3a");
-            titleBar.ButtonPressedForegroundColor = Microsoft.UI.Colors.White;
-            titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
-            titleBar.ButtonInactiveForegroundColor = ParseHex("#6a6a76");
+            if (light)
+            {
+                titleBar.ButtonForegroundColor = ParseHex("#1d1d1f");
+                titleBar.ButtonHoverBackgroundColor = ParseHex("#e8e8ec");
+                titleBar.ButtonHoverForegroundColor = ParseHex("#000000");
+                titleBar.ButtonPressedBackgroundColor = ParseHex("#dcdce2");
+                titleBar.ButtonPressedForegroundColor = ParseHex("#000000");
+                titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+                titleBar.ButtonInactiveForegroundColor = ParseHex("#9a9aa4");
+            }
+            else
+            {
+                titleBar.ButtonForegroundColor = ParseHex("#f2f2f5");
+                titleBar.ButtonHoverBackgroundColor = ParseHex("#23232f");
+                titleBar.ButtonHoverForegroundColor = Microsoft.UI.Colors.White;
+                titleBar.ButtonPressedBackgroundColor = ParseHex("#2c2c3a");
+                titleBar.ButtonPressedForegroundColor = Microsoft.UI.Colors.White;
+                titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+                titleBar.ButtonInactiveForegroundColor = ParseHex("#6a6a76");
+            }
         }
         catch
         {
@@ -602,6 +638,7 @@ public sealed partial class MainWindow : Window
         RefreshDisplay();
         UpdateViewVisibility();
         SetNavSelected(view);
+        UpdateContentSubtitle();
 
         // All library views share one collection and RefreshDisplay resets it
         // in place — the ScrollViewer keeps its old pixel offset, which made
@@ -642,11 +679,12 @@ public sealed partial class MainWindow : Window
 
         if (_currentView == NavView.NowPlaying)
         {
-            CenterCol.Width = new GridLength(0);
-            RightCol.Width = new GridLength(1, GridUnitType.Star);
+            // EchoMusic-style immersive overlay: covers the title bar and the
+            // whole body; the floating player bar below stays usable.
             CenterGrid.Visibility = Visibility.Collapsed;
             NowPlayingPanel.Visibility = Visibility.Visible;
-            AnimatePanelIn(NowPlayingPanel, NowPanelTransform, fromX: 56, fromY: 0);
+            AnimatePanelIn(NowPlayingPanel, NowPanelTransform, fromX: 0, fromY: 36);
+            UpdateBottomBarImmersive(true);
             TrackGrid.Visibility = Visibility.Collapsed;
             TrackList.Visibility = Visibility.Collapsed;
             AlbumGrid.Visibility = Visibility.Collapsed;
@@ -662,10 +700,9 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            CenterCol.Width = new GridLength(1, GridUnitType.Star);
-            RightCol.Width = new GridLength(0);
             CenterGrid.Visibility = Visibility.Visible;
             NowPlayingPanel.Visibility = Visibility.Collapsed;
+            UpdateBottomBarImmersive(false);
             SettingsScroll.Visibility = _currentView == NavView.Settings ? Visibility.Visible : Visibility.Collapsed;
             LyricCompletionPanel.Visibility = _currentView == NavView.LyricFill ? Visibility.Visible : Visibility.Collapsed;
 
@@ -822,15 +859,15 @@ public sealed partial class MainWindow : Window
         group.Visibility = anyVisible ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    // EchoMusic selection style: the selected entry tints icon + text with the
+    // accent colour instead of a filled pill. Buttons inherit Foreground from
+    // the style, so toggling the control's Foreground is enough.
+    private Button? _selectedNavButton;
+
     private void SetNavSelected(NavView view)
     {
-        NavRecent.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        NavLocal.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        NavFavorites.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        NavMostPlayed.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        NavAlbums.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        NavArtists.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        NavSettings.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        if (_selectedNavButton != null)
+            _selectedNavButton.ClearValue(Microsoft.UI.Xaml.Controls.Control.ForegroundProperty);
 
         var sel = view switch
         {
@@ -844,8 +881,9 @@ public sealed partial class MainWindow : Window
             NavView.NowPlaying => null,
             _ => NavLocal
         };
-        if (sel != null && FindResource("NavSelected") is SolidColorBrush nav)
-            sel.Background = nav;
+        _selectedNavButton = sel;
+        if (sel != null && FindResource("QqGreen") is Microsoft.UI.Xaml.Media.Brush accent)
+            sel.Foreground = accent;
     }
 
     // ---------- View mode + sorting ----------
@@ -1935,7 +1973,7 @@ public sealed partial class MainWindow : Window
     {
         if (sender is not Grid row)
             return;
-        row.Background = RowHoverBrush;
+        row.Background = FindResource("RowHover") as Brush ?? RowHoverBrush;
         if (row.FindName("RowPlayNextBtn") is Button btn)
             btn.Opacity = 1;
     }
@@ -2164,6 +2202,10 @@ public sealed partial class MainWindow : Window
         if (fe is Button btn && btn.Content is FontIcon icon)
             UpdateFavIcon(icon, t.Favorite);
 
+        // Keep the bottom-bar heart in sync when the current track was toggled.
+        if (ReferenceEquals(t, _currentTrack))
+            UpdateBarFavIcon();
+
         // If we're in the Favorites view, re-filter so the toggled track
         // appears/disappears immediately.
         if (_currentView == NavView.Favorites)
@@ -2271,6 +2313,8 @@ public sealed partial class MainWindow : Window
         TrackList.CanReorderItems = CanReorderPlaylist();
 
         UpdateEmptyHint();
+        // Search filtering changes what the header subtitle should say.
+        ContentSubtitle.Text = filtered.Count > 0 ? $"{filtered.Count} 首" : "";
     }
 
     private async Task RefreshDisplayAsync(bool scrollToTop)
@@ -2778,6 +2822,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowQueuePanel()
     {
+        UpdateQueueBadge();
         QueueDismissLayer.Visibility = Visibility.Visible;
         QueuePanel.Visibility = Visibility.Visible;
         AnimatePanelIn(QueuePanel, QueuePanelTransform, fromX: 0, fromY: 48);
@@ -3139,7 +3184,7 @@ public sealed partial class MainWindow : Window
     private void OnStateChanged(MediaPlaybackState state)
     {
         _isPlaying = state == MediaPlaybackState.Playing;
-        BtnPlay.Content = new FontIcon { Glyph = _isPlaying ? "\uE103" : "\uE102", FontSize = 18 };
+        BtnPlay.Content = new FontIcon { Glyph = _isPlaying ? "\uE103" : "\uE102", FontSize = 16 };
         UpdateDiscTimer();
 
         if (_isPlaying)
@@ -3233,6 +3278,7 @@ public sealed partial class MainWindow : Window
 
         QueueList.SelectedIndex = _playback.CurrentIndex;
         ScrollQueueToCurrent();
+        UpdateQueueBadge();
     }
 
     private void OnPlaybackMediaFailed(string message)
@@ -3403,6 +3449,8 @@ public sealed partial class MainWindow : Window
         MiniCover.Source = track.Cover;
         MiniTitle.Text = track.Title;
         MiniArtist.Text = track.Artist;
+        UpdateBarFavIcon();
+        _ = SampleCoverColorAsync(track.Cover);
 
         BindCurrentCover(track);
 
@@ -3463,10 +3511,18 @@ public sealed partial class MainWindow : Window
 
     private void CurrentTrack_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (sender is not Track track || e.PropertyName != nameof(Track.Cover))
+        if (sender is not Track track)
             return;
-        ApplyCover(track.Cover);
-        MiniCover.Source = track.Cover;
+        if (e.PropertyName == nameof(Track.Cover))
+        {
+            ApplyCover(track.Cover);
+            MiniCover.Source = track.Cover;
+            _ = SampleCoverColorAsync(track.Cover);
+        }
+        else if (e.PropertyName == nameof(Track.Favorite))
+        {
+            UpdateBarFavIcon();
+        }
     }
 
     // Alternate between the two cover layers on every change, so switching
@@ -3478,6 +3534,9 @@ public sealed partial class MainWindow : Window
         var newBrush = cover == null
             ? CoverPlaceholder
             : new ImageBrush { ImageSource = cover };
+
+        // EchoMusic rounded-square cover mirrors the artwork instantly.
+        SquareCover.Background = newBrush;
 
         var back = _coverFrontIsA ? NowCoverEllipseB : NowCoverEllipse;
         var front = _coverFrontIsA ? NowCoverEllipse : NowCoverEllipseB;
@@ -3495,6 +3554,163 @@ public sealed partial class MainWindow : Window
         sb.Children.Add(fadeIn);
         sb.Children.Add(fadeOut);
         sb.Begin();
+    }
+
+    // ---------- EchoMusic look helpers ----------
+
+    /// <summary>Square (EchoMusic default) vs vinyl disc (cover spin on).</summary>
+    private void ApplyCoverMode()
+    {
+        bool vinyl = _settings.CoverSpin;
+        CoverDisc.Visibility = vinyl ? Visibility.Visible : Visibility.Collapsed;
+        SquareCover.Visibility = vinyl ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>While the immersive now-playing overlay is open the floating
+    /// player bar turns into its dark translucent variant (EchoMusic's dark
+    /// lyric-page transport), and back on close.</summary>
+    private bool _bottomBarImmersive;
+
+    /// <summary>Re-tints the floating player bar to the current theme. No-op
+    /// while the immersive (fixed dark) variant is active.</summary>
+    private void ApplyBottomBarThemeBrushes()
+    {
+        if (_bottomBarImmersive)
+            return;
+        PlayerBarBorder.Background = FindResource("Surface") as Microsoft.UI.Xaml.Media.Brush
+            ?? new SolidColorBrush(Microsoft.UI.Colors.White);
+        PlayerBarBorder.BorderBrush = FindResource("BorderSoft") as Microsoft.UI.Xaml.Media.Brush
+            ?? new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
+
+    private void UpdateBottomBarImmersive(bool immersive)
+    {
+        if (_bottomBarImmersive == immersive)
+            return;
+        _bottomBarImmersive = immersive;
+        BottomBarHost.RequestedTheme = immersive ? ElementTheme.Dark : ElementTheme.Default;
+        if (immersive)
+        {
+            PlayerBarBorder.Background = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xB0, 0x14, 0x14, 0x18));
+            PlayerBarBorder.BorderBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        }
+        else
+        {
+            ApplyBottomBarThemeBrushes();
+        }
+    }
+
+    private void BtnExitNowPlaying_Click(object sender, RoutedEventArgs e)
+        => ShowView(NavView.Local);
+
+    /// <summary>Bottom-bar heart: toggle favourite on the current track.</summary>
+    private void BtnBarFav_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentTrack == null)
+            return;
+        _currentTrack.Favorite = !_currentTrack.Favorite;
+        _libraryDirty = true;
+        PersistLibrary();
+        UpdateBarFavIcon();
+
+        if (_currentView == NavView.Favorites)
+        {
+            _activeTracks = _library.Where(tr => tr.Favorite).ToList();
+            RefreshDisplay();
+        }
+    }
+
+    private void UpdateBarFavIcon()
+    {
+        bool fav = _currentTrack?.Favorite ?? false;
+        BarFavIcon.Glyph = fav ? "\uE735" : "\uE734";
+        if (FindResource(fav ? "QqGreen" : "TextSecondary") is Microsoft.UI.Xaml.Media.Brush tint)
+            BarFavIcon.Foreground = tint;
+    }
+
+    /// <summary>Count badge on the queue button (EchoMusic playlist bubble).</summary>
+    private void UpdateQueueBadge()
+    {
+        int n = _playback.Queue?.Count ?? 0;
+        QueueBadgeText.Text = n > 99 ? "99+" : n.ToString();
+        QueueBadge.Visibility = n > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>"N 首" suffix next to the content title.</summary>
+    private void UpdateContentSubtitle()
+    {
+        if (_currentView is NavView.Settings or NavView.LyricFill or NavView.NowPlaying)
+        {
+            ContentSubtitle.Text = "";
+            return;
+        }
+        int n = _activeTracks?.Count ?? 0;
+        ContentSubtitle.Text = n > 0 ? $"{n} 首" : "";
+    }
+
+    private void UpdateProfileSubtitle()
+    {
+        int n = _library?.Count ?? 0;
+        ProfileSubtitle.Text = n > 0 ? $"本地曲库 · {n} 首" : "本地音乐库";
+    }
+
+    /// <summary>
+    /// EchoMusic lyric-page ambience: a dark vertical gradient tinted by the
+    /// artwork's dominant colour. The colour is sampled off the rendered mini
+    /// cover (RenderTargetBitmap) — cheap, dependency-free, and works with
+    /// every cover source the app already produces.
+    /// </summary>
+    private async Task SampleCoverColorAsync(ImageSource? cover)
+    {
+        Windows.UI.Color? tint = null;
+        if (cover != null)
+        {
+            try
+            {
+                await Task.Delay(40); // let the mini cover complete a layout pass
+                var rtb = new RenderTargetBitmap();
+                await rtb.RenderAsync(MiniCover);
+                if (rtb.PixelWidth > 0 && rtb.PixelHeight > 0)
+                {
+                    var buffer = await rtb.GetPixelsAsync();
+                    var bytes = buffer.ToArray();
+                    long r = 0, g = 0, b = 0; int used = 0;
+                    long ar = 0, ag = 0, ab = 0; int all = 0;
+                    int stride = 4;
+                    for (int i = 0; i + 2 < bytes.Length; i += stride * 3) // sparse sampling
+                    {
+                        byte bl = bytes[i], gr = bytes[i + 1], rd = bytes[i + 2];
+                        ar += rd; ag += gr; ab += bl; all++;
+                        int max = Math.Max(rd, Math.Max(gr, bl));
+                        int min = Math.Min(rd, Math.Min(gr, bl));
+                        if (max - min > 26) // skip greys/near-whites so the accent hue survives
+                        {
+                            r += rd; g += gr; b += bl; used++;
+                        }
+                    }
+                    if (used >= 8)
+                        tint = Microsoft.UI.ColorHelper.FromArgb(255, (byte)(r / used), (byte)(g / used), (byte)(b / used));
+                    else if (all > 0)
+                        tint = Microsoft.UI.ColorHelper.FromArgb(255, (byte)(ar / all), (byte)(ag / all), (byte)(ab / all));
+                }
+            }
+            catch
+            {
+                // Sampling is cosmetic; any failure just keeps the default ambience.
+            }
+        }
+        ApplyNowOverlay(tint);
+    }
+
+    private void ApplyNowOverlay(Windows.UI.Color? tint)
+    {
+        Windows.UI.Color top = tint.HasValue
+            ? Microsoft.UI.ColorHelper.FromArgb(0xF0, (byte)(tint.Value.R * 55 / 100), (byte)(tint.Value.G * 55 / 100), (byte)(tint.Value.B * 55 / 100))
+            : Microsoft.UI.ColorHelper.FromArgb(0xF0, 0x22, 0x1c, 0x22);
+        var brush = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1) };
+        brush.GradientStops.Add(new GradientStop { Color = top, Offset = 0 });
+        brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(0xF8, 0x0e, 0x0f, 0x14), Offset = 1 });
+        NowPlayingPanel.Background = brush;
     }
 
     private void ResetNowPlaying()
@@ -3517,6 +3733,7 @@ public sealed partial class MainWindow : Window
         MiniCover.Source = null;
         MiniTitle.Text = "未在播放";
         MiniArtist.Text = string.Empty;
+        UpdateBarFavIcon();
         TimeCurrent.Text = "00:00";
         TimeTotal.Text = "00:00";
         SeekSlider.Value = 0;
@@ -3605,7 +3822,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var s = (SettingsStore.Load().AccentColor ?? "#31c27c").TrimStart('#');
+            var s = (SettingsStore.Load().AccentColor ?? "#ef4444").TrimStart('#');
             if (s.Length == 6)
                 return Microsoft.UI.ColorHelper.FromArgb(255,
                     Convert.ToByte(s[..2], 16), Convert.ToByte(s.Substring(2, 2), 16),
@@ -3615,7 +3832,7 @@ public sealed partial class MainWindow : Window
         {
             // fall through to the default accent
         }
-        return Microsoft.UI.ColorHelper.FromArgb(255, 0x31, 0xc2, 0x7c);
+        return Microsoft.UI.ColorHelper.FromArgb(255, 0xef, 0x44, 0x44);
     }
 
     /// <summary>Rebuild the lyrics panel (e.g. after toggling romaji/translation)
@@ -5191,7 +5408,7 @@ public sealed partial class MainWindow : Window
         _settings.AutoStart = AutoStart.IsAutoStartEnabled();
         AutoStartToggle.IsOn = _settings.AutoStart;
 
-        AccentColorPicker.Color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#31c27c" : _settings.AccentColor);
+        AccentColorPicker.Color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#ef4444" : _settings.AccentColor);
 
         // Data/cache location.
         CacheDirBox.Text = DataLocation.Root;
@@ -5514,6 +5731,10 @@ public sealed partial class MainWindow : Window
         var light = string.Equals(_settings.ThemeMode, "Light", StringComparison.OrdinalIgnoreCase);
         RootGrid.RequestedTheme = light ? ElementTheme.Light : ElementTheme.Dark;
 
+        // Feed the track-title converter the theme-aware default foreground.
+        CurrentTrackBrushConverter.Fallback = FindResource("TextPrimary") as Microsoft.UI.Xaml.Media.Brush;
+        ApplyTitleBarTheme(light);
+
         // On a live switch, redo the brushes that were assigned from code: unlike
         // {ThemeResource} they are plain property values and won't re-resolve.
         // Skipped on the first pass — the tree has no DataContext yet and the
@@ -5521,13 +5742,24 @@ public sealed partial class MainWindow : Window
         if (_themeModeApplied)
         {
             SetNavSelected(_currentView);
+            // Only touch the favourite stars — a blanket sweep would also
+            // rewrite the row "play next" glyph (it binds a Track as well).
             ForEachVisual<FontIcon>(RootGrid, icon =>
             {
-                if (icon.DataContext is Track t) UpdateFavIcon(icon, t.Favorite);
+                if ((icon.Name == "CardFavIcon" || icon.Name == "RowFavIcon")
+                    && icon.DataContext is Track t)
+                    UpdateFavIcon(icon, t.Favorite);
             });
             if (FindResource("TextSecondary") is Microsoft.UI.Xaml.Media.Brush dim)
                 CacheDirStatus.Foreground = dim;
             foreach (var item in _lyricTasks) StampLyricTaskBrush(item);
+            // The floating player bar's background is assigned from code, so
+            // it must be re-tinted on a theme switch (only the immersive
+            // variant is theme-independent).
+            ApplyBottomBarThemeBrushes();
+            // Rebind the visible lists so the title converter re-evaluates
+            // against the new Fallback brush.
+            RefreshDisplay();
         }
         _themeModeApplied = true;
 
@@ -5592,14 +5824,17 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>Applies the chosen theme color live by retinting the shared accent brushes
-    /// ("QqGreen" solid + "AccentGlow" gradient first stop) that the whole UI references.</summary>
+    /// ("QqGreen" solid + "AccentGlow" gradient first stop) that the whole UI references,
+    /// plus the sidebar avatar gradient.</summary>
     private void ApplyAccentColor()
     {
-        var color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#31c27c" : _settings.AccentColor);
+        var color = ParseHex(string.IsNullOrEmpty(_settings.AccentColor) ? "#ef4444" : _settings.AccentColor);
         if (FindResource("QqGreen") is SolidColorBrush qq)
             qq.Color = color;
         if (FindResource("AccentGlow") is LinearGradientBrush glow && glow.GradientStops.Count > 0)
             glow.GradientStops[0].Color = color;
+        if (ProfileAvatarStopA != null)
+            ProfileAvatarStopA.Color = color;
     }
 
     private bool _coverCollapsed;
@@ -5731,6 +5966,7 @@ public sealed partial class MainWindow : Window
     {
         _settings.CoverSpin = ((ToggleSwitch)sender).IsOn;
         SettingsStore.Save(_settings);
+        ApplyCoverMode();
         UpdateDiscTimer();
     }
 
