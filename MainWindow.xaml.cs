@@ -621,7 +621,7 @@ public sealed partial class MainWindow : Window
                 ShowActions("playlist");
                 break;
             case NavView.Settings:
-                ContentTitle.Text = "设置";
+                ContentTitle.Text = "偏好设置";
                 ShowActions("settings");
                 ShowSettings();
                 break;
@@ -5354,10 +5354,43 @@ public sealed partial class MainWindow : Window
 
     // ---------- Settings ----------
 
+    /// <summary>EchoMusic-style settings tabs: show only the cards that
+    /// belong to the selected section and underline the active tab.</summary>
+    private void ShowSettingsTab(string tab)
+    {
+        void Show(bool on, params FrameworkElement[] els)
+        {
+            foreach (var el in els)
+                el.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        }
+        Show(tab == "look", SettingsCardLook);
+        Show(tab == "lyric", SettingsCardLyric);
+        Show(tab == "play", SettingsCardPlay, SettingsCardClose, SettingsCardHotkeys, SettingsCardSystem);
+        Show(tab == "data", SettingsCardData, SettingsCardLastFm);
+
+        void Mark(Button b, bool on)
+        {
+            b.Foreground = on
+                ? FindResource("QqGreen") as Microsoft.UI.Xaml.Media.Brush ?? b.Foreground
+                : FindResource("TextPrimary") as Microsoft.UI.Xaml.Media.Brush ?? b.Foreground;
+            b.BorderBrush = on
+                ? FindResource("QqGreen") as Microsoft.UI.Xaml.Media.Brush ?? b.BorderBrush
+                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        }
+        Mark(SettingsTabLook, tab == "look");
+        Mark(SettingsTabLyric, tab == "lyric");
+        Mark(SettingsTabPlay, tab == "play");
+        Mark(SettingsTabData, tab == "data");
+    }
+
+    private void SettingsTab_Click(object sender, RoutedEventArgs e)
+        => ShowSettingsTab((string)((FrameworkElement)sender).Tag);
+
     private void ShowSettings()
     {
         // Every open starts at the top — the ScrollViewer keeps its old pixel
         // offset from the previous visit otherwise.
+        ShowSettingsTab("look");
         _dispatcher.TryEnqueue(() => SettingsScroll.ChangeView(null, 0, null, true));
 
         // Pushing persisted values into the controls must not echo back out
