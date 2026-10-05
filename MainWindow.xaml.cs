@@ -3821,6 +3821,9 @@ public sealed partial class MainWindow : Window
                 // an accent copy clipped to the sung prefix (slide per tick).
                 var baseTb = MakeTextBlock(line.Original!, 22, ParseHex(_settings.LyricUnsungColor));
                 overlay = MakeTextBlock(line.Original!, 22, ParseHex(_settings.LyricSungColor));
+                // Start fully clipped: without a clip the sung-colour copy
+                // shows through on every not-yet-sung line.
+                overlay.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, 0, 0) };
                 var host = new Grid();
                 host.Children.Add(baseTb);
                 host.Children.Add(overlay);
@@ -3916,7 +3919,10 @@ public sealed partial class MainWindow : Window
         }
 
         if (_currentLineIndex >= 0 && _currentLineIndex < _lyricPanels.Count)
+        {
             SetLineActive(_lyricPanels[_currentLineIndex], false);
+            ResetWordHighlight(_currentLineIndex);
+        }
 
         _currentLineIndex = idx;
 
@@ -4075,7 +4081,7 @@ public sealed partial class MainWindow : Window
             && string.Equals(original, _pushedOriginal, StringComparison.Ordinal)
             && string.Equals(roma, _pushedRoma, StringComparison.Ordinal)
             && string.Equals(trans, _pushedTrans, StringComparison.Ordinal)
-            && Math.Abs(progress - _pushedProgress) < 0.002)
+            && Math.Abs(progress - _pushedProgress) < 0.0005)
             return;
 
         _pushedTrack = _currentTrack;
@@ -5368,7 +5374,32 @@ public sealed partial class MainWindow : Window
                     ? new System.Numerics.Vector3(1.03f, 1.03f, 1f)
                     : System.Numerics.Vector3.One;
             }
+            else if (child is Grid karaoke)
+            {
+                // Word-timed originals live in a Grid (unsung base + sung
+                // overlay); without this branch the original line never took
+                // part in the active-line dim/brighten.
+                karaoke.Opacity = active ? 1.0 : 0.45;
+                karaoke.Scale = active
+                    ? new System.Numerics.Vector3(1.03f, 1.03f, 1f)
+                    : System.Numerics.Vector3.One;
+                foreach (var inner in karaoke.Children)
+                    if (inner is TextBlock ktb)
+                        ktb.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+            }
         }
+    }
+
+    /// <summary>Clear the karaoke clip of a line we are leaving — a seek back
+    /// used to leave already-sung lines permanently tinted with the sung
+    /// colour because their overlay clip was never reset.</summary>
+    private void ResetWordHighlight(int idx)
+    {
+        if (idx < 0 || idx >= _wordOverlays.Count)
+            return;
+        var overlay = _wordOverlays[idx];
+        if (overlay != null)
+            overlay.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, 0, 0) };
     }
 
     // ---------- Settings ----------

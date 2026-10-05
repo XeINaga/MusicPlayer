@@ -221,11 +221,33 @@ public static class LyricsParser
             var lineStartMs = int.Parse(header.Groups[1].Value);
             var words = new List<Models.LyricWord>(tags.Count);
             var sb = new System.Text.StringBuilder();
+
+            // QRC puts each character BEFORE its (s,d) tag — "君(4451,401)が…":
+            // the first character sits between the line header and the first
+            // tag, so the old "text after tag" loop dropped the first character
+            // of EVERY line and shifted every timing by one word. KRC/YRC put
+            // the text AFTER the tag. Detect the layout from the gap between
+            // the header and the first tag.
+            var headerEnd = header.Index + header.Length;
+            var textBefore = line.Substring(headerEnd, tags[0].Index - headerEnd)
+                                 .Trim().Length > 0;
+
             for (var i = 0; i < tags.Count; i++)
             {
                 var m = tags[i];
-                var textStart = m.Index + m.Length;
-                var textEnd = i + 1 < tags.Count ? tags[i + 1].Index : line.Length;
+                int textStart, textEnd;
+                if (textBefore)
+                {
+                    // QRC: this word's text runs from the previous tag's end
+                    // (or the line header) up to this tag.
+                    textStart = i == 0 ? headerEnd : tags[i - 1].Index + tags[i - 1].Length;
+                    textEnd = m.Index;
+                }
+                else
+                {
+                    textStart = m.Index + m.Length;
+                    textEnd = i + 1 < tags.Count ? tags[i + 1].Index : line.Length;
+                }
                 var wordText = line.Substring(textStart, textEnd - textStart);
                 if (wordText.Length == 0)
                     continue;
