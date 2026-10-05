@@ -3891,6 +3891,12 @@ public sealed partial class MainWindow : Window
 
         if (idx == _currentLineIndex)
         {
+            // (-1 == -1) happens right after a cold load (lyrics shown, playback
+            // still at 0): nothing to highlight yet, and Lines[-1] would throw
+            // ArgumentOutOfRangeException — which as a FailFast took the whole
+            // app down ("crashed on startup / on adding a folder").
+            if (idx < 0)
+                return;
             var prog = CalcWordProgress(_lyrics.Lines[idx], t);
             UpdateWordHighlight(idx, t);
             PushDesktop(idx, prog);
