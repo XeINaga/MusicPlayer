@@ -256,6 +256,7 @@ public sealed partial class MainWindow : Window
         ApplyCoverMode();
         UpdateProfileSubtitle();
         UpdateQueueBadge();
+        UpdateSoundFxIcon();
 
         // Title bar + profile avatar show the app icon.
         try
@@ -5354,10 +5355,13 @@ public sealed partial class MainWindow : Window
 
     // ---------- Settings ----------
 
+    private string _currentSettingsTab = "look";
+
     /// <summary>EchoMusic-style settings tabs: show only the cards that
     /// belong to the selected section and underline the active tab.</summary>
     private void ShowSettingsTab(string tab)
     {
+        _currentSettingsTab = tab;
         void Show(bool on, params FrameworkElement[] els)
         {
             foreach (var el in els)
@@ -5370,12 +5374,22 @@ public sealed partial class MainWindow : Window
 
         void Mark(Button b, bool on)
         {
-            b.Foreground = on
-                ? FindResource("QqGreen") as Microsoft.UI.Xaml.Media.Brush ?? b.Foreground
-                : FindResource("TextPrimary") as Microsoft.UI.Xaml.Media.Brush ?? b.Foreground;
-            b.BorderBrush = on
-                ? FindResource("QqGreen") as Microsoft.UI.Xaml.Media.Brush ?? b.BorderBrush
-                : new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+            // Unselected tabs ClearValue so their colour comes from the style's
+            // {ThemeResource TextPrimary} and follows theme switches; a plain
+            // code-assigned brush would keep the old theme's colour.
+            if (on)
+            {
+                if (FindResource("QqGreen") is Microsoft.UI.Xaml.Media.Brush accent)
+                {
+                    b.Foreground = accent;
+                    b.BorderBrush = accent;
+                }
+            }
+            else
+            {
+                b.ClearValue(Microsoft.UI.Xaml.Controls.Control.ForegroundProperty);
+                b.ClearValue(Microsoft.UI.Xaml.Controls.Control.BorderBrushProperty);
+            }
         }
         Mark(SettingsTabLook, tab == "look");
         Mark(SettingsTabLyric, tab == "lyric");
@@ -5799,6 +5813,9 @@ public sealed partial class MainWindow : Window
             // it must be re-tinted on a theme switch (only the immersive
             // variant is theme-independent).
             ApplyBottomBarThemeBrushes();
+            UpdateSoundFxIcon();
+            if (_currentView == NavView.Settings)
+                ShowSettingsTab(_currentSettingsTab);
             // Rebind the visible lists so the title converter re-evaluates
             // against the new Fallback brush.
             RefreshDisplay();
@@ -6103,8 +6120,21 @@ public sealed partial class MainWindow : Window
 
         _soundFxWindow = new SoundEffectWindow(_settings,
             WinRT.Interop.WindowNative.GetWindowHandle(this), ApplySoundFxDebounced);
-        _soundFxWindow.Closed += (_, _) => _soundFxWindow = null;
+        _soundFxWindow.Closed += (_, _) =>
+        {
+            _soundFxWindow = null;
+            UpdateSoundFxIcon(); // the panel persists SoundEffectsEnabled on close
+        };
         _soundFxWindow.Activate();
+    }
+
+    /// <summary>Lights the player-bar sound-fx button while effects are on.</summary>
+    private void UpdateSoundFxIcon()
+    {
+        bool on = _settings.SoundEffectsEnabled;
+        SoundFxIcon.Foreground = on
+            ? FindResource("QqGreen") as Microsoft.UI.Xaml.Media.Brush ?? SoundFxIcon.Foreground
+            : FindResource("TextSecondary") as Microsoft.UI.Xaml.Media.Brush ?? SoundFxIcon.Foreground;
     }
 
     private SoundEffectWindow? _soundFxWindow;

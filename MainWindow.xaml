@@ -1607,7 +1607,13 @@
                                     <TextBlock x:Name="SpeedText" Text="1.0x" FontSize="12" FontWeight="SemiBold"
                                                Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
                                 </Button>
-                                <primitives:ToggleButton x:Name="BtnDesktopLyrics" Width="34" Height="34"
+                                <Button x:Name="BtnSoundFx" Width="34" Height="34" Padding="0"
+                                Background="Transparent" BorderThickness="0" CornerRadius="17"
+                                Click="SoundFxOpen_Click" ToolTipService.ToolTip="音效面板（均衡器 / 混响 / 环绕 / 超重低音）">
+                            <FontIcon x:Name="SoundFxIcon" FontFamily="Segoe MDL2 Assets" Glyph="&#xE9E9;" FontSize="15"
+                                      Foreground="{ThemeResource TextSecondary}" />
+                        </Button>
+                        <primitives:ToggleButton x:Name="BtnDesktopLyrics" Width="34" Height="34"
                                                          Style="{StaticResource AccentToggleStyle}" CornerRadius="17" ToolTipService.ToolTip="在桌面顶部显示歌词悬浮窗"
                                                          Checked="BtnDesktopLyrics_Checked" Unchecked="BtnDesktopLyrics_Unchecked">
                                     <TextBlock Text="词" FontSize="13" TextLineBounds="Tight" />
