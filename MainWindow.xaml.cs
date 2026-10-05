@@ -3790,8 +3790,20 @@ public sealed partial class MainWindow : Window
                 }
             }
 
+            // Assemble the row in the user's chosen order. A word-timed
+            // original renders via the karaoke Grid appended afterwards, so
+            // remember the slot where 'O' belongs and insert it there —
+            // appending blindly put the original AFTER the romaji/translation
+            // no matter what LyricLineOrder said.
+            var originalSlot = -1;
             foreach (var role in order)
             {
+                if (role == 'O')
+                {
+                    if (originalSlot < 0)
+                        originalSlot = panel.Children.Count;
+                    continue;
+                }
                 var tb = MakePart(role);
                 if (tb != null)
                     panel.Children.Add(tb);
@@ -3812,7 +3824,7 @@ public sealed partial class MainWindow : Window
                 var host = new Grid();
                 host.Children.Add(baseTb);
                 host.Children.Add(overlay);
-                panel.Children.Add(host);
+                panel.Children.Insert(originalSlot < 0 ? panel.Children.Count : originalSlot, host);
             }
             _wordLines.Add(line);
             _wordOverlays.Add(overlay);

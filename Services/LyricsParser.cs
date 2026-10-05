@@ -86,6 +86,8 @@ public static class LyricsParser
             if (mainFile.EndsWith(".srt", System.StringComparison.OrdinalIgnoreCase))
                 MergeSrt(mainFile, doc, map, forcedEncoding);
             else if (mainFile.EndsWith(".krc", System.StringComparison.OrdinalIgnoreCase) ||
+                     mainFile.EndsWith(".qrc", System.StringComparison.OrdinalIgnoreCase) ||
+                     mainFile.EndsWith(".yrc", System.StringComparison.OrdinalIgnoreCase) ||
                      IsWordTimedContent(mainFile, forcedEncoding))
                 MergeWordTimed(mainFile, doc, map, forcedEncoding);
             else
@@ -154,6 +156,11 @@ public static class LyricsParser
             {
                 var line = raw.Trim();
                 if (line.Length == 0)
+                    continue;
+                // Metadata preamble ([ti:], [kana:], [offset:] …) — some
+                // downloaders save word-timed files WITH such a header, so
+                // skip those lines and sniff the first real content line.
+                if (line.StartsWith("[") && line.Length > 1 && !char.IsDigit(line[1]))
                     continue;
                 return WordLineTag.IsMatch(line);
             }
