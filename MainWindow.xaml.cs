@@ -4681,6 +4681,7 @@ public sealed partial class MainWindow : Window
         var sourceName = source switch { 1 => "网易云", 2 => "LRCLIB", 3 => "酷狗", _ => "QQ音乐" };
 
         ShowInfoBar($"正在下载歌词（{sourceName}）：{selected.Title} - {selected.Artist}");
+        AppLog.WriteProbe($"DL: source={source} title='{selected.Title}' mid='{selected.SongMid}' songId='{selected.SongId}'");
         (string? Lyric, string? Trans, string? Roma)? lyric;
         bool wordModeForManual = _settings.LyricWordLyrics;
         string? krcContent = null;
@@ -4689,6 +4690,7 @@ public sealed partial class MainWindow : Window
             if (source == 3)
             {
                 var kg = await KugouLyricService.FetchLyricAsync(selected.SongMid);
+                AppLog.WriteProbe($"DL: kugou lrc={kg.Lrc?.Length ?? 0} krc={kg.Krc?.Length ?? 0}");
                 krcContent = kg.Krc;
                 lyric = (kg.Lrc, null, null);
             }
@@ -4709,6 +4711,7 @@ public sealed partial class MainWindow : Window
         }
         if (string.IsNullOrEmpty(lyric?.Lyric))
         {
+            AppLog.WriteProbe($"DL: EMPTY lyric after fetch (source={source})");
             ShowInfoBar("该歌曲没有可用歌词。");
             return false;
         }
