@@ -40,6 +40,20 @@ public static class AppLog
     /// </summary>
     public static string LyricCompletionLogPath => Path.Combine(LogDir, "LyricCompletion.log");
 
+    /// <summary>Append a timestamped diagnostic line to the crash log.</summary>
+    public static void WriteProbe(string message)
+    {
+        try
+        {
+            var line = $"[{DateTime.Now:HH:mm:ss.fff}] {message}{Environment.NewLine}";
+            File.AppendAllText(Path.Combine(LogDir, "probe.log"), line, new UTF8Encoding(false));
+        }
+        catch
+        {
+            // best effort — logging must never crash the app
+        }
+    }
+
     /// <summary>Append a timestamped line to the lyric-completion log.
     /// Rotates the file to ".1" once it exceeds 5 MB so long-term use cannot
     /// grow a single log without bound.</summary>

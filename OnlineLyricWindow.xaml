@@ -40,10 +40,14 @@
                        Foreground="{ThemeResource TextSecondary}" />
             <ComboBox x:Name="SourceCombo" Width="132" MinHeight="32" FontSize="12"
                       SelectionChanged="SourceCombo_SelectionChanged">
+                <!-- Item order MUST match the source numbers used by the
+                     download dispatch (0=QQ, 1=NetEase, 2=LRCLIB, 3=KuGou);
+                     they used to be swapped, so picking 酷狗 silently searched
+                     LRCLIB instead. -->
                 <ComboBoxItem Content="QQ音乐" />
                 <ComboBoxItem Content="网易云" />
-                <ComboBoxItem Content="酷狗" />
                 <ComboBoxItem Content="LRCLIB" />
+                <ComboBoxItem Content="酷狗" />
             </ComboBox>
             <TextBox x:Name="KeywordBox" MinWidth="220" MinHeight="32" FontSize="12"
                      PlaceholderText="关键词" KeyDown="KeywordBox_KeyDown" />
