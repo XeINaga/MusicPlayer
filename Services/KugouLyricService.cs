@@ -34,23 +34,38 @@ public static class KugouLyricService
         });
         c.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-        c.Timeout = TimeSpan.FromSeconds(10);
+        c.Timeout = TimeSpan.FromSeconds(20);
         return c;
     }
 
-    private static async Task<string?> GetAsync(string url)
+    private static async Task<string?> GetAsync(string url, int attempts = 3)
     {
-        try
+        // The KuGou endpoints are plain http and occasionally slow / flaky;
+        // a single 10s timeout used to surface as "no lyrics available".
+        for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            using var resp = await Http.GetAsync(url);
-            if (!resp.IsSuccessStatusCode)
+            try
+            {
+                using var resp = await Http.GetAsync(url);
+                if (resp.IsSuccessStatusCode)
+                    return await resp.Content.ReadAsStringAsync();
+                if ((int)resp.StatusCode is 404 or 502 or 503 && attempt < attempts)
+                {
+                    await Task.Delay(600 * attempt);
+                    continue;
+                }
                 return null;
-            return await resp.Content.ReadAsStringAsync();
+            }
+            catch when (attempt < attempts)
+            {
+                await Task.Delay(600 * attempt);
+            }
+            catch
+            {
+                return null;
+            }
         }
-        catch
-        {
-            return null;
-        }
+        return null;
     }
 
     /// <summary>Search songs; duration is in seconds.</summary>
@@ -113,10 +128,12 @@ public static class KugouLyricService
         var matchUrl = "http://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash=" +
                        Uri.EscapeDataString(hash);
         var matchJson = await GetAsync(matchUrl);
+        if (matchJson == null)
+            throw new Exception("酷狗歌词匹配请求失败（网络超时，请重试）");
         string? id = null, accessKey = null;
         try
         {
-            var matchDoc = JsonDocument.Parse(matchJson ?? "null");
+            var matchDoc = JsonDocument.Parse(matchJson);
             if (matchDoc.RootElement.TryGetProperty("candidates", out var cands) &&
                 cands.ValueKind == JsonValueKind.Array &&
                 cands.GetArrayLength() > 0)
@@ -128,11 +145,11 @@ public static class KugouLyricService
         }
         catch (JsonException)
         {
-            return (null, null);
+            throw new Exception("酷狗歌词匹配返回了无法解析的数据（可能被反爬拦截）");
         }
 
         if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(accessKey))
-            return (null, null);
+            throw new Exception("酷狗没有这首歌的歌词候选（曲目可能未收录）");
 
         var lrcTask = DownloadAsync(id!, accessKey!, "lrc");
         var krcTask = DownloadAsync(id!, accessKey!, "krc");
