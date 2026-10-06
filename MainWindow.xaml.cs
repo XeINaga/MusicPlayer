@@ -380,6 +380,7 @@ public sealed partial class MainWindow : Window
 
         // Retry any pending Last.fm scrobbles from a previous session.
         _ = Task.Run(async () => await _lastFm.RetryFailedScrobblesAsync());
+
     }
 
     /// <summary>

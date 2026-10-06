@@ -19,7 +19,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AssemblyName>MusicPlayer</AssemblyName>
     <RootNamespace>MusicPlayer</RootNamespace>
-    <Version>1.6.6</Version>
+    <Version>1.6.7</Version>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -190,7 +190,10 @@
   <Target Name="BuildOverlay" BeforeTargets="Build;Publish">
     <!-- No ContinueOnError: a silent compile failure shipped a stale overlay
          exe once; the build must fail loudly when g++ is unavailable. -->
-    <Exec Command="&quot;$(GxxPath)g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32" />
+    <!-- g++ needs its own bin dir on PATH for the assembler/linker it spawns;
+         a bare "dotnet publish" (e.g. from a service without MSYS2 on PATH)
+         used to fail here with a bare exit code 1. -->
+    <Exec Command="set PATH=$(GxxPath);%25PATH%25&#x0D;&#x0A;&quot;$(GxxPath)g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32" />
   </Target>
 
   <Target Name="CopyOverlayPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
@@ -204,7 +207,9 @@
     when the DLL is missing, so lyrics never break because of it.
   -->
   <Target Name="BuildQrcNative" BeforeTargets="Build;Publish">
-    <Exec Command="&quot;$(GxxPath)g++.exe&quot; -O2 -static -shared -std=c++17 -o &quot;$(OutDir)QrcNative.dll&quot; &quot;$(MSBuildProjectDirectory)\NativeQrc\qrc.cpp&quot;" />
+    <!-- Same PATH preamble as BuildOverlay: g++ spawns sub-tools that need
+         its own bin dir on PATH. -->
+    <Exec Command="set PATH=$(GxxPath);%25PATH%25&#x0D;&#x0A;&quot;$(GxxPath)g++.exe&quot; -O2 -static -shared -std=c++17 -o &quot;$(OutDir)QrcNative.dll&quot; &quot;$(MSBuildProjectDirectory)\NativeQrc\qrc.cpp&quot;" />
   </Target>
 
   <Target Name="CopyQrcNativePublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">
