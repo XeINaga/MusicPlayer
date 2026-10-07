@@ -4,6 +4,23 @@ using System.Threading;
 
 namespace MusicPlayer.Services;
 
+/// <summary>Snapshot of app state the right-click menu renders. The host
+/// sets <see cref="TrayIconService.MenuStateProvider"/>; it is invoked on the
+/// tray thread right before the menu opens (plain field reads only).</summary>
+public sealed class TrayMenuState
+{
+    public bool IsPlaying;
+    public string TrackTitle = "";
+    public bool Favorite;
+    public int VolumePercent;
+    public bool DesktopLyricsOn;
+}
+
+public enum TrayMenuCommand
+{
+    Previous, PlayPause, Next, ToggleFavorite, VolumeUp, VolumeDown, ToggleDesktopLyrics, Settings,
+}
+
 /// <summary>
 /// System-tray icon backed by a message-only Win32 window running on its own
 /// thread. Left click (or the "打开" menu item) raises <see cref="OpenRequested"/>;
@@ -15,6 +32,13 @@ public sealed class TrayIconService : IDisposable
 {
     public event Action? OpenRequested;
     public event Action? ExitRequested;
+
+    /// <summary>Provides the state snapshot when the context menu opens.</summary>
+    public Func<TrayMenuState>? MenuStateProvider;
+
+    /// <summary>Raised on the tray thread when the user picks a command item
+    /// other than open/exit; the host marshals to its UI thread.</summary>
+    public event Action<TrayMenuCommand>? MenuCommand;
 
     private const uint WmAppShow = 0x8000 + 1;
     private const uint WmAppHide = 0x8000 + 2;
@@ -34,10 +58,13 @@ public sealed class TrayIconService : IDisposable
     private const uint NIIF_INFO = 0x01;
     private const uint TPM_RIGHTBUTTON = 0x0002, TPM_RETURNCMD = 0x0100;
     private const uint MF_SEPARATOR = 0x0800;
+    private const uint MF_GRAYED = 0x0400;
     private const uint LR_LOADFROMFILE = 0x0010;
     private const int IMAGE_ICON = 1;
     private const int SM_CXSMICON = 49, SM_CYSMICON = 50;
     private const int MenuOpen = 1001, MenuExit = 1002;
+    private const int MenuPrev = 1010, MenuPlayPause = 1011, MenuNext = 1012, MenuFav = 1013,
+        MenuVolUp = 1014, MenuVolDown = 1015, MenuLyrics = 1016, MenuSettings = 1017;
 
     private static readonly IntPtr HWND_MESSAGE = new(-3);
 
@@ -244,19 +271,46 @@ public sealed class TrayIconService : IDisposable
         // Required so the menu also dismisses when clicking elsewhere.
         Native.SetForegroundWindow(hwnd);
 
+        var state = MenuStateProvider?.Invoke() ?? new TrayMenuState();
+
         var menu = Native.CreatePopupMenu();
-        Native.AppendMenu(menu, 0, MenuOpen, "打开 MusicPlayer");
+        Native.AppendMenu(menu, 0, MenuPrev, "上一首");
+        Native.AppendMenu(menu, 0, MenuPlayPause, state.IsPlaying ? "暂停" : "播放");
+        Native.AppendMenu(menu, 0, MenuNext, "下一首");
         Native.AppendMenu(menu, MF_SEPARATOR, 0, "-");
-        Native.AppendMenu(menu, 0, MenuExit, "退出");
+        // Greyed info line: what is playing right now (QQ-music style).
+        Native.AppendMenu(menu, MF_GRAYED, 0,
+            string.IsNullOrEmpty(state.TrackTitle) ? "未在播放" : $"正在播放：{state.TrackTitle}");
+        if (!string.IsNullOrEmpty(state.TrackTitle))
+            Native.AppendMenu(menu, 0, MenuFav, state.Favorite ? "♥ 取消收藏" : "♡ 收藏这首歌");
+        Native.AppendMenu(menu, MF_SEPARATOR, 0, "-");
+        Native.AppendMenu(menu, 0, MenuVolUp, $"音量增大（当前 {state.VolumePercent}%）");
+        Native.AppendMenu(menu, 0, MenuVolDown, "音量减小");
+        Native.AppendMenu(menu, MF_SEPARATOR, 0, "-");
+        Native.AppendMenu(menu, 0, MenuLyrics, state.DesktopLyricsOn ? "关闭桌面歌词" : "开启桌面歌词");
+        Native.AppendMenu(menu, MF_SEPARATOR, 0, "-");
+        Native.AppendMenu(menu, 0, MenuOpen, "打开 MusicPlayer");
+        Native.AppendMenu(menu, 0, MenuSettings, "设置");
+        Native.AppendMenu(menu, MF_SEPARATOR, 0, "-");
+        Native.AppendMenu(menu, 0, MenuExit, "退出 MusicPlayer");
 
         var cmd = Native.TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.X, pt.Y, 0, hwnd, IntPtr.Zero);
         Native.DestroyMenu(menu);
         Native.PostMessage(hwnd, WM_NULL, 0, 0);
 
-        if (cmd == MenuOpen)
-            OpenRequested?.Invoke();
-        else if (cmd == MenuExit)
-            ExitRequested?.Invoke();
+        switch (cmd)
+        {
+            case MenuOpen: OpenRequested?.Invoke(); break;
+            case MenuExit: ExitRequested?.Invoke(); break;
+            case MenuPrev: MenuCommand?.Invoke(TrayMenuCommand.Previous); break;
+            case MenuPlayPause: MenuCommand?.Invoke(TrayMenuCommand.PlayPause); break;
+            case MenuNext: MenuCommand?.Invoke(TrayMenuCommand.Next); break;
+            case MenuFav: MenuCommand?.Invoke(TrayMenuCommand.ToggleFavorite); break;
+            case MenuVolUp: MenuCommand?.Invoke(TrayMenuCommand.VolumeUp); break;
+            case MenuVolDown: MenuCommand?.Invoke(TrayMenuCommand.VolumeDown); break;
+            case MenuLyrics: MenuCommand?.Invoke(TrayMenuCommand.ToggleDesktopLyrics); break;
+            case MenuSettings: MenuCommand?.Invoke(TrayMenuCommand.Settings); break;
+        }
     }
 
     // ---------- Win32 ----------

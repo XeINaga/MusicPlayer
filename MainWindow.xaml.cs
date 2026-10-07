@@ -401,6 +401,10 @@ public sealed partial class MainWindow : Window
 
         // Retry any pending Last.fm scrobbles from a previous session.
         _ = Task.Run(async () => await _lastFm.RetryFailedScrobblesAsync());
+        // Tray icon is always present from startup (right-click menu:
+        // playback controls, now-playing info, favourite, volume, desktop
+        // lyrics, settings, exit) — not only after a close-to-tray.
+        EnsureTrayIcon();
 
     }
 
@@ -470,12 +474,58 @@ public sealed partial class MainWindow : Window
             _forceExit = true;
             Close();
         });
+        _tray.MenuStateProvider = GetTrayMenuState;
+        _tray.MenuCommand += cmd => _dispatcher.TryEnqueue(() => HandleTrayCommand(cmd));
         _tray.Show(iconPath, "MusicPlayer — 音乐播放器");
+    }
 
-        if (!_trayHintShown)
+    /// <summary>Read on the tray thread right before the context menu opens —
+    /// plain field reads only, no UI work.</summary>
+    private TrayMenuState GetTrayMenuState() => new()
+    {
+        IsPlaying = _isPlaying,
+        TrackTitle = _currentTrack?.Title ?? "",
+        Favorite = _currentTrack?.Favorite ?? false,
+        VolumePercent = (int)Math.Round(_playback.Volume * 100),
+        DesktopLyricsOn = _settings.LyricOverlayEnabled,
+    };
+
+    private void HandleTrayCommand(TrayMenuCommand cmd)
+    {
+        switch (cmd)
         {
-            _trayHintShown = true;
-            _tray.ShowBalloon("MusicPlayer", "已最小化到托盘，点击托盘图标可恢复窗口。");
+            case TrayMenuCommand.Previous:
+                _playback.Previous();
+                break;
+            case TrayMenuCommand.PlayPause:
+                _playback.PlayPause();
+                break;
+            case TrayMenuCommand.Next:
+                _playback.Next();
+                break;
+            case TrayMenuCommand.ToggleFavorite:
+                if (_currentTrack == null)
+                    return;
+                _currentTrack.Favorite = !_currentTrack.Favorite;
+                _libraryDirty = true;
+                PersistLibrary();
+                UpdateBarFavIcon();
+                break;
+            case TrayMenuCommand.VolumeUp:
+                _playback.Volume = Math.Round(_playback.Volume + 0.1, 2);
+                VolumeSlider.Value = _playback.Volume * 100.0;
+                break;
+            case TrayMenuCommand.VolumeDown:
+                _playback.Volume = Math.Round(_playback.Volume - 0.1, 2);
+                VolumeSlider.Value = _playback.Volume * 100.0;
+                break;
+            case TrayMenuCommand.ToggleDesktopLyrics:
+                BtnDesktopLyrics.IsChecked = !(BtnDesktopLyrics.IsChecked ?? false);
+                break;
+            case TrayMenuCommand.Settings:
+                RestoreFromTray();
+                ShowView(NavView.Settings);
+                break;
         }
     }
 
@@ -6565,6 +6615,11 @@ public sealed partial class MainWindow : Window
             try { this.AppWindow.Hide(); }
             catch { /* best-effort */ }
             EnsureTrayIcon();
+            if (!_trayHintShown)
+            {
+                _trayHintShown = true;
+                _tray?.ShowBalloon("MusicPlayer", "已最小化到托盘，点击托盘图标可恢复窗口。");
+            }
             return;
         }
 
