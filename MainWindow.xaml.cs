@@ -3752,12 +3752,15 @@ public sealed partial class MainWindow : Window
 
     private void ApplyNowOverlay(Windows.UI.Color? tint)
     {
+        // Semi-translucent ambience: the artwork tint rides ON TOP of the
+        // window material (Mica / acrylic show through) instead of covering
+        // it with an opaque slab. Bottom stays denser for lyric legibility.
         Windows.UI.Color top = tint.HasValue
-            ? Microsoft.UI.ColorHelper.FromArgb(0xF0, (byte)(tint.Value.R * 55 / 100), (byte)(tint.Value.G * 55 / 100), (byte)(tint.Value.B * 55 / 100))
-            : Microsoft.UI.ColorHelper.FromArgb(0xF0, 0x22, 0x1c, 0x22);
+            ? Microsoft.UI.ColorHelper.FromArgb(0xB4, (byte)(tint.Value.R * 55 / 100), (byte)(tint.Value.G * 55 / 100), (byte)(tint.Value.B * 55 / 100))
+            : Microsoft.UI.ColorHelper.FromArgb(0xB4, 0x22, 0x1c, 0x22);
         var brush = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1) };
         brush.GradientStops.Add(new GradientStop { Color = top, Offset = 0 });
-        brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(0xF8, 0x0e, 0x0f, 0x14), Offset = 1 });
+        brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(0xE0, 0x0e, 0x0f, 0x14), Offset = 1 });
         NowPlayingPanel.Background = brush;
     }
 

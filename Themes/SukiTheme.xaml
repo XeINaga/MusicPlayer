@@ -89,10 +89,10 @@
             </LinearGradientBrush>
 
             <!-- Now-playing overlay: fixed dark ambience (cover-tinted at
-                 runtime), independent of the app theme. -->
+                 runtime), translucent so the window material reads through. -->
             <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#f2191b22" Offset="0" />
-                <GradientStop Color="#f80e0f14" Offset="1" />
+                <GradientStop Color="#b4191b22" Offset="0" />
+                <GradientStop Color="#e00e0f14" Offset="1" />
             </LinearGradientBrush>
 
             <AcrylicBrush x:Key="QueueAcrylic"
@@ -153,8 +153,8 @@
             </LinearGradientBrush>
 
             <LinearGradientBrush x:Key="NowPanelBg" StartPoint="0,0" EndPoint="0,1">
-                <GradientStop Color="#f2191b22" Offset="0" />
-                <GradientStop Color="#f80e0f14" Offset="1" />
+                <GradientStop Color="#b4191b22" Offset="0" />
+                <GradientStop Color="#e00e0f14" Offset="1" />
             </LinearGradientBrush>
 
             <AcrylicBrush x:Key="QueueAcrylic"
