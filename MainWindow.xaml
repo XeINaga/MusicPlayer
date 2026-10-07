@@ -482,13 +482,14 @@
         <!-- Body -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="224" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition x:Name="CenterCol" Width="*" />
             </Grid.ColumnDefinitions>
 
             <!-- Left navigation sidebar (EchoMusic style: profile card on top,
-                 grouped nav, playlist list) -->
-            <Grid Grid.Column="0" Background="{ThemeResource NavRailBg}" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="0,0,1,0">
+                 grouped nav, playlist list). Width is owned by the NavRail
+                 element so the collapse toggle can animate it. -->
+            <Grid x:Name="NavRail" Width="224" Grid.Column="0" Background="{ThemeResource NavRailBg}" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="0,0,1,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -497,85 +498,98 @@
 
                 <!-- Profile-style card: app avatar, name, and the settings
                      gear exactly where EchoMusic puts it. The gear keeps the
-                     NavSettings x:Name so selection code keeps working. -->
-                <Border Grid.Row="0" Margin="12,12,12,4" Padding="12,10"
+                     NavSettings x:Name so selection code keeps working.
+                     Two interchangeable layouts: the expanded row (avatar +
+                     texts + gear) and the collapsed column (avatar over the
+                     gear, no texts) shown while the rail is icon-only. -->
+                <Border x:Name="ProfileCard" Grid.Row="0" Margin="12,12,12,4" Padding="12,10"
                         Background="{ThemeResource CardBg}" BorderBrush="{ThemeResource BorderSoft}"
                         BorderThickness="1" CornerRadius="16">
                     <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20"
-                                Background="{ThemeResource Surface3}" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
-                            <Image x:Name="ProfileAvatarImage" Stretch="Uniform" />
-                        </Border>
-                        <StackPanel Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
-                            <TextBlock Text="MusicPlayer" FontSize="14" FontWeight="SemiBold"
-                                       Foreground="{ThemeResource TextPrimary}" />
-                            <TextBlock x:Name="ProfileSubtitle" Text="本地音乐库" FontSize="11"
-                                       Foreground="{ThemeResource TextSecondary}" />
+                        <Grid x:Name="ProfileExpandedRow">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Width="40" Height="40" CornerRadius="20"
+                                    Background="{ThemeResource Surface3}" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
+                                <Image x:Name="ProfileAvatarImage" Stretch="Uniform" />
+                            </Border>
+                            <StackPanel x:Name="ProfileTextCol" Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" Spacing="1">
+                                <TextBlock Text="MusicPlayer" FontSize="14" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextPrimary}" />
+                                <TextBlock x:Name="ProfileSubtitle" Text="本地音乐库" FontSize="11"
+                                           Foreground="{ThemeResource TextSecondary}" />
+                            </StackPanel>
+                            <Button x:Name="NavSettings" Grid.Column="2" Click="NavSettings_Click" Style="{StaticResource GhostIconButtonStyle}"
+                                    Width="34" Height="34" Padding="0" VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="设置">
+                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE713;" FontSize="15"
+                                          Foreground="{ThemeResource TextSecondary}" />
+                            </Button>
+                        </Grid>
+                        <StackPanel x:Name="ProfileCollapsedCol" Visibility="Collapsed" HorizontalAlignment="Center">
+                            <Button x:Name="NavSettingsCollapsed" Click="NavSettings_Click" Style="{StaticResource GhostIconButtonStyle}"
+                                    Width="34" Height="40" Padding="0" HorizontalAlignment="Center"
+                                    ToolTipService.ToolTip="设置">
+                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE713;" FontSize="15"
+                                          Foreground="{ThemeResource TextSecondary}" />
+                            </Button>
                         </StackPanel>
-                        <Button x:Name="NavSettings" Grid.Column="2" Click="NavSettings_Click" Style="{StaticResource GhostIconButtonStyle}"
-                                Width="34" Height="34" Padding="0" VerticalAlignment="Center"
-                                ToolTipService.ToolTip="设置">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE713;" FontSize="15"
-                                      Foreground="{ThemeResource TextSecondary}" />
-                        </Button>
                     </Grid>
                 </Border>
 
                 <StackPanel Grid.Row="1" Spacing="2" Margin="10,6,10,0">
-                    <TextBlock Text="我的乐库" Style="{StaticResource NavGroupLabel}" />
+                    <TextBlock x:Name="NavGroupLibrary" Text="我的乐库" Style="{StaticResource NavGroupLabel}" />
                     <Button x:Name="NavRecent" Click="NavRecent_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" Width="16" />
                             <TextBlock Text="最近播放" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavLocal" Click="NavLocal_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8B7;" FontSize="16" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8B7;" FontSize="16" Width="16" />
                             <TextBlock Text="本地音乐" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavFavorites" Click="NavFavorites_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE734;" FontSize="16" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE734;" FontSize="16" Width="16" />
                             <TextBlock Text="我的收藏" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavMostPlayed" Click="NavMostPlayed_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE823;" FontSize="16" Width="16" />
                             <TextBlock Text="最常播放" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavArtists" Click="NavArtists_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE77B;" FontSize="16" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE77B;" FontSize="16" Width="16" />
                             <TextBlock Text="歌手" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                     <Button x:Name="NavAlbums" Click="NavAlbums_Click" Style="{StaticResource NavButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D2;" FontSize="16" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8D2;" FontSize="16" Width="16" />
                             <TextBlock Text="专辑" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
 
-                    <TextBlock Text="工具" Style="{StaticResource NavGroupLabel}" Margin="12,12,0,4" />
+                    <TextBlock x:Name="NavGroupTools" Text="工具" Style="{StaticResource NavGroupLabel}" Margin="12,12,0,4" />
                     <Button x:Name="NavLyricFill" Click="NavLyricFill_Click" Style="{StaticResource NavButtonStyle}"
                             ToolTipService.ToolTip="批量下载缺失的歌词并补齐翻译 / 罗马音">
                         <StackPanel Orientation="Horizontal" Spacing="12">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8A5;" FontSize="16" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8A5;" FontSize="16" Width="16" />
                             <TextBlock Text="歌词补全" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
                 </StackPanel>
 
-                <Grid Grid.Row="2" Margin="10,4,10,12">
+                <Grid x:Name="PlaylistsSection" Grid.Row="2" Margin="10,4,10,12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
@@ -605,6 +619,16 @@
                         </ListView.ItemTemplate>
                     </ListView>
                 </Grid>
+
+                <!-- Sidebar collapse toggle: pinned to the rail's right edge,
+                     spanning the full rail height (centered vertically). -->
+                <Button x:Name="BtnSidebarToggle" Grid.RowSpan="3" HorizontalAlignment="Right" VerticalAlignment="Center"
+                        Width="18" Height="52" Padding="0" BorderThickness="0"
+                        Background="Transparent" CornerRadius="5"
+                        Click="BtnSidebarToggle_Click" ToolTipService.ToolTip="收起侧栏">
+                    <FontIcon x:Name="SidebarToggleIcon" FontFamily="Segoe MDL2 Assets" Glyph="&#xE76B;" FontSize="10"
+                              Foreground="{ThemeResource TextSecondary}" />
+                </Button>
             </Grid>
 
             <!-- Center content area (transparent: Mica / RootGrid fallback shows through) -->
