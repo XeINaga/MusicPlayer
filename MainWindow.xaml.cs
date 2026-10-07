@@ -3217,8 +3217,13 @@ public sealed partial class MainWindow : Window
             if (_spinRunning)
                 return;
             var spin = visual.Compositor.CreateScalarKeyFrameAnimation();
-            spin.InsertKeyFrame(1f, 360f);
-            spin.Duration = TimeSpan.FromSeconds(16); // 22.5°/s, same speed as before
+            // Visual.RotationAngle is in RADIANS. 360f meant 57 rotations per
+            // iteration; even 2π-per-second read as a frantic, uneven spin —
+            // at 1.8 rev/s the 60 fps strobe makes the artwork appear to
+            // change speed and direction (wagon-wheel effect). 2π over 32 s
+            // = one calm turn every 32 s (11.25°/s).
+            spin.InsertKeyFrame(1f, (float)(Math.PI * 2.0));
+            spin.Duration = TimeSpan.FromSeconds(32);
             spin.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
             visual.StartAnimation("RotationAngle", spin);
             _spinRunning = true;
