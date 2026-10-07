@@ -1,4 +1,10 @@
 ----
+commit 83ec8b7  2026-10-07
+桌面歌词暂停冻结协议修扫色停歌后仍前冲：根因是宿主暂停时 _lyricTimer.Stop() 停发进度样本，而覆盖层的本地外推（1.6.3 引入的 progRate 线性外推）继续以最后速率滑行，coast 上限 0.5s——用户看到"暂停后扫色还往前冲一段"。修复：管道协议新增 {"t":"pause","on":0/1}（DesktopLyricsOverlay.SetPaused，走 FIFO 通道保序），宿主 OnStateChanged 在播放/暂停切换时发送；覆盖层 paused 时 EffectiveProg 直接返回冻结样本值不外推、KaraokeActive 含 !paused 使渲染泵线程同步停转（暂停零渲染开销），恢复播放时清零 progRate 由新样本重建速率防用过期速率滑过新位置。验证：播放中三连拍裁剪区 hash 全不同（扫色在动）、暂停后三连拍（间隔 350ms）hash 完全一致且歌词正常显示——逐像素冻结。版本号 1.6.10（csproj+installer.wxs 同步）。
+
+----
+
+----
 commit 2456521  2026-10-07
 桌面歌词与程序动画优化并加玻璃材质：①桌面歌词卡拉OK扫色改亚像素连续推进（progress 浮点映射字形簇序列，整簇+当前簇分数切片，替代逐字跳变——桌面歌词"不流畅"的主因）②修居中对齐行扫色起点错位（clip 起点改 pad+(layoutW−textW)/2，原从盒边开始导致短行迟迟不变色然后瞬间扫过）③渲染驱动从 16ms USER 定时器改为 DWM 垂直同步泵线程（DwmFlush 等场同步，g_renderPending 挂起标志防消息洪泛、渲染慢自动降帧）④DirectWrite TextLayout/TextFormat 按行缓存（原每帧每行重建，长行 CPU 尖峰掉帧）⑤扫色速率指数平滑+seek 跳变检测（拖进度条后扫色直接到位不回滑）⑥合并 lyric 命令处理的双重临界区⑦主窗口加玻璃材质：DesktopAcrylicBackdrop 系统背板，主区 MainGlassBg/侧栏 NavRailBg/播放条 BarAcrylic（应用内 AcrylicBrush）三档半透明令牌（系统"透明效果"关闭时 Windows 强制回退纯色，属系统策略）⑧动画补全：正在播放面板退出淡出 110ms（防快速进出竞态）、设置页 Tab 切换卡片淡入 140ms（主题重应用时抑制）⑨清理诊断遗留（WriteProbe 定义与三处 DL: 调用）⑩installer.wxs 版本号同步补齐前几轮欠账
 
