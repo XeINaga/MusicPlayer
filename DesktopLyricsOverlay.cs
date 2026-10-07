@@ -340,6 +340,13 @@ public sealed class DesktopLyricsOverlay : IDisposable
     public void SetClickThrough(bool on) =>
         Send(JsonSerializer.Serialize(new { t = "click", on = on ? 1 : 0 }, JsonOptions));
 
+    /// <summary>Freeze the karaoke sweep on pause: the overlay extrapolates
+    /// progress locally between samples, so without an explicit freeze it
+    /// keeps gliding forward for up to half a second after the host stops
+    /// streaming them.</summary>
+    public void SetPaused(bool paused) =>
+        Send(JsonSerializer.Serialize(new { t = "pause", on = paused ? 1 : 0 }, JsonOptions));
+
     /// <summary>Push the current lyric line (original / romaji / translation).</summary>
     public void UpdateLyric(MusicPlayer.Models.Track? track, string original, string? romaji, string? translation, double progress = -1)
     {
