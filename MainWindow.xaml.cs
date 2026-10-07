@@ -271,6 +271,10 @@ public sealed partial class MainWindow : Window
 
         // EchoMusic look: square cover by default, sidebar subtitle, queue badge.
         ApplyCoverMode();
+
+        // Restore the persisted sidebar state (icon-only rail or full).
+        ApplySidebarCollapsed(_settings.SidebarCollapsed);
+
         UpdateProfileSubtitle();
         UpdateQueueBadge();
         UpdateSoundFxIcon();
@@ -5950,6 +5954,53 @@ public sealed partial class MainWindow : Window
             _settings.WindowMaterial = tag;
             SettingsStore.Save(_settings);
             ApplyWindowMaterial();
+        }
+    }
+
+    // ---------- Sidebar collapse ----------
+
+    private void BtnSidebarToggle_Click(object sender, RoutedEventArgs e)
+    {
+        bool collapse = !_settings.SidebarCollapsed;
+        _settings.SidebarCollapsed = collapse;
+        SettingsStore.Save(_settings);
+        ApplySidebarCollapsed(collapse);
+    }
+
+    /// <summary>Apply the persisted sidebar state. The switch is INSTANT on
+    /// purpose: animating Width re-runs whole-window layout every frame
+    /// (dependent animation on the UI thread), which read as obvious
+    /// stutter. A single clean swap reads better than a janky tween.</summary>
+    private void ApplySidebarCollapsed(bool collapsed)
+    {
+        NavRail.Width = collapsed ? 64 : 224;
+        // Collapsed card drops its padding so the 34px gear fits the 40px
+        // content area instead of being clipped by it.
+        ProfileCard.Padding = collapsed ? new Thickness(0, 10, 0, 10) : new Thickness(12, 10, 12, 10);
+        SetSidebarContentVisible(!collapsed);
+        SidebarToggleIcon.Glyph = collapsed ? "\uE76C" : "\uE76B";
+        ToolTipService.SetToolTip(BtnSidebarToggle, collapsed ? "展开侧栏" : "收起侧栏");
+    }
+
+    /// <summary>Show/hide everything that only fits the expanded rail. The
+    /// group headings ("我的乐库" / "工具") switch to Opacity 0 instead of
+    /// Collapsed: they must keep their layout slot, or every nav icon below
+    /// them shifts up and the rail reads as a different list. Nav labels fold
+    /// away horizontally (they sit right of the icons) without moving them,
+    /// and the settings gear moves into the collapsed profile column.</summary>
+    private void SetSidebarContentVisible(bool expanded)
+    {
+        var vis = expanded ? Visibility.Visible : Visibility.Collapsed;
+        ProfileExpandedRow.Visibility = vis;
+        ProfileCollapsedCol.Visibility = expanded ? Visibility.Collapsed : Visibility.Visible;
+        NavGroupLibrary.Opacity = expanded ? 1 : 0;
+        NavGroupTools.Opacity = expanded ? 1 : 0;
+        PlaylistsSection.Visibility = vis;
+
+        foreach (var btn in new[] { NavRecent, NavLocal, NavFavorites, NavMostPlayed, NavArtists, NavAlbums, NavLyricFill })
+        {
+            if (btn.Content is StackPanel sp && sp.Children.Count > 1 && sp.Children[1] is TextBlock label)
+                label.Visibility = vis;
         }
     }
 

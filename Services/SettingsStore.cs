@@ -32,6 +32,12 @@ public sealed class AppSettings
     public string WindowMaterial { get; set; } = "Acrylic";
 
     /// <summary>
+    /// Collapsed sidebar: icon-only rail (64 px). Persisted so the choice
+    /// survives restarts; applied in MainWindow.ApplySidebarCollapsed.
+    /// </summary>
+    public bool SidebarCollapsed { get; set; }
+
+    /// <summary>
     /// One-shot migration flag: pre-EchoMusic installs stored the old defaults
     /// (Dark + QQ green). On first load after the UI rework they are switched
     /// to the EchoMusic look once; anything the user customised afterwards is
