@@ -188,10 +188,9 @@ public sealed partial class MainWindow : Window
     {
         this.InitializeComponent();
 
-        // Glass material: the system-level DesktopAcrylic backdrop shows
-        // blurred desktop content through the main window's semi-transparent
-        // MainGlassBg root tint (secondary windows stay opaque).
-        SystemBackdrop = new DesktopAcrylicBackdrop();
+        // Window background material (Mica / Mica Alt / acrylic / thin
+        // acrylic) is applied by WindowMaterialService after the theme — the
+        // semi-transparent MainGlassBg root tint lets it show through.
 
         _dispatcher = DispatcherQueue.GetForCurrentThread();
 
@@ -256,6 +255,10 @@ public sealed partial class MainWindow : Window
 
         // Switch the whole visual language (dark / light) before the first paint.
         ApplyThemeMode();
+
+        // Then the window background material (needs the theme to map the
+        // SystemBackdropConfiguration correctly on first attach).
+        ApplyWindowMaterial();
 
         // EchoMusic look: square cover by default, sidebar subtitle, queue badge.
         ApplyCoverMode();
@@ -5533,6 +5536,11 @@ public sealed partial class MainWindow : Window
         SungColorPicker.Color = ParseHex(_settings.LyricSungColor);
         UnsungColorPicker.Color = ParseHex(_settings.LyricUnsungColor);
         UpdateColorSwatches();
+        var material = _settings.WindowMaterial;
+        MaterialMica.IsChecked = material == "Mica";
+        MaterialMicaAlt.IsChecked = material == "MicaAlt";
+        MaterialAcrylic.IsChecked = material is not ("Mica" or "MicaAlt" or "AcrylicThin");
+        MaterialAcrylicThin.IsChecked = material == "AcrylicThin";
         LyricOpacitySlider.Value = _settings.LyricBgOpacity * 100;
         LyricBoldToggle.IsOn = _settings.LyricBold;
         LyricAlignCombo.SelectedIndex = _settings.LyricAlign == "Left" ? 1 : 0;
@@ -5882,6 +5890,32 @@ public sealed partial class MainWindow : Window
         _settings.ThemeMode = ThemeModeCombo.SelectedIndex == 1 ? "Light" : "Dark";
         SettingsStore.Save(_settings);
         ApplyThemeMode();
+    }
+
+    /// <summary>Apply the persisted window material (tubatools-style four
+    /// variants) to this window.</summary>
+    private void ApplyWindowMaterial()
+    {
+        var kind = _settings.WindowMaterial switch
+        {
+            "Mica" => WindowMaterialKind.Mica,
+            "MicaAlt" => WindowMaterialKind.MicaAlt,
+            "AcrylicThin" => WindowMaterialKind.AcrylicThin,
+            _ => WindowMaterialKind.Acrylic,
+        };
+        WindowMaterialService.Apply(this, kind);
+    }
+
+    private void WindowMaterial_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        if (sender is RadioButton rb && rb.Tag is string tag)
+        {
+            _settings.WindowMaterial = tag;
+            SettingsStore.Save(_settings);
+            ApplyWindowMaterial();
+        }
     }
 
     /// <summary>Switches between the dark and light resource dictionaries. Setting
