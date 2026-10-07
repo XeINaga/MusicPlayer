@@ -260,6 +260,15 @@ public sealed partial class MainWindow : Window
         // SystemBackdropConfiguration correctly on first attach).
         ApplyWindowMaterial();
 
+        // Startup material race: attaching the backdrop controller from the
+        // constructor — before the window has ever been activated — renders
+        // with the wrong policy (observed: the saved thin acrylic only
+        // appeared after a manual material re-switch). Re-apply once on the
+        // first activation, when the window is fully live; that is the exact
+        // same condition a manual switch runs under.
+        _materialReappliedOnActivate = false;
+        Activated += OnFirstActivatedReapplyMaterial;
+
         // EchoMusic look: square cover by default, sidebar subtitle, queue badge.
         ApplyCoverMode();
         UpdateProfileSubtitle();
@@ -5907,6 +5916,17 @@ public sealed partial class MainWindow : Window
             _ => WindowMaterialKind.Acrylic,
         };
         WindowMaterialService.Apply(this, kind);
+    }
+
+    private bool _materialReappliedOnActivate;
+
+    private void OnFirstActivatedReapplyMaterial(object sender, WindowActivatedEventArgs e)
+    {
+        if (_materialReappliedOnActivate || e.WindowActivationState == WindowActivationState.Deactivated)
+            return;
+        _materialReappliedOnActivate = true;
+        Activated -= OnFirstActivatedReapplyMaterial;
+        ApplyWindowMaterial();
     }
 
     private void WindowMaterial_Checked(object sender, RoutedEventArgs e)
