@@ -19,7 +19,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AssemblyName>MusicPlayer</AssemblyName>
     <RootNamespace>MusicPlayer</RootNamespace>
-    <Version>1.6.8</Version>
+    <Version>1.6.9</Version>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -193,7 +193,7 @@
     <!-- g++ needs its own bin dir on PATH for the assembler/linker it spawns;
          a bare "dotnet publish" (e.g. from a service without MSYS2 on PATH)
          used to fail here with a bare exit code 1. -->
-    <Exec Command="set PATH=$(GxxPath);%25PATH%25&#x0D;&#x0A;&quot;$(GxxPath)g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -lole32 -luser32 -lgdi32 -lkernel32" />
+    <Exec Command="set PATH=$(GxxPath);%25PATH%25&#x0D;&#x0A;&quot;$(GxxPath)g++.exe&quot; -O2 -static -std=c++17 -mwindows -o &quot;$(OutDir)DesktopLyricsOverlay.exe&quot; &quot;$(MSBuildProjectDirectory)\DesktopLyricsOverlay\main.cpp&quot; -ld2d1 -ldwrite -ldwmapi -lole32 -luser32 -lgdi32 -lkernel32" />
   </Target>
 
   <Target Name="CopyOverlayPublish" AfterTargets="Publish" Condition="'$(PublishDir)' != ''">

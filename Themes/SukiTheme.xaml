@@ -41,7 +41,21 @@
             <!-- Accent-tinted navigation states. -->
             <SolidColorBrush x:Key="NavHover" Color="#f0f0f2" />
             <SolidColorBrush x:Key="NavSelected" Color="#fdeaea" />
-            <SolidColorBrush x:Key="NavRailBg" Color="#ffffff" />
+            <!-- Sidebar tint over the window-level DesktopAcrylic backdrop:
+                 ~95% white so the glass reads through just barely. -->
+            <SolidColorBrush x:Key="NavRailBg" Color="#f2ffffff" />
+
+            <!-- Main-window glass: semi-transparent tint layered over the
+                 DesktopAcrylic system backdrop. Only MainWindow's root uses
+                 this — secondary windows keep the opaque AppBackground, since
+                 their swap chains have nothing behind the transparency. -->
+            <SolidColorBrush x:Key="MainGlassBg" Color="#c9f7f7fa" />
+
+            <!-- In-app acrylic for the floating player bar (blurs the window
+                 content and backdrop behind it). -->
+            <AcrylicBrush x:Key="BarAcrylic"
+                          TintColor="#ffffff" TintOpacity="0.55" TintLuminosityOpacity="0.9"
+                          FallbackColor="#f7f7fa" />
 
             <!-- List-row hover: EchoMusic's 5% ink wash. -->
             <SolidColorBrush x:Key="RowHover" Color="#0d000000" />
@@ -98,7 +112,15 @@
 
             <SolidColorBrush x:Key="NavHover" Color="#2c2c30" />
             <SolidColorBrush x:Key="NavSelected" Color="#4a2a2c" />
-            <SolidColorBrush x:Key="NavRailBg" Color="#d936363a" />
+            <!-- Sidebar glass tint (~91% graphite). -->
+            <SolidColorBrush x:Key="NavRailBg" Color="#e8333338" />
+
+            <!-- Main-window glass tint over the DesktopAcrylic backdrop. -->
+            <SolidColorBrush x:Key="MainGlassBg" Color="#d21d1d21" />
+
+            <AcrylicBrush x:Key="BarAcrylic"
+                          TintColor="#26262b" TintOpacity="0.6" TintLuminosityOpacity="0.85"
+                          FallbackColor="#2b2b31" />
 
             <SolidColorBrush x:Key="RowHover" Color="#14ffffff" />
 
