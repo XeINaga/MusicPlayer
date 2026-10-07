@@ -195,6 +195,7 @@ struct State {
     bool visible = false;
     bool clickThrough = false;
     double prog = -1.0;            // word-timed karaoke progress 0..1 (-1 = not word-timed)
+    bool paused = false;           // host paused: freeze the sweep, stop extrapolation
     double progPrev = -1.0;        // previous sample (for local interpolation)
     double progRate = 0.0;         // progress per second, from the last two samples
     LARGE_INTEGER progPrevAt{};    // timestamp of the previous sample
@@ -278,6 +279,10 @@ static size_t ClusterLen(const std::wstring& t, size_t i) {
 static double EffectiveProg() {
     if (g_state.prog < 0)
         return -1.0;
+    // Host paused: show the frozen sample position — extrapolating here is
+    // exactly the "sweep keeps running forward after pause" bug.
+    if (g_state.paused)
+        return g_state.prog;
     LARGE_INTEGER now{}, freq{};
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&freq);
@@ -350,7 +355,7 @@ static HANDLE g_renderQuit = nullptr;
 
 static bool KaraokeActive() {
     EnterCriticalSection(&g_cs);
-    bool a = g_state.prog >= 0.0 && g_state.visible;
+    bool a = g_state.prog >= 0.0 && g_state.visible && !g_state.paused;
     LeaveCriticalSection(&g_cs);
     return a;
 }
@@ -825,6 +830,17 @@ static void ApplyCommand(const std::string& line) {
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
         // While a word-timed line plays the vsync pump thread keeps posting
         // render frames; static text only needs the PostMessage above.
+    } else if (type == "pause") {
+        // Host paused/resumed: freeze (or resume) the sweep. On resume the
+        // rate restarts from zero and is rebuilt from the incoming samples —
+        // reusing the stale pre-pause rate would glide past the new position.
+        auto* on = FindMember(root, "on");
+        bool v = on && on->type == JsonVal::BOOL ? on->boolean : (on && on->type == JsonVal::NUM ? on->num != 0 : false);
+        EnterCriticalSection(&g_cs);
+        g_state.paused = v;
+        if (!v) g_state.progRate = 0.0;
+        LeaveCriticalSection(&g_cs);
+        PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
     } else if (type == "style") {
         auto* f = FindMember(root, "font");
         auto* c = FindMember(root, "color");

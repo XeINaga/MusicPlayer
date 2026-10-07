@@ -3232,6 +3232,11 @@ public sealed partial class MainWindow : Window
         else
             _lyricTimer.Stop();
 
+        // Freeze the desktop-lyrics sweep on pause: the overlay extrapolates
+        // progress between samples and would keep gliding after the stream
+        // stops. Send on both transitions so resume rebuilds cleanly.
+        _desktopLyrics?.SetPaused(!_isPlaying);
+
         if (state == MediaPlaybackState.Playing)
         {
             _consecutiveFailures = 0;
