@@ -24,6 +24,14 @@ public sealed class AppSettings
     public string ThemeMode { get; set; } = "Light";
 
     /// <summary>
+    /// Main-window background material: "Mica" | "MicaAlt" | "Acrylic" |
+    /// "AcrylicThin" (the four variants tubatools offers). Applied through
+    /// WindowMaterialService. All of them fall back to a solid colour while
+    /// the system transparency effect is disabled.
+    /// </summary>
+    public string WindowMaterial { get; set; } = "Acrylic";
+
+    /// <summary>
     /// One-shot migration flag: pre-EchoMusic installs stored the old defaults
     /// (Dark + QQ green). On first load after the UI rework they are switched
     /// to the EchoMusic look once; anything the user customised afterwards is

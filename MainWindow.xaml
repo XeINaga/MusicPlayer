@@ -51,6 +51,61 @@
                 <GradientStop Color="#f97316" Offset="1" />
             </LinearGradientBrush>
 
+            <!-- Window material option card (tubatools-style 2×2 picker): a
+                 preview swatch + name + hint inside a selectable card; the
+                 checked state outlines it with the accent brush. -->
+            <Style x:Key="MaterialOptionStyle" TargetType="RadioButton">
+                <Setter Property="Background" Value="{ThemeResource Surface}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource BorderSoft}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="{StaticResource RadiusMedium}" />
+                <Setter Property="Padding" Value="12,9" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Border x:Name="RootBorder"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter />
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource RowHover}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                    <VisualStateGroup x:Name="CheckStates">
+                                        <VisualState x:Name="Checked">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="BorderBrush">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{StaticResource QqGreen}" />
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RootBorder" Storyboard.TargetProperty="BorderThickness">
+                                                    <DiscreteObjectKeyFrame KeyTime="0">
+                                                        <DiscreteObjectKeyFrame.Value>
+                                                            <Thickness>1.5</Thickness>
+                                                        </DiscreteObjectKeyFrame.Value>
+                                                    </DiscreteObjectKeyFrame>
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Unchecked" />
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <Style x:Key="NavButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="Foreground" Value="{ThemeResource TextPrimary}" />
@@ -848,6 +903,68 @@
                                             </Button.Flyout>
                                         </Button>
                                     </Grid>
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <StackPanel Padding="0,12" Spacing="10">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="窗口材质" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="主窗口背景的云母 / 磨砂玻璃效果（系统关闭透明效果时显示为纯色）" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <Grid ColumnSpacing="10" RowSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+                                            <RadioButton x:Name="MaterialMica" Grid.Row="0" Grid.Column="0" GroupName="WindowMaterial" Tag="Mica"
+                                                         Style="{StaticResource MaterialOptionStyle}" Checked="WindowMaterial_Checked">
+                                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                                    <Border Width="42" Height="28" CornerRadius="6" Background="{ThemeResource Surface2}"
+                                                            BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+                                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="Mica" FontSize="13" Foreground="{ThemeResource TextPrimary}" />
+                                                        <TextBlock Text="柔和云母" FontSize="11" Foreground="{ThemeResource TextSecondary}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton x:Name="MaterialMicaAlt" Grid.Row="0" Grid.Column="1" GroupName="WindowMaterial" Tag="MicaAlt"
+                                                         Style="{StaticResource MaterialOptionStyle}" Checked="WindowMaterial_Checked">
+                                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                                    <Border Width="42" Height="28" CornerRadius="6" Background="{ThemeResource Surface3}"
+                                                            BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+                                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="Mica Alt" FontSize="13" Foreground="{ThemeResource TextPrimary}" />
+                                                        <TextBlock Text="层次云母" FontSize="11" Foreground="{ThemeResource TextSecondary}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton x:Name="MaterialAcrylic" Grid.Row="1" Grid.Column="0" GroupName="WindowMaterial" Tag="Acrylic"
+                                                         Style="{StaticResource MaterialOptionStyle}" Checked="WindowMaterial_Checked">
+                                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                                    <Border Width="42" Height="28" CornerRadius="6" Background="{ThemeResource CardPlaceholder}"
+                                                            BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+                                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="亚克力" FontSize="13" Foreground="{ThemeResource TextPrimary}" />
+                                                        <TextBlock Text="磨砂玻璃" FontSize="11" Foreground="{ThemeResource TextSecondary}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                            <RadioButton x:Name="MaterialAcrylicThin" Grid.Row="1" Grid.Column="1" GroupName="WindowMaterial" Tag="AcrylicThin"
+                                                         Style="{StaticResource MaterialOptionStyle}" Checked="WindowMaterial_Checked">
+                                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                                    <Border Width="42" Height="28" CornerRadius="6" Background="{ThemeResource CardPlaceholder}" Opacity="0.55"
+                                                            BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+                                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="细亚克力" FontSize="13" Foreground="{ThemeResource TextPrimary}" />
+                                                        <TextBlock Text="更透亮的磨砂" FontSize="11" Foreground="{ThemeResource TextSecondary}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                        </Grid>
+                                    </StackPanel>
                                 </StackPanel>
                             </Border>
 
