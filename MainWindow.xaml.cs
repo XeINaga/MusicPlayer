@@ -3222,7 +3222,14 @@ public sealed partial class MainWindow : Window
             // at 1.8 rev/s the 60 fps strobe makes the artwork appear to
             // change speed and direction (wagon-wheel effect). 2π over 32 s
             // = one calm turn every 32 s (11.25°/s).
-            spin.InsertKeyFrame(1f, (float)(Math.PI * 2.0));
+            //
+            // The easing function must be LINEAR explicitly: the default
+            // keyframe interpolation eased out (uniform until ~75%, then
+            // decelerating into each iteration boundary — the disc visibly
+            // slowed, paused and snapped back to speed every turn).
+            var linear = visual.Compositor.CreateLinearEasingFunction();
+            spin.InsertKeyFrame(0f, 0f, linear);
+            spin.InsertKeyFrame(1f, (float)(Math.PI * 2.0), linear);
             spin.Duration = TimeSpan.FromSeconds(32);
             spin.IterationBehavior = Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
             visual.StartAnimation("RotationAngle", spin);
