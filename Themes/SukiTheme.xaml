@@ -28,7 +28,9 @@
             <SolidColorBrush x:Key="Surface" Color="#ffffff" />
             <SolidColorBrush x:Key="Surface2" Color="#f2f2f5" />
             <SolidColorBrush x:Key="Surface3" Color="#ececf0" />
-            <SolidColorBrush x:Key="CardBg" Color="#ffffff" />
+            <!-- Mostly opaque white for text legibility, but letting a hint
+                 of the window material through. -->
+            <SolidColorBrush x:Key="CardBg" Color="#f0ffffff" />
             <SolidColorBrush x:Key="BorderSoft" Color="#e5e5ea" />
 
             <SolidColorBrush x:Key="TextPrimary" Color="#1d1d1f" />
@@ -41,21 +43,24 @@
             <!-- Accent-tinted navigation states. -->
             <SolidColorBrush x:Key="NavHover" Color="#f0f0f2" />
             <SolidColorBrush x:Key="NavSelected" Color="#fdeaea" />
-            <!-- Sidebar tint over the window-level DesktopAcrylic backdrop:
-                 ~95% white so the glass reads through just barely. -->
-            <SolidColorBrush x:Key="NavRailBg" Color="#f2ffffff" />
+            <!-- Sidebar tint over the window material: low enough that the
+                 Mica/acrylic backdrop reads through (the pane is separated
+                 from the main area by its border line, not an opaque fill). -->
+            <SolidColorBrush x:Key="NavRailBg" Color="#99ffffff" />
 
             <!-- Main-window glass: semi-transparent tint layered over the
-                 DesktopAcrylic system backdrop. Only MainWindow's root uses
-                 this — secondary windows keep the opaque AppBackground, since
-                 their swap chains have nothing behind the transparency. -->
-            <SolidColorBrush x:Key="MainGlassBg" Color="#c9f7f7fa" />
+                 system backdrop (Mica / Mica Alt / acrylic, user-selectable).
+                 Only MainWindow's root uses this — secondary windows keep the
+                 opaque AppBackground, since their swap chains have nothing
+                 behind the transparency. -->
+            <SolidColorBrush x:Key="MainGlassBg" Color="#b9f7f7fa" />
 
-            <!-- In-app acrylic for the floating player bar (blurs the window
-                 content and backdrop behind it). -->
-            <AcrylicBrush x:Key="BarAcrylic"
-                          TintColor="#ffffff" TintOpacity="0.55" TintLuminosityOpacity="0.9"
-                          FallbackColor="#f7f7fa" />
+            <!-- Floating player bar: a plain translucent tint. The bar sits
+                 on its own layout row with no content beneath it, so an
+                 in-app AcrylicBrush has nothing to blur and (measured) never
+                 picks up the backdrop — a plain brush tracks the window
+                 material exactly like the sidebar does. -->
+            <SolidColorBrush x:Key="BarGlass" Color="#c0ffffff" />
 
             <!-- List-row hover: EchoMusic's 5% ink wash. -->
             <SolidColorBrush x:Key="RowHover" Color="#0d000000" />
@@ -101,7 +106,10 @@
             <SolidColorBrush x:Key="Surface" Color="#e636363a" />
             <SolidColorBrush x:Key="Surface2" Color="#313135" />
             <SolidColorBrush x:Key="Surface3" Color="#3c3c41" />
-            <SolidColorBrush x:Key="CardBg" Color="#36363a" />
+            <!-- Semi-transparent graphite so the window material reads
+                 through under the cards (sidebar/cards float on the glass,
+                 they are not opaque slabs on top of it). -->
+            <SolidColorBrush x:Key="CardBg" Color="#b436363a" />
             <SolidColorBrush x:Key="BorderSoft" Color="#3a3a3d" />
 
             <SolidColorBrush x:Key="TextPrimary" Color="#f5f5f7" />
@@ -112,15 +120,15 @@
 
             <SolidColorBrush x:Key="NavHover" Color="#2c2c30" />
             <SolidColorBrush x:Key="NavSelected" Color="#4a2a2c" />
-            <!-- Sidebar glass tint (~91% graphite). -->
-            <SolidColorBrush x:Key="NavRailBg" Color="#e8333338" />
+            <!-- Sidebar glass tint (~33% graphite): the material shows
+                 through and the pane is delimited by its border line. -->
+            <SolidColorBrush x:Key="NavRailBg" Color="#54303034" />
 
-            <!-- Main-window glass tint over the DesktopAcrylic backdrop. -->
-            <SolidColorBrush x:Key="MainGlassBg" Color="#d21d1d21" />
+            <!-- Main-window glass tint over the system backdrop. -->
+            <SolidColorBrush x:Key="MainGlassBg" Color="#c81d1d21" />
 
-            <AcrylicBrush x:Key="BarAcrylic"
-                          TintColor="#26262b" TintOpacity="0.6" TintLuminosityOpacity="0.85"
-                          FallbackColor="#2b2b31" />
+            <!-- Floating player bar tint (~45% graphite), see Light note. -->
+            <SolidColorBrush x:Key="BarGlass" Color="#73202024" />
 
             <SolidColorBrush x:Key="RowHover" Color="#14ffffff" />
 
