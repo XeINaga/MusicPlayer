@@ -1,4 +1,10 @@
 ----
+commit c06ad31  2026-10-07
+窗口材质四选（参照 tubatools 图吧工具箱）：设置页外观卡片新增"窗口材质"行——Mica（柔和云母）/Mica Alt（层次云母）/亚克力（磨砂玻璃）/细亚克力（更透亮的磨砂）2×2 选择卡（预览色块+名称+描述，选中态 accent 描边，样式仿用户提供的截图）。实现用合成控制器而非 XAML 封装类：只有 MicaController/DesktopAcrylicController 暴露 Kind（MicaKind.BaseAlt、DesktopAcrylicKind.Thin），XAML 的 MicaBackdrop/DesktopAcrylicBackdrop 表达不了四种变体；WindowMaterialService 管理控制器生命周期（SystemBackdropConfiguration 的 IsInputActive 跟随窗口激活、Theme 跟随窗口 ActualTheme——注意 ElementTheme 与 SystemBackdropTheme 枚举数值不齐需显式映射，naive cast 会把浅色窗口映射成 Default；窗口关闭时 Dispose 控制器）。设置项 WindowMaterial（Mica|MicaAlt|Acrylic|AcrylicThin，默认 Acrylic 延续 1.6.9 现状），切换即时生效。WinUI 坑：AddSystemBackdropTarget/SetSystemBackdropConfiguration 定义在 ISystemBackdropControllerWithTargets 接口上（ISystemBackdropController 只有 Dispose），接口名写错报 CS1061 且会连锁触发 XamlCompiler 假报 WMC0001 Unknown type（编译失败导致 LocalAssembly 缺失，MarkupCompilePass2 解析不了本程序集类型——先修 CS 错误 XAML 错误自动消失）。四材质均受系统透明效果开关影响（关闭时回退纯色）。
+
+----
+
+----
 commit 83ec8b7  2026-10-07
 桌面歌词暂停冻结协议修扫色停歌后仍前冲：根因是宿主暂停时 _lyricTimer.Stop() 停发进度样本，而覆盖层的本地外推（1.6.3 引入的 progRate 线性外推）继续以最后速率滑行，coast 上限 0.5s——用户看到"暂停后扫色还往前冲一段"。修复：管道协议新增 {"t":"pause","on":0/1}（DesktopLyricsOverlay.SetPaused，走 FIFO 通道保序），宿主 OnStateChanged 在播放/暂停切换时发送；覆盖层 paused 时 EffectiveProg 直接返回冻结样本值不外推、KaraokeActive 含 !paused 使渲染泵线程同步停转（暂停零渲染开销），恢复播放时清零 progRate 由新样本重建速率防用过期速率滑过新位置。验证：播放中三连拍裁剪区 hash 全不同（扫色在动）、暂停后三连拍（间隔 350ms）hash 完全一致且歌词正常显示——逐像素冻结。版本号 1.6.10（csproj+installer.wxs 同步）。
 
