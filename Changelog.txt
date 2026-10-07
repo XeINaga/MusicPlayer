@@ -1,4 +1,10 @@
 ----
+commit 1a11337  2026-10-07
+修启动时窗口材质不是所存设置：ctor 里挂 backdrop 控制器时窗口从未激活过，渲染策略不生效（观察=保存的细亚克力启动后显示为暗色错误材质，手动重切才对）。修复：ctor 保留首次 Apply，另订阅 Window.Activated 首次激活（非 Deactivated）时重建一次材质并退订——重建路径与手动切换完全同条件，同时覆盖"attach 时机未就绪"与"首次 attach 时 ActualTheme/配置未同步"两种根因。版本 1.6.14。
+
+----
+
+----
 commit 06fdba3  2026-10-07
 窗口材质透明令牌贯通与歌词页半透明化（两笔）：①侧栏/卡片/播放条此前用高不透明画刷把材质盖住（侧栏 91%、卡片 100%、播放条应用内 AcrylicBrush）——NavRailBg 降至 33%（侧栏靠边框线分隔而非实色填充）、CardBg 降至 70.6%、MainGlassBg 微调至 78%、播放条 BarAcrylic(AcrylicBrush) 改名 BarGlass 换半透明 SolidColorBrush：**实测 AcrylicBrush 采不到系统 backdrop**（播放条独占布局行、下层无可模糊内容，双材质采样一像素不差），纯色半透明刷与侧栏同机制必然跟随；②歌词页 NowPlayingPanel 的封面色渐变 alpha 0xF0/0xF8 (94%/97%) 降至 0xB4/0xE0 (70%/88%)，静态 NowPanelBg 令牌同步——沉浸氛围保留（封面 tint 叠在材质上）而材质从整页透出，底部更实保歌词可读。验证：同位置双材质像素采样，侧栏/卡片/播放条/歌词页全部随 Mica Alt↔亚克力显著变色。版本 1.6.12/1.6.13。
 
