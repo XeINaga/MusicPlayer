@@ -3625,7 +3625,7 @@ public sealed partial class MainWindow : Window
     {
         if (_bottomBarImmersive)
             return;
-        PlayerBarBorder.Background = FindResource("BarAcrylic") as Microsoft.UI.Xaml.Media.Brush
+        PlayerBarBorder.Background = FindResource("BarGlass") as Microsoft.UI.Xaml.Media.Brush
             ?? new SolidColorBrush(Microsoft.UI.Colors.White);
         PlayerBarBorder.BorderBrush = FindResource("BorderSoft") as Microsoft.UI.Xaml.Media.Brush
             ?? new SolidColorBrush(Microsoft.UI.Colors.Gray);
