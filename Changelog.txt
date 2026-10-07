@@ -1,4 +1,10 @@
 ----
+commit 06fdba3  2026-10-07
+窗口材质透明令牌贯通与歌词页半透明化（两笔）：①侧栏/卡片/播放条此前用高不透明画刷把材质盖住（侧栏 91%、卡片 100%、播放条应用内 AcrylicBrush）——NavRailBg 降至 33%（侧栏靠边框线分隔而非实色填充）、CardBg 降至 70.6%、MainGlassBg 微调至 78%、播放条 BarAcrylic(AcrylicBrush) 改名 BarGlass 换半透明 SolidColorBrush：**实测 AcrylicBrush 采不到系统 backdrop**（播放条独占布局行、下层无可模糊内容，双材质采样一像素不差），纯色半透明刷与侧栏同机制必然跟随；②歌词页 NowPlayingPanel 的封面色渐变 alpha 0xF0/0xF8 (94%/97%) 降至 0xB4/0xE0 (70%/88%)，静态 NowPanelBg 令牌同步——沉浸氛围保留（封面 tint 叠在材质上）而材质从整页透出，底部更实保歌词可读。验证：同位置双材质像素采样，侧栏/卡片/播放条/歌词页全部随 Mica Alt↔亚克力显著变色。版本 1.6.12/1.6.13。
+
+----
+
+----
 commit c06ad31  2026-10-07
 窗口材质四选（参照 tubatools 图吧工具箱）：设置页外观卡片新增"窗口材质"行——Mica（柔和云母）/Mica Alt（层次云母）/亚克力（磨砂玻璃）/细亚克力（更透亮的磨砂）2×2 选择卡（预览色块+名称+描述，选中态 accent 描边，样式仿用户提供的截图）。实现用合成控制器而非 XAML 封装类：只有 MicaController/DesktopAcrylicController 暴露 Kind（MicaKind.BaseAlt、DesktopAcrylicKind.Thin），XAML 的 MicaBackdrop/DesktopAcrylicBackdrop 表达不了四种变体；WindowMaterialService 管理控制器生命周期（SystemBackdropConfiguration 的 IsInputActive 跟随窗口激活、Theme 跟随窗口 ActualTheme——注意 ElementTheme 与 SystemBackdropTheme 枚举数值不齐需显式映射，naive cast 会把浅色窗口映射成 Default；窗口关闭时 Dispose 控制器）。设置项 WindowMaterial（Mica|MicaAlt|Acrylic|AcrylicThin，默认 Acrylic 延续 1.6.9 现状），切换即时生效。WinUI 坑：AddSystemBackdropTarget/SetSystemBackdropConfiguration 定义在 ISystemBackdropControllerWithTargets 接口上（ISystemBackdropController 只有 Dispose），接口名写错报 CS1061 且会连锁触发 XamlCompiler 假报 WMC0001 Unknown type（编译失败导致 LocalAssembly 缺失，MarkupCompilePass2 解析不了本程序集类型——先修 CS 错误 XAML 错误自动消失）。四材质均受系统透明效果开关影响（关闭时回退纯色）。
 
