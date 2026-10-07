@@ -9,7 +9,7 @@
     xmlns:models="using:MusicPlayer.Models"
     Title="音乐播放器">
 
-    <Grid x:Name="RootGrid" Background="{ThemeResource AppBackground}" RequestedTheme="Light" KeyDown="MainWindow_KeyDown">
+    <Grid x:Name="RootGrid" Background="{ThemeResource MainGlassBg}" RequestedTheme="Light" KeyDown="MainWindow_KeyDown">
 
         <Grid.Resources>
             <services:TimeSpanConverter x:Key="TimeSpanConverter" />
@@ -1525,7 +1525,7 @@
                 <!-- Bottom transport bar: EchoMusic floating rounded card. -->
                 <Grid x:Name="BottomBarHost" Grid.Row="1" Background="Transparent">
                     <Border x:Name="PlayerBarBorder" Margin="10,0,10,10" Padding="14,10,14,10"
-                            Background="{ThemeResource Surface}" BorderBrush="{ThemeResource BorderSoft}"
+                            Background="{ThemeResource BarAcrylic}" BorderBrush="{ThemeResource BorderSoft}"
                             BorderThickness="1" CornerRadius="14">
                         <Border.Shadow>
                             <ThemeShadow />

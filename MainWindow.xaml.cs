@@ -188,6 +188,11 @@ public sealed partial class MainWindow : Window
     {
         this.InitializeComponent();
 
+        // Glass material: the system-level DesktopAcrylic backdrop shows
+        // blurred desktop content through the main window's semi-transparent
+        // MainGlassBg root tint (secondary windows stay opaque).
+        SystemBackdrop = new DesktopAcrylicBackdrop();
+
         _dispatcher = DispatcherQueue.GetForCurrentThread();
 
         // Sound-effect DSP state mirrors the persisted settings; PlaybackService
@@ -686,6 +691,8 @@ public sealed partial class MainWindow : Window
             // EchoMusic-style immersive overlay: covers the title bar and the
             // whole body; the floating player bar below stays usable.
             CenterGrid.Visibility = Visibility.Collapsed;
+            _nowPlayingOutSb?.Stop();
+            NowPlayingPanel.Opacity = 1;
             NowPlayingPanel.Visibility = Visibility.Visible;
             AnimatePanelIn(NowPlayingPanel, NowPanelTransform, fromX: 0, fromY: 36);
             UpdateBottomBarImmersive(true);
@@ -705,7 +712,7 @@ public sealed partial class MainWindow : Window
         else
         {
             CenterGrid.Visibility = Visibility.Visible;
-            NowPlayingPanel.Visibility = Visibility.Collapsed;
+            AnimateNowPlayingOut();
             UpdateBottomBarImmersive(false);
             SettingsScroll.Visibility = _currentView == NavView.Settings ? Visibility.Visible : Visibility.Collapsed;
             LyricCompletionPanel.Visibility = _currentView == NavView.LyricFill ? Visibility.Visible : Visibility.Collapsed;
@@ -2861,9 +2868,38 @@ public sealed partial class MainWindow : Window
     /// (rather than composition Offset animations) so window resizes / layout
     /// moves keep working once the animation completes.
     /// </summary>
-    private static void AnimatePanelIn(FrameworkElement panel, CompositeTransform transform, double fromX, double fromY)
+    private Microsoft.UI.Xaml.Media.Animation.Storyboard? _nowPlayingOutSb;
+
+    /// <summary>Fade the immersive now-playing panel out, then collapse it.
+    /// Collapsing immediately made panel exits feel clipped next to the
+    /// animated entrance. Stop() before a re-entry cancels the pending
+    /// collapse (a stopped storyboard never runs its Completed handler).</summary>
+    private void AnimateNowPlayingOut()
     {
-        transform.TranslateX = fromX;
+        if (NowPlayingPanel.Visibility != Visibility.Visible)
+            return;
+        _nowPlayingOutSb?.Stop();
+        var fade = new DoubleAnimation
+        {
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(110)),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(fade, NowPlayingPanel);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fade);
+        sb.Completed += (_, _) =>
+        {
+            NowPlayingPanel.Visibility = Visibility.Collapsed;
+            NowPlayingPanel.Opacity = 1;
+        };
+        _nowPlayingOutSb = sb;
+        sb.Begin();
+    }
+
+    private static void AnimatePanelIn(FrameworkElement panel, CompositeTransform transform, double fromX, double fromY)
+    {        transform.TranslateX = fromX;
         transform.TranslateY = fromY;
 
         var sb = new Storyboard();
@@ -3581,7 +3617,7 @@ public sealed partial class MainWindow : Window
     {
         if (_bottomBarImmersive)
             return;
-        PlayerBarBorder.Background = FindResource("Surface") as Microsoft.UI.Xaml.Media.Brush
+        PlayerBarBorder.Background = FindResource("BarAcrylic") as Microsoft.UI.Xaml.Media.Brush
             ?? new SolidColorBrush(Microsoft.UI.Colors.White);
         PlayerBarBorder.BorderBrush = FindResource("BorderSoft") as Microsoft.UI.Xaml.Media.Brush
             ?? new SolidColorBrush(Microsoft.UI.Colors.Gray);
@@ -4681,7 +4717,6 @@ public sealed partial class MainWindow : Window
         var sourceName = source switch { 1 => "网易云", 2 => "LRCLIB", 3 => "酷狗", _ => "QQ音乐" };
 
         ShowInfoBar($"正在下载歌词（{sourceName}）：{selected.Title} - {selected.Artist}");
-        AppLog.WriteProbe($"DL: source={source} title='{selected.Title}' mid='{selected.SongMid}' songId='{selected.SongId}'");
         (string? Lyric, string? Trans, string? Roma)? lyric;
         bool wordModeForManual = _settings.LyricWordLyrics;
         string? krcContent = null;
@@ -4690,7 +4725,6 @@ public sealed partial class MainWindow : Window
             if (source == 3)
             {
                 var kg = await KugouLyricService.FetchLyricAsync(selected.SongMid);
-                AppLog.WriteProbe($"DL: kugou lrc={kg.Lrc?.Length ?? 0} krc={kg.Krc?.Length ?? 0}");
                 krcContent = kg.Krc;
                 lyric = (kg.Lrc, null, null);
             }
@@ -4711,7 +4745,6 @@ public sealed partial class MainWindow : Window
         }
         if (string.IsNullOrEmpty(lyric?.Lyric))
         {
-            AppLog.WriteProbe($"DL: EMPTY lyric after fetch (source={source})");
             ShowInfoBar("该歌曲没有可用歌词。");
             return false;
         }
@@ -5411,14 +5444,28 @@ public sealed partial class MainWindow : Window
     private string _currentSettingsTab = "look";
 
     /// <summary>EchoMusic-style settings tabs: show only the cards that
-    /// belong to the selected section and underline the active tab.</summary>
-    private void ShowSettingsTab(string tab)
+    /// belong to the selected section and underline the active tab. Newly
+    /// revealed cards fade in (suppressed for theme re-application, which
+    /// calls this with animate:false to avoid replaying the motion).</summary>
+    private void ShowSettingsTab(string tab, bool animate = true)
     {
         _currentSettingsTab = tab;
         void Show(bool on, params FrameworkElement[] els)
         {
             foreach (var el in els)
+            {
+                bool was = el.Visibility == Visibility.Visible;
                 el.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+                if (on && !was && animate)
+                {
+                    var fadeIn = new DoubleAnimation { From = 0, To = 1, Duration = new Duration(TimeSpan.FromMilliseconds(140)) };
+                    Storyboard.SetTarget(fadeIn, el);
+                    Storyboard.SetTargetProperty(fadeIn, "Opacity");
+                    var sb = new Storyboard();
+                    sb.Children.Add(fadeIn);
+                    sb.Begin();
+                }
+            }
         }
         Show(tab == "look", SettingsCardLook);
         Show(tab == "lyric", SettingsCardLyric);
@@ -5868,7 +5915,7 @@ public sealed partial class MainWindow : Window
             ApplyBottomBarThemeBrushes();
             UpdateSoundFxIcon();
             if (_currentView == NavView.Settings)
-                ShowSettingsTab(_currentSettingsTab);
+                ShowSettingsTab(_currentSettingsTab, animate: false);
             // Rebind the visible lists so the title converter re-evaluates
             // against the new Fallback brush.
             RefreshDisplay();

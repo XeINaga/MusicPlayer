@@ -26,6 +26,8 @@
 #include <windows.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <dwmapi.h>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -36,6 +38,7 @@
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "kernel32.lib")
@@ -290,6 +293,83 @@ static double EffectiveProg() {
     return p;
 }
 
+// ---------- per-role text layout cache ----------
+// Rebuilding the DirectWrite text format + layout every frame (measure and
+// draw run per frame at 60 fps) cost measurable CPU on long wrapped lines
+// and showed up as judder. The cache rebuilds only when the text, style or
+// layout width actually changes. Only the window thread touches these, so
+// no locking is needed.
+static const wchar_t* kFontFamily = L"Microsoft YaHei";
+struct LayoutCache {
+    IDWriteTextLayout* lay = nullptr;
+    DWRITE_TEXT_METRICS m = {};
+    std::wstring text;
+    float size = 0.0f, width = 0.0f;
+    bool bold = false, left = false;
+    bool Matches(const std::wstring& t, float sz, bool b, float w, bool l) const {
+        return lay != nullptr && text == t && size == sz && bold == b && width == w && left == l;
+    }
+    void Release() {
+        if (lay) { lay->Release(); lay = nullptr; }
+        text.clear(); m = {};
+    }
+};
+static LayoutCache g_layO, g_layR, g_layT;
+
+static IDWriteTextLayout* GetLayout(LayoutCache& c, const std::wstring& text,
+                                    float size, bool bold, float maxW, bool alignLeft)
+{
+    if (c.Matches(text, size, bold, maxW, alignLeft))
+        return c.lay;
+    c.Release();
+    IDWriteTextFormat* fmt = nullptr;
+    g_dwriteFactory->CreateTextFormat(kFontFamily, nullptr,
+        bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, L"", &fmt);
+    if (!fmt) return nullptr;
+    fmt->SetTextAlignment(alignLeft ? DWRITE_TEXT_ALIGNMENT_LEADING : DWRITE_TEXT_ALIGNMENT_CENTER);
+    g_dwriteFactory->CreateTextLayout(text.c_str(), (UINT32)text.size(), fmt, maxW, 10000.0f, &c.lay);
+    fmt->Release();
+    if (!c.lay) return nullptr;
+    c.lay->GetMetrics(&c.m);
+    c.text = text; c.size = size; c.bold = bold; c.width = maxW; c.left = alignLeft;
+    return c.lay;
+}
+
+// ---------- vsync render pump ----------
+// A WM_TIMER at 16 ms fires at the system timer granularity (~15.6 ms with
+// wide jitter whenever any window is busy), so the karaoke sweep visibly
+// stuttered. This thread instead posts one render per DWM composition cycle
+// (DwmFlush waits for vsync) while a word-timed line is playing, and idles
+// otherwise — static text only needs the event-driven renders from commands.
+// g_renderPending keeps at most one frame queued: if the window thread
+// renders slower than the display refreshes, the pump auto-throttles
+// instead of flooding the message queue.
+static volatile LONG g_renderPending = 0;
+static HANDLE g_renderQuit = nullptr;
+
+static bool KaraokeActive() {
+    EnterCriticalSection(&g_cs);
+    bool a = g_state.prog >= 0.0 && g_state.visible;
+    LeaveCriticalSection(&g_cs);
+    return a;
+}
+
+static DWORD WINAPI RenderPumpThread(LPVOID) {
+    while (WaitForSingleObject(g_renderQuit, 25) != WAIT_OBJECT_0) {
+        if (!KaraokeActive()) continue;
+        while (KaraokeActive() && WaitForSingleObject(g_renderQuit, 0) != WAIT_OBJECT_0) {
+            // On displays/remote sessions without composition DwmFlush fails
+            // immediately — fall back to a fixed 15 ms beat instead of
+            // spinning at 100% CPU.
+            if (FAILED(DwmFlush())) Sleep(15);
+            if (InterlockedCompareExchange(&g_renderPending, 1, 0) == 0)
+                PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
+        }
+    }
+    return 0;
+}
+
 
 
 static void Render() {
@@ -359,20 +439,13 @@ static void Render() {
         if (maxW > 0) maxW -= gap; // no trailing gap
     } else
     for (auto& ln : lines) {
-        IDWriteTextFormat* fmt = nullptr;
-        g_dwriteFactory->CreateTextFormat(fontFamily, nullptr,
-            st.bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, ln.size, L"", &fmt);
-        IDWriteTextLayout* lay = nullptr;
-        if (fmt) g_dwriteFactory->CreateTextLayout(ln.text.c_str(), (UINT32)ln.text.size(), fmt, wrapW, 10000.0f, &lay);
-        DWRITE_TEXT_METRICS m = { 0 };
+        LayoutCache& c = ln.role == 'O' ? g_layO : (ln.role == 'R' ? g_layR : g_layT);
+        IDWriteTextLayout* lay = GetLayout(c, ln.text, ln.size, st.bold, wrapW, st.alignLeft);
         float w = 10, hgt = ln.size * 1.3f;
-        if (lay) { lay->GetMetrics(&m); w = m.widthIncludingTrailingWhitespace; hgt = m.height; }
+        if (lay) { w = c.m.widthIncludingTrailingWhitespace; hgt = c.m.height; }
         ln.w = w; ln.h = hgt;
         totalH += hgt + gap;
         if (w > maxW) maxW = w;
-        if (lay) lay->Release();
-        if (fmt) fmt->Release();
     }
     if (totalH > 0) totalH -= gap;
     if (!st.vertical && maxW > wrapW) maxW = wrapW;
@@ -465,13 +538,8 @@ static void Render() {
     } else {
     float y = pad;
     for (auto& ln : lines) {
-        IDWriteTextFormat* fmt = nullptr;
-        g_dwriteFactory->CreateTextFormat(fontFamily, nullptr,
-            st.bold ? DWRITE_FONT_WEIGHT_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
-            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, ln.size, L"", &fmt);
-        if (fmt) fmt->SetTextAlignment(st.alignLeft ? DWRITE_TEXT_ALIGNMENT_LEADING : DWRITE_TEXT_ALIGNMENT_CENTER);
-        IDWriteTextLayout* lay = nullptr;
-        if (fmt) g_dwriteFactory->CreateTextLayout(ln.text.c_str(), (UINT32)ln.text.size(), fmt, maxW, 10000.0f, &lay);
+        LayoutCache& c = ln.role == 'O' ? g_layO : (ln.role == 'R' ? g_layR : g_layT);
+        IDWriteTextLayout* lay = GetLayout(c, ln.text, ln.size, st.bold, maxW, st.alignLeft);
         ID2D1SolidColorBrush* tb = nullptr;
         // Karaoke original line: the base layer is the unsung color.
         g_dcRT->CreateSolidColorBrush(
@@ -480,23 +548,31 @@ static void Render() {
         // Karaoke sweep: when a word-timed line is playing (prog >= 0), draw
         // the whole line in the unsung color, then re-draw it clipped to the
         // sung prefix in the accent color. Applies to orig/roma/trans alike —
-        // companion lines ride the same progress as their main line. doneWidth uses the char-ratio approximation (lyric
-        // lines are CJK-dominated, so per-char width is near-uniform).
+        // companion lines ride the same progress as their main line.
         bool karaoke = st.prog >= 0.0 && ln.role == 'O';
         float doneW = 0.0f;
+        float textX = pad;
         if (karaoke && lay) {
-            // Cluster metrics give the exact pixel width of the sung prefix.
+            // Centred glyphs start at (layoutWidth - textWidth) / 2, not at
+            // the box edge — the sweep clip must start there too, or short
+            // centred lines lit up late and then raced through.
+            if (!st.alignLeft)
+                textX += (maxW - c.m.widthIncludingTrailingWhitespace) * 0.5f;
             UINT32 maxClusters = (UINT32)ln.text.size() + 1;
             std::vector<DWRITE_CLUSTER_METRICS> clusters(maxClusters);
-            std::vector<UINT16> clusterIdx(maxClusters);
             UINT32 actual = 0;
-            if (SUCCEEDED(lay->GetClusterMetrics(clusters.data(), maxClusters, &actual))) {
-                UINT32 pos = 0;
-                auto target = (UINT32)(EffectiveProg() * (double)ln.text.size() + 0.5);
-                for (UINT32 i = 0; i < actual && pos < target; i++) {
-                    doneW += clusters[i].width;
-                    pos += clusters[i].length;
-                }
+            if (SUCCEEDED(lay->GetClusterMetrics(clusters.data(), maxClusters, &actual)) && actual > 0) {
+                // Sub-pixel sweep: progress maps onto the cluster sequence as
+                // a float — whole clusters plus the fractional slice of the
+                // current one. The previous char-rounded clip width made the
+                // sweep jump a whole character at a time, the main source of
+                // the "not flowing" feel reported on desktop lyrics.
+                double exact = EffectiveProg() * (double)actual;
+                UINT32 full = (UINT32)exact;
+                if (full > actual) full = actual;
+                double frac = exact - (double)full;
+                for (UINT32 i = 0; i < full; i++) doneW += clusters[i].width;
+                if (full < actual) doneW += (float)(frac * clusters[full].width);
             }
         }
 
@@ -507,7 +583,7 @@ static void Render() {
                 ID2D1SolidColorBrush* hb = nullptr;
                 g_dcRT->CreateSolidColorBrush(st.accent, &hb);
                 if (hb) {
-                    D2D1_RECT_F lineRect = D2D1::RectF(pad, y, pad + doneW, y + ln.h);
+                    D2D1_RECT_F lineRect = D2D1::RectF(textX, y, textX + doneW, y + ln.h);
                     g_dcRT->PushAxisAlignedClip(lineRect, D2D1_ANTIALIAS_MODE_ALIASED);
                     g_dcRT->DrawTextLayout(D2D1::Point2F(pad, y), lay, hb);
                     g_dcRT->PopAxisAlignedClip();
@@ -516,8 +592,6 @@ static void Render() {
             }
         }
         y += ln.h + gap;
-        if (lay) lay->Release();
-        if (fmt) fmt->Release();
     }
     }
 
@@ -703,25 +777,36 @@ static void ApplyCommand(const std::string& line) {
         auto* a = FindMember(root, "orig");
         auto* r = FindMember(root, "roma");
         auto* tr = FindMember(root, "trans");
-        EnterCriticalSection(&g_cs);
-        g_state.orig  = Utf8ToWide(a && a->type == JsonVal::STR ? a->str : "");
-        g_state.roma  = Utf8ToWide(r && r->type == JsonVal::STR ? r->str : "");
-        g_state.trans = Utf8ToWide(tr && tr->type == JsonVal::STR ? tr->str : "");
         auto* sg = FindMember(root, "prog");
         double newProg = (sg && sg->type == JsonVal::NUM) ? sg->num : -1.0;
-        // Keep the last two samples so the render timer can interpolate the
-        // sweep locally (40 Hz pipe updates judder; 60 Hz local extrapolation
+        // Keep the last two samples so the vsync pump can interpolate the
+        // sweep locally (25 Hz pipe updates judder; 60 Hz local extrapolation
         // is as smooth as the in-app panel).
         LARGE_INTEGER now{}, freq{};
         QueryPerformanceCounter(&now);
         QueryPerformanceFrequency(&freq);
         EnterCriticalSection(&g_cs);
+        g_state.orig  = Utf8ToWide(a && a->type == JsonVal::STR ? a->str : "");
+        g_state.roma  = Utf8ToWide(r && r->type == JsonVal::STR ? r->str : "");
+        g_state.trans = Utf8ToWide(tr && tr->type == JsonVal::STR ? tr->str : "");
         if (newProg >= 0 && g_state.prog >= 0 && g_state.progPrev >= 0)
         {
             double dt = (double)(g_state.progAt.QuadPart - g_state.progPrevAt.QuadPart) / (double)freq.QuadPart;
             double dp = g_state.prog - g_state.progPrev;
-            if (dt > 0.005 && dp > -0.5 && dp < 0.5)
-                g_state.progRate = dp / dt;
+            if (dt > 0.005 && dp > -0.5 && dp < 0.5) {
+                // Exponential smoothing: one off-beat sample would otherwise
+                // read as a twitch on the interpolated sweep.
+                double inst = dp / dt;
+                g_state.progRate = (g_state.progRate == 0.0) ? inst
+                                        : g_state.progRate * 0.6 + inst * 0.4;
+            }
+            // Seek detection: when the sample is far from what the current
+            // rate predicts the user dragged — drop the rate so the sweep
+            // jumps to the target instead of gliding over the pre-seek spot.
+            double dtNow = (double)(now.QuadPart - g_state.progAt.QuadPart) / (double)freq.QuadPart;
+            double predicted = g_state.prog + g_state.progRate * dtNow;
+            if (fabs(newProg - predicted) > 0.12)
+                g_state.progRate = 0.0;
         }
         if (newProg >= 0 && g_state.prog < 0)
         {
@@ -737,13 +822,9 @@ static void ApplyCommand(const std::string& line) {
         g_state.prog = newProg;
         g_state.progAt = now;
         LeaveCriticalSection(&g_cs);
-        LeaveCriticalSection(&g_cs);
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
-        // Local 60 fps interpolation timer while a word-timed line plays.
-        if (g_state.prog >= 0)
-            SetTimer(g_hwnd, 2, 16, nullptr);
-        else
-            KillTimer(g_hwnd, 2);
+        // While a word-timed line plays the vsync pump thread keeps posting
+        // render frames; static text only needs the PostMessage above.
     } else if (type == "style") {
         auto* f = FindMember(root, "font");
         auto* c = FindMember(root, "color");
@@ -867,15 +948,10 @@ static bool InResizeZone(HWND h, LPARAM l) {
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
         case WM_APP_RENDER:
+            InterlockedExchange(&g_renderPending, 0);
             Render();
             return 0;
         case WM_TIMER:
-            if (w == 2) {
-                // Karaoke interpolation tick (~60 fps): redraw with the
-                // locally extrapolated progress.
-                Render();
-                return 0;
-            }
             if (w == 1) {
                 UpdateFullscreenHide();
                 // Host-death suicide: if the command pipe has no client for
@@ -967,7 +1043,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             return 0;
         case WM_DESTROY:
             KillTimer(h, 1);
-            KillTimer(h, 2);
+            if (g_renderQuit) SetEvent(g_renderQuit);
             ReportPosition();       // last chance: where the user left it
             PostQuitMessage(0);
             return 0;
@@ -1026,6 +1102,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         }
     }
     SetTimer(g_hwnd, 1, 1000, nullptr);   // fullscreen auto-hide watchdog
+
+    g_renderQuit = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    CreateThread(nullptr, 0, RenderPumpThread, nullptr, 0, nullptr);
 
     MSG msg;
     while (GetMessage(&msg, nullptr, 0, 0)) {
