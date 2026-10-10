@@ -11,6 +11,18 @@ commit 28868ea  2026-10-07
 ----
 
 ----
+commit 581a9f4  2026-10-07
+托盘图标常驻与右键菜单（仿 QQ 音乐，用户验收后提交）：①修启动时托盘无图标——托盘图标原只在"点 X 关闭到托盘"时创建（EnsureTrayIcon 由 MainWindow_Closed 调用），现 ctor 末尾即调用，图标常驻；"已最小化到托盘"气泡提示移到真正最小化时机才弹。②右键菜单从"打开/退出"两项扩展为 QQ 音乐式布局：上一首/播放暂停（按状态动态文字）/下一首、灰色信息行"正在播放：曲名"（未播放显示"未在播放"）、♡收藏这首歌/♥取消收藏（随收藏状态切换）、音量增大（当前 N%）/音量减小（每次±10%）、开启/关闭桌面歌词（随开关状态）、打开 MusicPlayer、设置（恢复窗口并跳设置页）、退出——只含程序已有功能。实现：TrayIconService 加 MenuStateProvider（右键打开时托盘线程回调读取播放状态/曲目/收藏/音量/桌面歌词开关的纯字段快照）+ MenuCommand 事件（宿主 dispatcher marshal 到 UI 线程处理：PlayPause/Previous/Next/收藏切换写库并同步红心/音量±10% 同步滑杆/桌面歌词经 ToggleButton IsChecked 走既有事件链/Settings=RestoreFromTray+ShowView(Settings)）。TrayMenuState/TrayMenuCommand 定义在命名空间级（嵌套在 TrayIconService 类内会 CS0246）。版本 1.6.19。
+
+----
+
+----
+commit a6c861e  2026-10-07
+侧栏收起为图标栏（用户验收后提交）：右缘 `<`/`>` 收起按钮（Grid.RowSpan 全高、垂直居中、18×52 透明按钮）；收起=NavRail 64px 只留图标（头像卡片只显示齿轮按钮、分组标题透明占位（**Opacity 0 而非 Collapsed**——塌掉会让下方图标整体上移、间距收紧）、导航按钮只折起文字（图标固定 Width=16 保持原位）、歌单区隐藏）、展开完全恢复；瞬时切换（**Width 是布局属性，EnableDependentAnimation=true 的逐帧动画带全窗口重排卡顿**——用户实测反馈后去掉动画）。WinUI 坑记录：导航图标在窄容器下自然宽度漂移需显式 Width；分组标题占位用 Opacity。设置齿轮收起态保留（用户第二轮反馈：去头像、留齿轮）。状态持久化 SidebarCollapsed。版本 1.6.18。
+
+----
+
+----
 commit 1a11337  2026-10-07
 修启动时窗口材质不是所存设置：ctor 里挂 backdrop 控制器时窗口从未激活过，渲染策略不生效（观察=保存的细亚克力启动后显示为暗色错误材质，手动重切才对）。修复：ctor 保留首次 Apply，另订阅 Window.Activated 首次激活（非 Deactivated）时重建一次材质并退订——重建路径与手动切换完全同条件，同时覆盖"attach 时机未就绪"与"首次 attach 时 ActualTheme/配置未同步"两种根因。版本 1.6.14。
 
