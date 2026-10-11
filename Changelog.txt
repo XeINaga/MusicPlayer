@@ -11,6 +11,12 @@ commit 28868ea  2026-10-07
 ----
 
 ----
+commit 55c0cc5  2026-10-07
+修桌面歌词扫色抖动并加纯色模式与自定义壁纸裁剪：①扫色抖动根因=宿主 40ms 进度样本偶发小幅回退（播放位置量化/回读旧值），覆盖层无条件接受导致扫色回退→外推追回→再回退的循环——加同行单调保护：歌词文本未变且新样本比外推位置落后 0.4%~5% 时忽略该样本（大于 5% 判定为行内拖动 seek 仍接受，换行由文本变化识别）。②窗口材质加纯色模式（WindowMaterialKind.None：无 backdrop，RootGrid 背景切 AppBackground 实色，随深浅主题）。③自定义壁纸：外观卡新增窗口壁纸区——选择图片后弹出裁剪窗口（WallpaperCropWindow：比例锁定为主窗口客户比的裁剪框，可切 16:9/4:3/3:2/1:1/自由，框内拖动+四角手柄缩放，三分构图线，框外变暗；确定后 BitmapDecoder+BitmapTransform.Bounds 像素级裁剪输出 PNG 到 DataLocation.Root），壁纸透明度滑杆 0-100% 与显示方式（完整显示 Uniform/拉伸 Fill）可调，清除壁纸恢复。壁纸为 RootGrid 最底层 Image（RowSpan 全高），独立于材质叠加。版本 1.6.22/1.6.23。
+
+----
+
+----
 commit 581a9f4  2026-10-07
 托盘图标常驻与右键菜单（仿 QQ 音乐，用户验收后提交）：①修启动时托盘无图标——托盘图标原只在"点 X 关闭到托盘"时创建（EnsureTrayIcon 由 MainWindow_Closed 调用），现 ctor 末尾即调用，图标常驻；"已最小化到托盘"气泡提示移到真正最小化时机才弹。②右键菜单从"打开/退出"两项扩展为 QQ 音乐式布局：上一首/播放暂停（按状态动态文字）/下一首、灰色信息行"正在播放：曲名"（未播放显示"未在播放"）、♡收藏这首歌/♥取消收藏（随收藏状态切换）、音量增大（当前 N%）/音量减小（每次±10%）、开启/关闭桌面歌词（随开关状态）、打开 MusicPlayer、设置（恢复窗口并跳设置页）、退出——只含程序已有功能。实现：TrayIconService 加 MenuStateProvider（右键打开时托盘线程回调读取播放状态/曲目/收藏/音量/桌面歌词开关的纯字段快照）+ MenuCommand 事件（宿主 dispatcher marshal 到 UI 线程处理：PlayPause/Previous/Next/收藏切换写库并同步红心/音量±10% 同步滑杆/桌面歌词经 ToggleButton IsChecked 走既有事件链/Settings=RestoreFromTray+ShowView(Settings)）。TrayMenuState/TrayMenuCommand 定义在命名空间级（嵌套在 TrayIconService 类内会 CS0246）。版本 1.6.19。
 
