@@ -50,6 +50,12 @@ public static class WindowMaterialService
 
         public void OnClosed(object sender, WindowEventArgs args)
         {
+            // "Close to tray" cancels the close (Handled = true): the window
+            // stays alive, so the material must remain attached. Disposing
+            // here left a bare translucent window behind after a wake-up from
+            // the tray.
+            if (args.Handled)
+                return;
             _contexts.Remove(Window);
             Dispose();
         }
@@ -97,31 +103,40 @@ public static class WindowMaterialService
     {
         // Mutually exclusive with the XAML backdrop property.
         window.SystemBackdrop = null;
-        Remove(window);
 
         ISystemBackdropControllerWithTargets controller;
         switch (kind)
         {
             case WindowMaterialKind.None:
-                return; // pure colour: no backdrop, root fills opaque
+                Remove(window); // pure colour: no backdrop, root fills opaque
+                return;
             case WindowMaterialKind.Mica:
             case WindowMaterialKind.MicaAlt:
-                if (!MicaController.IsSupported()) return;
+                if (!MicaController.IsSupported()) { Remove(window); return; }
                 controller = new MicaController
                 {
                     Kind = kind == WindowMaterialKind.MicaAlt ? MicaKind.BaseAlt : MicaKind.Base,
                 };
                 break;
             case WindowMaterialKind.AcrylicThin:
-                if (!DesktopAcrylicController.IsSupported()) return;
+                if (!DesktopAcrylicController.IsSupported()) { Remove(window); return; }
                 controller = new DesktopAcrylicController { Kind = DesktopAcrylicKind.Thin };
                 break;
             default:
-                if (!DesktopAcrylicController.IsSupported()) return;
+                if (!DesktopAcrylicController.IsSupported()) { Remove(window); return; }
                 controller = new DesktopAcrylicController { Kind = DesktopAcrylicKind.Base };
                 break;
         }
-        Attach(window, controller);
+
+        // Attach the NEW controller first and only then take the OLD one down:
+        // removing first left the window on a plain solid colour until the new
+        // controller's brush arrived — visible as a flash on every switch.
+        _contexts.TryGetValue(window, out var previous);
+        var context = Attach(window, controller);
+        if (context is null)
+            return; // attach failed: the old material (if any) stays in place
+        _contexts[window] = context;
+        previous?.Dispose(); // old controller out only once the new one is live
     }
 
     /// <summary>Detach and dispose the material currently on the window.</summary>
@@ -134,7 +149,10 @@ public static class WindowMaterialService
         }
     }
 
-    private static void Attach(Window window, ISystemBackdropControllerWithTargets controller)
+    /// <summary>Wire the controller to the window. Returns the context on
+    /// success; on failure the half-initialised controller is disposed and
+    /// null is returned (the caller keeps the previous material, if any).</summary>
+    private static Context? Attach(Window window, ISystemBackdropControllerWithTargets controller)
     {
         try
         {
@@ -155,18 +173,19 @@ public static class WindowMaterialService
                 Configuration = configuration,
                 Root = root,
             };
-            _contexts[window] = context;
 
             window.Activated += context.OnActivated;
             window.Closed += context.OnClosed;
             if (root is not null)
                 root.ActualThemeChanged += context.OnThemeChanged;
+            return context;
         }
         catch
         {
             // Attach failed (compositor refused the target): fall back to a
             // solid background instead of leaking a half-wired controller.
             controller.Dispose();
+            return null;
         }
     }
 }
@@ -181,4 +200,8 @@ public enum WindowMaterialKind
     /// <summary>No backdrop at all: the root fills with the opaque theme
     /// background (MainWindow swaps MainGlassBg for AppBackground).</summary>
     None,
+
+    /// <summary>Live capture of the Wallpaper Engine desktop render window
+    /// (no backdrop either — the captured frames cover the root).</summary>
+    WallpaperEngine,
 }

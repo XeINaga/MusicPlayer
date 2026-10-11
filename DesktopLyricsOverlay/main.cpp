@@ -48,6 +48,7 @@
 #define WM_APP_RENDER    (WM_APP + 1)
 #define WM_APP_SHOW      (WM_APP + 2)
 #define WM_APP_HIDE      (WM_APP + 3)
+#define WM_APP_QUIT      (WM_APP + 4)   // real quit: WndProc calls DestroyWindow
 
 // ---------- minimal JSON (flat objects: string / number / bool) ----------
 static void AppendUtf8(std::string& out, unsigned int cp);  // defined later, near Utf8ToWide
@@ -231,8 +232,10 @@ static float g_dpiScale = 1.0f;
 // ---------- rendering ----------
 static void EnsureBitmap(int w, int h) {
     if (g_hbm && w == g_bmW && h == g_bmH) return;
-    if (g_hbm) { DeleteObject(g_hbm); g_hbm = nullptr; }
+    // DeleteDC first: the DIB is still selected into the memory DC, so a
+    // DeleteObject issued before it would fail and leak the bitmap.
     if (g_hdcMem) { DeleteDC(g_hdcMem); g_hdcMem = nullptr; }
+    if (g_hbm) { DeleteObject(g_hbm); g_hbm = nullptr; }
     if (g_dcRT) { g_dcRT->Release(); g_dcRT = nullptr; }
 
     BITMAPINFOHEADER bi = { 0 };
@@ -355,19 +358,33 @@ static HANDLE g_renderQuit = nullptr;
 
 static bool KaraokeActive() {
     EnterCriticalSection(&g_cs);
-    bool a = g_state.prog >= 0.0 && g_state.visible && !g_state.paused;
+    // Vertical mode draws no karaoke sweep (plain single-color columns), so it
+    // must not keep the 60 fps pump running: its picture only changes when a
+    // lyric/style command arrives, and those post their own render.
+    bool a = g_state.prog >= 0.0 && !g_state.vertical &&
+             g_state.visible && !g_state.paused;
     LeaveCriticalSection(&g_cs);
     return a;
 }
 
 static DWORD WINAPI RenderPumpThread(LPVOID) {
+    LARGE_INTEGER freq{};
+    QueryPerformanceFrequency(&freq);
     while (WaitForSingleObject(g_renderQuit, 25) != WAIT_OBJECT_0) {
         if (!KaraokeActive()) continue;
         while (KaraokeActive() && WaitForSingleObject(g_renderQuit, 0) != WAIT_OBJECT_0) {
             // On displays/remote sessions without composition DwmFlush fails
             // immediately — fall back to a fixed 15 ms beat instead of
-            // spinning at 100% CPU.
+            // spinning at 100% CPU. Some drivers also return S_OK instantly:
+            // time the call and sleep briefly when it clearly did not wait
+            // for a vsync, so the loop never busy-spins either way.
+            LARGE_INTEGER t0{}, t1{};
+            QueryPerformanceCounter(&t0);
             if (FAILED(DwmFlush())) Sleep(15);
+            QueryPerformanceCounter(&t1);
+            if (freq.QuadPart > 0 &&
+                (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart < 0.004)
+                Sleep(1);
             if (InterlockedCompareExchange(&g_renderPending, 1, 0) == 0)
                 PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
         }
@@ -377,8 +394,17 @@ static DWORD WINAPI RenderPumpThread(LPVOID) {
 
 
 
+// Per-monitor DPI of the overlay window. Cheap enough to call every frame —
+// a purely cached scale would go stale when the box crosses monitors.
+static float WindowDpiScale() {
+    UINT dpi = g_hwnd ? GetDpiForWindow(g_hwnd) : 0;
+    if (dpi == 0) dpi = GetDpiForSystem();
+    return (float)dpi / 96.0f;
+}
+
 static void Render() {
     if (!g_hwnd) return;
+    g_dpiScale = WindowDpiScale();   // track the monitor the box is on now
     State st;
     EnterCriticalSection(&g_cs); st = g_state; LeaveCriticalSection(&g_cs);
 
@@ -544,7 +570,16 @@ static void Render() {
     float y = pad;
     for (auto& ln : lines) {
         LayoutCache& c = ln.role == 'O' ? g_layO : (ln.role == 'R' ? g_layR : g_layT);
-        IDWriteTextLayout* lay = GetLayout(c, ln.text, ln.size, st.bold, maxW, st.alignLeft);
+        // Draw with the SAME cached layout the measure pass built (wrapW
+        // wide). Requesting a second layout at maxW here missed the cache on
+        // every frame and rebuilt format + layout at 60 fps. When the box is
+        // narrower than the wrap width (maxW < wrapW) shift the layout left
+        // by (wrapW - maxW) / 2 so CENTER-aligned glyphs still land at
+        // pad + (maxW - textW) / 2 — exactly where a maxW-wide layout would
+        // have put them, and where the sweep clip starts.
+        IDWriteTextLayout* lay = GetLayout(c, ln.text, ln.size, st.bold, wrapW, st.alignLeft);
+        float drawX = pad;
+        if (!st.alignLeft) drawX += (maxW - wrapW) * 0.5f;
         ID2D1SolidColorBrush* tb = nullptr;
         // Karaoke original line: the base layer is the unsung color.
         g_dcRT->CreateSolidColorBrush(
@@ -556,13 +591,13 @@ static void Render() {
         // companion lines ride the same progress as their main line.
         bool karaoke = st.prog >= 0.0 && ln.role == 'O';
         float doneW = 0.0f;
-        float textX = pad;
+        float textX = drawX;
         if (karaoke && lay) {
             // Centred glyphs start at (layoutWidth - textWidth) / 2, not at
             // the box edge — the sweep clip must start there too, or short
             // centred lines lit up late and then raced through.
             if (!st.alignLeft)
-                textX += (maxW - c.m.widthIncludingTrailingWhitespace) * 0.5f;
+                textX += (wrapW - c.m.widthIncludingTrailingWhitespace) * 0.5f;
             UINT32 maxClusters = (UINT32)ln.text.size() + 1;
             std::vector<DWRITE_CLUSTER_METRICS> clusters(maxClusters);
             UINT32 actual = 0;
@@ -582,7 +617,7 @@ static void Render() {
         }
 
         if (tb) {
-            if (lay) g_dcRT->DrawTextLayout(D2D1::Point2F(pad, y), lay, tb);
+            if (lay) g_dcRT->DrawTextLayout(D2D1::Point2F(drawX, y), lay, tb);
 
             if (karaoke && lay && doneW > 0.5f) {
                 ID2D1SolidColorBrush* hb = nullptr;
@@ -590,11 +625,12 @@ static void Render() {
                 if (hb) {
                     D2D1_RECT_F lineRect = D2D1::RectF(textX, y, textX + doneW, y + ln.h);
                     g_dcRT->PushAxisAlignedClip(lineRect, D2D1_ANTIALIAS_MODE_ALIASED);
-                    g_dcRT->DrawTextLayout(D2D1::Point2F(pad, y), lay, hb);
+                    g_dcRT->DrawTextLayout(D2D1::Point2F(drawX, y), lay, hb);
                     g_dcRT->PopAxisAlignedClip();
                     hb->Release();
                 }
             }
+            tb->Release();          // was leaked once per line per frame
         }
         y += ln.h + gap;
     }
@@ -628,6 +664,9 @@ static void Render() {
         // Device lost (driver reset etc.): drop the target so the next render
         // recreates it instead of spinning on a dead one forever.
         g_dcRT->Release(); g_dcRT = nullptr;
+        // Same GDI rule as EnsureBitmap: drop the DC (deselecting the DIB)
+        // before deleting the bitmap, or DeleteObject silently fails.
+        if (g_hdcMem) { DeleteDC(g_hdcMem); g_hdcMem = nullptr; }
         if (g_hbm) { DeleteObject(g_hbm); g_hbm = nullptr; }
         g_bmW = g_bmH = 0;
         return;
@@ -784,6 +823,10 @@ static void ApplyCommand(const std::string& line) {
         auto* tr = FindMember(root, "trans");
         auto* sg = FindMember(root, "prog");
         double newProg = (sg && sg->type == JsonVal::NUM) ? sg->num : -1.0;
+        // NaN slips through every comparison below (all false) and would
+        // reach (UINT32)NaN in the render sweep — undefined behavior. Garbage
+        // and negative samples mean "not word-timed" (-1, the protocol value).
+        if (!std::isfinite(newProg) || newProg < 0.0) newProg = -1.0;
         // Keep the last two samples so the vsync pump can interpolate the
         // sweep locally (25 Hz pipe updates judder; 60 Hz local extrapolation
         // is as smooth as the in-app panel).
@@ -932,8 +975,11 @@ static void ApplyCommand(const std::string& line) {
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
     } else if (type == "quit") {
         // ApplyCommand runs on the pipe thread; route the exit to the main
-        // (window) thread so its GetMessage loop actually terminates.
-        if (g_hwnd) PostMessage(g_hwnd, WM_DESTROY, 0, 0);
+        // (window) thread. A posted WM_DESTROY would only run the handler —
+        // the window would never actually be destroyed — so post WM_APP_QUIT
+        // instead: WndProc calls DestroyWindow there, running the normal
+        // WM_DESTROY / WM_NCDESTROY chain and ending the GetMessage loop.
+        if (g_hwnd) PostMessage(g_hwnd, WM_APP_QUIT, 0, 0);
     }
 }
 
@@ -986,29 +1032,68 @@ static bool InResizeZone(HWND h, LPARAM l) {
     return x >= logicalW - 14.0f;
 }
 
+// Keep the persisted box center inside the virtual desktop (the union of all
+// monitors): a DPI change or monitor hotplug can otherwise park the window
+// entirely off-screen with no way to drag it back.
+static void ClampToScreens() {
+    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (vw <= 0 || vh <= 0) return;
+    g_x = std::max(vx, std::min(g_x, vx + vw));
+    g_y = std::max(vy, std::min(g_y, vy + vh));
+}
+
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     switch (m) {
         case WM_APP_RENDER:
             InterlockedExchange(&g_renderPending, 0);
             Render();
             return 0;
+        case WM_APP_QUIT:
+            // Real teardown instead of the old posted WM_DESTROY:
+            // DestroyWindow runs WM_DESTROY / WM_NCDESTROY synchronously here
+            // on the window thread, and its PostQuitMessage ends the loop.
+            DestroyWindow(h);
+            return 0;
+        case WM_DPICHANGED: {
+            // Per-monitor-v2: the box moved to a monitor with another DPI.
+            // Refresh the cached scale (the drag/resize math uses it between
+            // frames; Render re-derives it per frame anyway), adopt the
+            // system-suggested rect, clamp the persisted center back into the
+            // visible desktop and re-render at the new scale.
+            g_dpiScale = HIWORD(w) / 96.0f;
+            if (g_dpiScale <= 0.0f) g_dpiScale = WindowDpiScale();
+            const RECT* sug = (const RECT*)l;
+            SetWindowPos(h, nullptr, sug->left, sug->top,
+                         sug->right - sug->left, sug->bottom - sug->top,
+                         SWP_NOZORDER | SWP_NOACTIVATE);
+            ClampToScreens();
+            PostMessage(h, WM_APP_RENDER, 0, 0);
+            return 0;
+        }
+        case WM_DISPLAYCHANGE:
+            // Monitor hotplug / resolution change: the persisted center may
+            // now sit off-screen — clamp it and let the render reposition.
+            ClampToScreens();
+            PostMessage(h, WM_APP_RENDER, 0, 0);
+            return 0;
         case WM_TIMER:
             if (w == 1) {
                 UpdateFullscreenHide();
                 // Host-death suicide: if the command pipe has no client for
-                // 10 s while we are showing lyrics, the host died without a
-                // quit command (crash / taskkill) — remove the stale window.
-                bool visibleNow;
-                EnterCriticalSection(&g_cs);
-                visibleNow = g_state.visible;
-                LeaveCriticalSection(&g_cs);
-                if (!g_pipeConnected && visibleNow) {
+                // 10 s, the host died without a quit command (crash /
+                // taskkill) — exit regardless of visibility. Watching only
+                // while visible left a hidden zombie squatting on the single
+                // pipe instance, so the next host launch could not reconnect.
+                if (!g_pipeConnected) {
                     FILETIME now;
                     GetSystemTimeAsFileTime(&now);
                     ULONGLONG now64 = ((ULONGLONG)now.dwHighDateTime << 32) | now.dwLowDateTime;
                     ULONGLONG gone64 = ((ULONGLONG)g_hostGoneAt.dwHighDateTime << 32) | g_hostGoneAt.dwLowDateTime;
                     if (gone64 != 0 && (now64 - gone64) > 10000000ULL * 10)
-                        PostMessage(h, WM_DESTROY, 0, 0);
+                        PostMessage(h, WM_APP_QUIT, 0, 0);
                 } else {
                     GetSystemTimeAsFileTime(&g_hostGoneAt);
                 }
@@ -1130,6 +1215,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     if (!g_hwnd) { CoUninitialize(); return 1; }
 
     ShowWindow(g_hwnd, SW_HIDE);
+    g_dpiScale = WindowDpiScale();   // real per-monitor DPI now that the window exists
 
     CreateThread(nullptr, 0, PipeThread, nullptr, 0, nullptr);
     CreateThread(nullptr, 0, ReportPipeThread, nullptr, 0, nullptr);
@@ -1148,19 +1234,24 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     CreateThread(nullptr, 0, RenderPumpThread, nullptr, 0, nullptr);
 
     MSG msg;
-    while (GetMessage(&msg, nullptr, 0, 0)) {
+    while (GetMessage(&msg, nullptr, 0, 0) > 0) {   // > 0: -1 is an error, not "keep looping"
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
 
     if (g_dcRT) g_dcRT->Release();
-    if (g_hbm) DeleteObject(g_hbm);
+    // Same GDI rule as EnsureBitmap: delete the DC (deselecting the DIB)
+    // before the bitmap itself.
     if (g_hdcMem) DeleteDC(g_hdcMem);
+    if (g_hbm) DeleteObject(g_hbm);
+    g_layO.Release();   // cached per-role IDWriteTextLayouts
+    g_layR.Release();
+    g_layT.Release();
     if (g_dwriteFactory) g_dwriteFactory->Release();
     if (g_d2dFactory) g_d2dFactory->Release();
     // NOTE: g_cs / g_pipeCs are intentionally NOT deleted — the pipe threads
-    // may still hold them at this point (PostMessage(WM_DESTROY) does not
-    // synchronize with them), and deleting a busy CS is undefined behavior.
+    // may still hold them at this point (nothing joins them before the
+    // process exits), and deleting a busy CS is undefined behavior.
     // The process is exiting; the OS reclaims everything.
     CoUninitialize();
     return 0;

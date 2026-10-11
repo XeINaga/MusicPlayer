@@ -22,8 +22,8 @@ public enum TrayMenuCommand
 }
 
 /// <summary>
-/// System-tray icon backed by a message-only Win32 window running on its own
-/// thread. Left click (or the "打开" menu item) raises <see cref="OpenRequested"/>;
+/// System-tray icon backed by a hidden top-level Win32 window running on its
+/// own thread. Left click (or the "打开" menu item) raises <see cref="OpenRequested"/>;
 /// "退出" raises <see cref="ExitRequested"/>. Events fire on the tray thread —
 /// callers must marshal back to their own UI thread. Re-adds the icon when
 /// Explorer restarts ("TaskbarCreated") so the icon never gets lost.
@@ -66,7 +66,13 @@ public sealed class TrayIconService : IDisposable
     private const int MenuPrev = 1010, MenuPlayPause = 1011, MenuNext = 1012, MenuFav = 1013,
         MenuVolUp = 1014, MenuVolDown = 1015, MenuLyrics = 1016, MenuSettings = 1017;
 
-    private static readonly IntPtr HWND_MESSAGE = new(-3);
+    // A normal top-level window that is never shown (hidden windows get no
+    // taskbar button and stay out of Alt-Tab) instead of a message-only one:
+    // HWND_MESSAGE windows do not receive HWND_BROADCAST messages, so
+    // "TaskbarCreated" (Explorer restart) never arrived and the icon was lost
+    // for good. A real top-level window also lets SetForegroundWindow work,
+    // which the tray menu needs to dismiss itself on an outside click.
+    private const uint WS_OVERLAPPED = 0x00000000;
 
     private readonly Native.WndProc _proc;
     private Thread? _thread;
@@ -142,9 +148,11 @@ public sealed class TrayIconService : IDisposable
         };
         Native.RegisterClass(ref wc);
 
+        // Hidden top-level window (see WS_OVERLAPPED above): never shown, but
+        // it receives broadcasts and can take the foreground.
         _hwnd = Native.CreateWindowEx(
-            0, "MusicPlayerTrayWnd", "", 0, 0, 0, 0, 0,
-            HWND_MESSAGE, IntPtr.Zero, Native.GetModuleHandle(null), IntPtr.Zero);
+            0, "MusicPlayerTrayWnd", "", WS_OVERLAPPED, 0, 0, 0, 0,
+            IntPtr.Zero, IntPtr.Zero, Native.GetModuleHandle(null), IntPtr.Zero);
 
         while (Native.GetMessage(out var msg, IntPtr.Zero, 0, 0) > 0)
         {

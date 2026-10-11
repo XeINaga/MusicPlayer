@@ -343,7 +343,7 @@
 
                         <Button x:Name="PlayBtn" Style="{StaticResource CirclePlayStyle}"
                                 HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,12"
-                                Opacity="0" Click="CardPlay_Click">
+                                Opacity="0" IsHitTestVisible="False" Click="CardPlay_Click">
                             <!-- Fade in on hover rather than popping in. -->
                             <Button.OpacityTransition>
                                 <ScalarTransition Duration="0:0:0.18" />
@@ -417,7 +417,7 @@
                     <TextBlock Grid.Column="4" Text="{Binding Duration, Converter={StaticResource TimeSpanConverter}}"
                                Foreground="{ThemeResource TextSecondary}" FontSize="12" VerticalAlignment="Center" />
                     <Button x:Name="RowPlayNextBtn" Grid.Column="5" Style="{StaticResource GhostIconButtonStyle}"
-                            Width="34" Height="34" VerticalAlignment="Center" Opacity="0"
+                            Width="34" Height="34" VerticalAlignment="Center" Opacity="0" IsHitTestVisible="False"
                             Click="TrackPlayNext_Click" ToolTipService.ToolTip="下一首播放">
                         <Button.OpacityTransition>
                             <ScalarTransition Duration="0:0:0.15" />
@@ -473,6 +473,10 @@
              pure-colour root background. -->
         <Image x:Name="WallpaperImage" Grid.RowSpan="2" Stretch="UniformToFill"
                Visibility="Collapsed" IsHitTestVisible="False" />
+        <!-- Live video wallpaper (from the Wallpaper Engine library): GPU
+             decoded, muted, looping; sits above the static image layer. -->
+        <MediaPlayerElement x:Name="WallpaperVideoPlayer" Grid.RowSpan="2"
+                            Visibility="Collapsed" IsHitTestVisible="False" />
 
         <!-- Title bar strip: content extends into the caption area (see
              ExtendsContentIntoTitleBar / SetTitleBar in code-behind). The whole
@@ -653,17 +657,20 @@
                 <StackPanel Grid.Row="0" Margin="26,20,26,4" Spacing="12">
                     <Grid>
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
+                            <!-- Star column: a long playlist name trims here
+                                 instead of pushing the right controls out of
+                                 the window. -->
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <TextBlock x:Name="ContentTitle" Text="本地音乐" FontSize="26" FontWeight="Bold"
-                                       Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center" />
-                            <TextBlock x:Name="ContentSubtitle" Text="" FontSize="13"
-                                       Foreground="{ThemeResource TextSecondary}" VerticalAlignment="Center"
-                                       Margin="2,4,0,0" />
-                        </StackPanel>
+                        <TextBlock x:Name="ContentTitle" Grid.Column="0" Text="本地音乐" FontSize="26" FontWeight="Bold"
+                                   Foreground="{ThemeResource TextPrimary}" VerticalAlignment="Center"
+                                   HorizontalAlignment="Left" TextTrimming="CharacterEllipsis"
+                                   Margin="0,0,10,0" />
+                        <TextBlock x:Name="ContentSubtitle" Grid.Column="1" Text="" FontSize="13"
+                                   Foreground="{ThemeResource TextSecondary}" VerticalAlignment="Center"
+                                   Margin="0,4,10,0" />
                         <StackPanel Grid.Column="2" x:Name="LibraryHeader" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                             <ComboBox x:Name="ViewCombo" Width="96"
                                       SelectionChanged="ViewCombo_SelectionChanged" Visibility="Collapsed">
@@ -1005,6 +1012,24 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                             </RadioButton>
+                                            <RadioButton x:Name="MaterialWallpaperEngine" Grid.Row="2" Grid.Column="1" GroupName="WindowMaterial" Tag="WallpaperEngine"
+                                                         Style="{StaticResource MaterialOptionStyle}" Checked="WindowMaterial_Checked"
+                                                         ToolTipService.ToolTip="需要 Wallpaper Engine 正在运行">
+                                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                                    <Border Width="42" Height="28" CornerRadius="6" BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
+                                                        <Border.Background>
+                                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                                <GradientStop Color="#7B4DBEF5" Offset="0" />
+                                                                <GradientStop Color="#7B7C5CFF" Offset="1" />
+                                                            </LinearGradientBrush>
+                                                        </Border.Background>
+                                                    </Border>
+                                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="Wallpaper Engine" FontSize="13" Foreground="{ThemeResource TextPrimary}" />
+                                                        <TextBlock Text="动态桌面壁纸" FontSize="11" Foreground="{ThemeResource TextSecondary}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
                                         </Grid>
                                     </StackPanel>
 
@@ -1020,6 +1045,11 @@
                                                     Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
                                                     Background="{ThemeResource ButtonBackground}" BorderBrush="{ThemeResource ButtonBorderBrush}"
                                                     BorderThickness="1" Click="BtnWallpaperPick_Click" />
+                                            <Button x:Name="BtnWallpaperWe" Content="从 Wallpaper Engine 选择…" MinWidth="170" MinHeight="32" FontSize="12"
+                                                    Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                                                    Background="{ThemeResource ButtonBackground}" BorderBrush="{ThemeResource ButtonBorderBrush}"
+                                                    BorderThickness="1" Click="BtnWallpaperWe_Click"
+                                                    ToolTipService.ToolTip="列出 Wallpaper Engine 已下载的壁纸（视频 / 图片可直接用作背景）" />
                                             <Button x:Name="BtnWallpaperClear" Content="清除壁纸" MinWidth="90" MinHeight="32" FontSize="12"
                                                     Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
                                                     Background="{ThemeResource ButtonBackground}" BorderBrush="{ThemeResource ButtonBorderBrush}"
@@ -1651,7 +1681,7 @@
 
                         <!-- Left: cover + track info. EchoMusic rounded-square by
                              default; the vinyl disc returns when cover spin is on. -->
-                        <StackPanel x:Name="NowCoverColumn" Grid.Column="0" MinWidth="300" MaxWidth="340" Margin="20,0,8,0"
+                        <StackPanel x:Name="NowCoverColumn" Grid.Column="0" MinWidth="240" MaxWidth="340" Margin="20,0,8,0"
                                     VerticalAlignment="Center">
                             <Border x:Name="SquareCover" Width="272" Height="272" CornerRadius="20"
                                     HorizontalAlignment="Center" Margin="0,12,0,0"
@@ -1861,7 +1891,7 @@
                  Shows with a slide-up + fade; see ShowQueuePanel/HideQueuePanel. -->
             <Grid x:Name="QueuePanel" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
                   VerticalAlignment="Bottom" HorizontalAlignment="Right"
-                  Width="560" Height="340" Margin="10,0,10,0"
+                  MaxWidth="560" MaxHeight="340" Margin="10,0,10,0"
                   Background="{ThemeResource QueueAcrylic}" BorderBrush="{ThemeResource BorderSoft}"
                   BorderThickness="1" CornerRadius="14,14,0,0"
                   Visibility="Collapsed">

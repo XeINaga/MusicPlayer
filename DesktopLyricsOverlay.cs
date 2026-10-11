@@ -265,33 +265,39 @@ public sealed class DesktopLyricsOverlay : IDisposable
 
     private void EnsureSendLoop()
     {
-        if (_sendLoop != null)
-            return;
-        _sendLoop = Task.Run(async () =>
+        // Atomic check-then-act: two threads both seeing a null _sendLoop
+        // would each start a loop and drain the (SingleReader) channel
+        // interleaved, breaking FIFO ordering.
+        lock (_gate)
         {
-            var reader = _sendChannel.Reader;
-            while (await reader.WaitToReadAsync())
+            if (_sendLoop != null)
+                return;
+            _sendLoop = Task.Run(async () =>
             {
-                while (reader.TryRead(out var json))
+                var reader = _sendChannel.Reader;
+                while (await reader.WaitToReadAsync())
                 {
-                    try
+                    while (reader.TryRead(out var json))
                     {
-                        EnsureStarted();
-                        WriteToPipe(json);
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // overlay closed mid-drain — drop the rest
-                        return;
-                    }
-                    catch (Exception ex)
-                    {
-                        // Surface instead of an unobserved task exception.
-                        AppLog.WriteLyricCompletion($"桌面歌词命令发送失败: {ex.Message}");
+                        try
+                        {
+                            EnsureStarted();
+                            WriteToPipe(json);
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            // overlay closed mid-drain — drop the rest
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            // Surface instead of an unobserved task exception.
+                            AppLog.WriteLyricCompletion($"桌面歌词命令发送失败: {ex.Message}");
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
     /// <summary>Write to the already-connected pipe only — never starts anything.</summary>

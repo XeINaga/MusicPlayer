@@ -104,6 +104,9 @@ public sealed partial class MainWindow : Window
     private readonly List<ScrobbleEntry> _scrobbleQueue = new();
     private bool _scrobbleTimerRunning;
     private readonly DispatcherTimer _scrobbleTimer = new();
+    // Most recent scrobble upload task. The real exit path waits (bounded)
+    // on it so an in-flight HTTP batch is not dropped by process teardown.
+    private Task _lastScrobbleFlushTask = Task.CompletedTask;
 
     /// <summary>Lightweight DTO for the album grid (not a Track, just grouping metadata).</summary>
     private sealed class AlbumInfo
@@ -265,7 +268,9 @@ public sealed partial class MainWindow : Window
         // with the wrong policy (observed: the saved thin acrylic only
         // appeared after a manual material re-switch). Re-apply once on the
         // first activation, when the window is fully live; that is the exact
-        // same condition a manual switch runs under.
+        // same condition a manual switch runs under. The handler stays
+        // subscribed: it also restores the material when the window comes
+        // back from hidden (tray / single-instance wake).
         _materialReappliedOnActivate = false;
         Activated += OnFirstActivatedReapplyMaterial;
 
@@ -275,7 +280,8 @@ public sealed partial class MainWindow : Window
         // Restore the persisted sidebar state (icon-only rail or full).
         ApplySidebarCollapsed(_settings.SidebarCollapsed);
 
-        // Restore the persisted wallpaper (bottom-most image layer).
+        // Restore the persisted wallpaper (static image layer; the WE
+        // material applies its remembered library pick in ApplyWindowMaterial).
         ApplyWallpaper();
 
         UpdateProfileSubtitle();
@@ -294,15 +300,12 @@ public sealed partial class MainWindow : Window
             // cosmetic only
         }
 
-        // Mica window backdrop (Windows 11+): the desktop material tints the
-        // whole window. The layered fills in XAML are semi-transparent for
-        // exactly this case; on unsupported systems the opaque RootGrid
-        // fallback color stays and the layout looks the same as before.
-        if (Microsoft.UI.Composition.SystemBackdrops.MicaController.IsSupported())
-        {
-            SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop();
-            RootGrid.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-        }
+        // NOTE: no unconditional Mica backdrop here anymore. This block used
+        // to stomp over whatever material ApplyWindowMaterial() had already
+        // attached above (every startup briefly flashed Mica, pure-colour
+        // mode was punched through, and two backdrop controllers fought over
+        // the window); the "re-apply on first activation" patch below only
+        // masked that. ApplyWindowMaterial owns the backdrop exclusively.
 
         // Apply the persisted data/cache directory (default = %LOCALAPPDATA%\MusicPlayer).
         // Must run before any PlaylistStore / LyricBindingStore access below.
@@ -329,6 +332,11 @@ public sealed partial class MainWindow : Window
             v.CenterPoint = new System.Numerics.Vector3(
                 (float)(CoverDisc.ActualWidth / 2), (float)(CoverDisc.ActualHeight / 2), 0);
         };
+
+        // Queue panel sizing: keep the 560x340 ceiling but never exceed the
+        // actual window (a fixed size clipped straight through on small
+        // windows) — see UpdateQueuePanelBounds.
+        RootGrid.SizeChanged += (_, _) => UpdateQueuePanelBounds();
 
         // Sleep timer: fires once after the chosen interval to pause playback.
         _sleepTimer.Tick += OnSleepTimerTick;
@@ -536,20 +544,26 @@ public sealed partial class MainWindow : Window
     {
         try
         {
+            // Mark the hidden state first: the Activated handler re-applies
+            // the material when the window comes back (the compositor drops
+            // the backdrop target while hidden).
+            _windowHiddenSinceActivation = true;
             this.AppWindow.Show();
             this.Activate();
-            // Hiding the window makes the composition system drop the backdrop
-            // target; the controller survives but the glass does not come
-            // back on its own. Re-apply the material (rebuilds the controller
-            // and re-attaches the target).
-            ApplyWindowMaterial();
+            // The activation above normally re-applied the material already
+            // (and consumed the flag); this fallback only covers an
+            // activation event that never arrived.
+            if (_windowHiddenSinceActivation)
+            {
+                _windowHiddenSinceActivation = false;
+                ApplyWindowMaterial(force: true);
+            }
         }
         catch
         {
             // best-effort
         }
     }
-
     // ---------- Global hotkeys ----------
 
     private void EnableHotkeys()
@@ -2028,7 +2042,13 @@ public sealed partial class MainWindow : Window
             if (fe.FindName("Dim") is Border dim)
                 dim.Opacity = 0.32;
             if (fe.FindName("PlayBtn") is Button btn)
+            {
                 btn.Opacity = 1;
+                // The button starts hit-test-invisible (Opacity=0 in the
+                // template): a touch tap without hover pre-heat used to fall
+                // through onto the invisible button and trigger it.
+                btn.IsHitTestVisible = true;
+            }
         }
     }
 
@@ -2039,7 +2059,10 @@ public sealed partial class MainWindow : Window
             if (fe.FindName("Dim") is Border dim)
                 dim.Opacity = 0;
             if (fe.FindName("PlayBtn") is Button btn)
+            {
                 btn.Opacity = 0;
+                btn.IsHitTestVisible = false;
+            }
         }
     }
 
@@ -2060,7 +2083,11 @@ public sealed partial class MainWindow : Window
             return;
         row.Background = FindResource("RowHover") as Brush ?? RowHoverBrush;
         if (row.FindName("RowPlayNextBtn") is Button btn)
+        {
             btn.Opacity = 1;
+            // Starts hit-test-invisible (see Card_PointerEntered).
+            btn.IsHitTestVisible = true;
+        }
     }
 
     private void TrackRow_PointerExited(object sender, PointerRoutedEventArgs e)
@@ -2069,7 +2096,10 @@ public sealed partial class MainWindow : Window
             return;
         row.Background = null;
         if (row.FindName("RowPlayNextBtn") is Button btn)
+        {
             btn.Opacity = 0;
+            btn.IsHitTestVisible = false;
+        }
     }
 
     private void TrackGrid_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -2902,6 +2932,17 @@ public sealed partial class MainWindow : Window
     private void BtnQueueClose_Click(object sender, RoutedEventArgs e) =>
         HideQueuePanel();
 
+    /// <summary>Queue popup bounds: the 560x340 ceiling stays, but the panel
+    /// shrinks with the window instead of clipping through it. The panel
+    /// lives in RootGrid row 1 (below the 48px title bar) with a 10px bottom
+    /// margin, so those come off the height; the 10px side margins come off
+    /// the width. Runs on every RootGrid size change.</summary>
+    private void UpdateQueuePanelBounds()
+    {
+        QueuePanel.Width = Math.Max(0, Math.Min(560, RootGrid.ActualWidth - 20));
+        QueuePanel.Height = Math.Max(0, Math.Min(340, RootGrid.ActualHeight - 58));
+    }
+
     private void QueueDismissLayer_Tapped(object sender, TappedRoutedEventArgs e) =>
         HideQueuePanel();
 
@@ -3135,7 +3176,12 @@ public sealed partial class MainWindow : Window
         if (wasCurrent)
         {
             if (q.Count > 0)
-                _playback.MoveTo(Math.Min(idx, q.Count - 1));
+                // TakeOverAfterRemoval (not MoveTo): the survivor of the slot
+                // starts playing but must NOT be pressed into the shuffle
+                // history — a plain MoveTo polluted the random bag, so the
+                // first "previous" in random mode skipped a track that never
+                // played.
+                _playback.TakeOverAfterRemoval(Math.Min(idx, q.Count - 1));
             else
             {
                 _playback.Clear();
@@ -3541,16 +3587,23 @@ public sealed partial class MainWindow : Window
     }
 
     private void FlushScrobbleQueue()
+        => _ = FlushScrobbleQueueAsync();
+
+    /// <summary>Flush variant that surfaces the upload task: the real exit
+    /// path waits (bounded) on it so the HTTP batch survives teardown; the
+    /// periodic paths keep the plain fire-and-forget behaviour.</summary>
+    private Task FlushScrobbleQueueAsync()
     {
         _scrobbleTimer.Stop();
         _scrobbleTimerRunning = false;
 
         if (_scrobbleQueue.Count == 0)
-            return;
+            return _lastScrobbleFlushTask; // maybe still mid-flight
 
         var batch = new List<ScrobbleEntry>(_scrobbleQueue);
         _scrobbleQueue.Clear();
-        _ = Task.Run(async () => await _lastFm.ScrobbleBatchAsync(batch));
+        _lastScrobbleFlushTask = Task.Run(async () => await _lastFm.ScrobbleBatchAsync(batch));
+        return _lastScrobbleFlushTask;
     }
 
     // ---------- Lyrics ----------
@@ -4066,8 +4119,15 @@ public sealed partial class MainWindow : Window
             _lyricScrollTarget = _lyricPanels[idx];
             _dispatcher.TryEnqueue(ScrollLyricToCurrent);
         }
-
-        PushDesktop(idx);
+        else if (idx < 0)
+        {
+            // Clear the overlay when there is no current line (progress -1 is
+            // the "not word-timed / clear" protocol value). Unconditionally
+            // re-pushing here used to clobber the real progress pushed right
+            // above with -1, so every line change flashed the karaoke sweep
+            // back to unsung for one frame.
+            PushDesktop(idx);
+        }
     }
 
     /// <summary>
@@ -5625,9 +5685,10 @@ public sealed partial class MainWindow : Window
         var material = _settings.WindowMaterial;
         MaterialMica.IsChecked = material == "Mica";
         MaterialMicaAlt.IsChecked = material == "MicaAlt";
-        MaterialAcrylic.IsChecked = material is not ("Mica" or "MicaAlt" or "AcrylicThin" or "None");
+        MaterialAcrylic.IsChecked = material is not ("Mica" or "MicaAlt" or "AcrylicThin" or "None" or "WallpaperEngine");
         MaterialAcrylicThin.IsChecked = material == "AcrylicThin";
         MaterialNone.IsChecked = material == "None";
+        MaterialWallpaperEngine.IsChecked = material == "WallpaperEngine";
         // Wallpaper controls: Range properties are set in code only (XAML
         // Range assignment corrupts the XBF — see the Slider rule in notes).
         WallpaperOpacitySlider.Minimum = 0;
@@ -5986,11 +6047,25 @@ public sealed partial class MainWindow : Window
         ApplyThemeMode();
     }
 
+    // Inputs of the last ApplyWindowMaterial run. Identical inputs are a
+    // no-op: theme toggles, tray restores and activation patches all re-run
+    // this without changing the material, and a full re-run used to rebuild
+    // the backdrop controller and restart the WE video from 0:00. The video
+    // source is derived from WallpaperWeLast, so the video path is covered
+    // by the key; the theme switch itself needs no controller rebuild — the
+    // Context inside WindowMaterialService follows ActualThemeChanged.
+    private WindowMaterialKind? _lastMaterialKind;
+    private string? _lastMaterialWeLast;
+    private string? _lastMaterialWallpaperPath;
+
     /// <summary>Apply the persisted window material (tubatools-style four
     /// variants, plus pure colour) to this window. Pure colour swaps the
     /// root's translucent glass tint for the opaque theme background — with
-    /// no backdrop behind it the translucent tint would just darken.</summary>
-    private void ApplyWindowMaterial()
+    /// no backdrop behind it the translucent tint would just darken.
+    /// <paramref name="force"/> skips the idempotency check — required when
+    /// the compositor dropped the backdrop target while the window was
+    /// hidden (tray / wake-up restore).</summary>
+    private void ApplyWindowMaterial(bool force = false)
     {
         var kind = _settings.WindowMaterial switch
         {
@@ -5998,23 +6073,125 @@ public sealed partial class MainWindow : Window
             "MicaAlt" => WindowMaterialKind.MicaAlt,
             "AcrylicThin" => WindowMaterialKind.AcrylicThin,
             "None" => WindowMaterialKind.None,
+            "WallpaperEngine" => WindowMaterialKind.WallpaperEngine,
             _ => WindowMaterialKind.Acrylic,
         };
+        var weLast = _settings.WallpaperWeLast ?? "";
+        var wallpaperPath = _settings.WallpaperPath ?? "";
+
+        if (!force
+            && kind == _lastMaterialKind
+            && string.Equals(weLast, _lastMaterialWeLast, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(wallpaperPath, _lastMaterialWallpaperPath, StringComparison.OrdinalIgnoreCase))
+        {
+            // Nothing changed: only the theme-dependent root brush needs
+            // re-resolving (the brush instance changes with the theme; see
+            // ApplyThemeMode). Everything else — backdrop controller, WE
+            // capture, video playback — is already in place.
+            RootGrid.Background = kind == WindowMaterialKind.None || kind == WindowMaterialKind.WallpaperEngine
+                ? FindResource("AppBackground") as Microsoft.UI.Xaml.Media.Brush
+                : FindResource("MainGlassBg") as Microsoft.UI.Xaml.Media.Brush;
+            return;
+        }
+        _lastMaterialKind = kind;
+        _lastMaterialWeLast = weLast;
+        _lastMaterialWallpaperPath = wallpaperPath;
+
+        if (kind == WindowMaterialKind.WallpaperEngine)
+        {
+            // No backdrop: the WE content (video / image / capture) fully
+            // covers the root, which fills opaque.
+            WindowMaterialService.Apply(this, WindowMaterialKind.None);
+            RootGrid.Background = FindResource("AppBackground") as Microsoft.UI.Xaml.Media.Brush;
+            BtnWallpaperWe.IsEnabled = true;
+            BtnWallpaperClear.IsEnabled = !string.IsNullOrEmpty(wallpaperPath);
+
+            // A static image picked through the generic wallpaper picker is
+            // the newest explicit user choice in this mode too (the library
+            // picker clears WallpaperPath), so it outranks the remembered
+            // library pick — otherwise the next re-apply here would clobber
+            // it with the capture again.
+            if (!string.IsNullOrEmpty(wallpaperPath) && File.Exists(wallpaperPath))
+            {
+                StopWallpaperEngineCapture();
+                WallpaperImage.Source = new BitmapImage(new Uri(wallpaperPath));
+                WallpaperImage.Stretch = _settings.WallpaperFill
+                    ? Stretch.Fill
+                    : Stretch.Uniform;
+                WallpaperImage.Opacity = _settings.WallpaperOpacity;
+                WallpaperImage.Visibility = Visibility.Visible;
+                return;
+            }
+
+            // Re-apply the wallpaper remembered from the library picker.
+            var ext = string.IsNullOrEmpty(weLast) ? "" : Path.GetExtension(weLast).ToLowerInvariant();
+            if (!string.IsNullOrEmpty(weLast) && File.Exists(weLast) &&
+                (ext is ".mp4" or ".webm" or ".mov" or ".mkv" or ".avi"))
+            {
+                StartVideoWallpaper(weLast);
+                return;
+            }
+            if (!string.IsNullOrEmpty(weLast) && File.Exists(weLast) &&
+                (ext is ".jpg" or ".jpeg" or ".png" or ".bmp"))
+            {
+                StopWallpaperEngineCapture();
+                WallpaperImage.Source = new BitmapImage(new Uri(weLast));
+                WallpaperImage.Stretch = _settings.WallpaperFill
+                    ? Stretch.Fill
+                    : Stretch.Uniform;
+                WallpaperImage.Opacity = _settings.WallpaperOpacity;
+                WallpaperImage.Visibility = Visibility.Visible;
+                return;
+            }
+
+            // Nothing (or nothing playable) remembered: fall back to
+            // capturing whatever WE renders on the desktop.
+            StartWallpaperEngineCapture();
+            return;
+        }
+        StopWallpaperEngineCapture();
         WindowMaterialService.Apply(this, kind);
         RootGrid.Background = kind == WindowMaterialKind.None
             ? FindResource("AppBackground") as Microsoft.UI.Xaml.Media.Brush
             : FindResource("MainGlassBg") as Microsoft.UI.Xaml.Media.Brush;
+        // The library picker requires the WE material mode.
+        BtnWallpaperWe.IsEnabled = false;
+        BtnWallpaperClear.IsEnabled = !string.IsNullOrEmpty(_settings.WallpaperPath);
     }
 
     private bool _materialReappliedOnActivate;
 
+    // Set when the window goes hidden (close-to-tray). The compositor drops
+    // the backdrop target for a hidden window and the glass does not come
+    // back on its own, so the next activation re-applies the material.
+    private bool _windowHiddenSinceActivation;
+
     private void OnFirstActivatedReapplyMaterial(object sender, WindowActivatedEventArgs e)
     {
-        if (_materialReappliedOnActivate || e.WindowActivationState == WindowActivationState.Deactivated)
+        if (e.WindowActivationState == WindowActivationState.Deactivated)
             return;
-        _materialReappliedOnActivate = true;
-        Activated -= OnFirstActivatedReapplyMaterial;
-        ApplyWindowMaterial();
+
+        // Startup material race: attaching the backdrop controller from the
+        // constructor — before the window has ever been activated — renders
+        // with the wrong policy (observed: the saved thin acrylic only
+        // appeared after a manual material re-switch). Force one re-apply on
+        // the first activation, when the window is fully live; that is the
+        // exact same condition a manual switch runs under.
+        if (!_materialReappliedOnActivate)
+        {
+            _materialReappliedOnActivate = true;
+            ApplyWindowMaterial(force: true);
+            return;
+        }
+
+        // Wake-up restore (hidden → visible: tray restore, or the second-
+        // instance ShowWindow that does not re-apply the material itself).
+        // Ordinary activations hit the idempotency key and cost nothing.
+        if (_windowHiddenSinceActivation)
+        {
+            _windowHiddenSinceActivation = false;
+            ApplyWindowMaterial(force: true);
+        }
     }
 
     private void WindowMaterial_Checked(object sender, RoutedEventArgs e)
@@ -6023,10 +6200,46 @@ public sealed partial class MainWindow : Window
             return;
         if (sender is RadioButton rb && rb.Tag is string tag)
         {
+            // Picking a material means leaving the video-wallpaper mode
+            // (the library pick stays remembered for the next WE switch).
+            StopVideoWallpaper();
             _settings.WindowMaterial = tag;
             SettingsStore.Save(_settings);
             ApplyWindowMaterial();
         }
+    }
+
+    // ---------- Wallpaper Engine live background ----------
+
+    private WallpaperEngineCaptureService? _weCapture;
+
+    private void StartWallpaperEngineCapture()
+    {
+        _weCapture ??= new WallpaperEngineCaptureService();
+        _weCapture.BitmapReplaced -= OnWeBitmapReplaced;
+        _weCapture.BitmapReplaced += OnWeBitmapReplaced;
+        var hwnd = WindowNative.GetWindowHandle(this);
+        _weCapture.Start(_dispatcher, hwnd);
+        OnWeBitmapReplaced(_weCapture.Bitmap!);
+    }
+
+    private void StopWallpaperEngineCapture()
+    {
+        _weCapture?.Stop();
+        if (_weCapture != null)
+            _weCapture.BitmapReplaced -= OnWeBitmapReplaced;
+        ApplyWallpaper(); // restore the static wallpaper layer
+    }
+
+    private void OnWeBitmapReplaced(WriteableBitmap bmp)
+    {
+        WallpaperImage.Source = bmp;
+        WallpaperImage.Stretch = Stretch.Fill;
+        // Follow the shared opacity instead of forcing 1: the slider keeps
+        // working live in capture mode and a resize re-apply no longer
+        // resets a dimmed capture to fully opaque.
+        WallpaperImage.Opacity = _settings.WallpaperOpacity;
+        WallpaperImage.Visibility = Visibility.Visible;
     }
 
     // ---------- Window wallpaper ----------
@@ -6035,6 +6248,13 @@ public sealed partial class MainWindow : Window
     /// layer of the root grid.</summary>
     private void ApplyWallpaper()
     {
+        // WE capture mode owns the wallpaper layer — frames arrive through
+        // OnWeBitmapReplaced. Re-running the static-image logic here (e.g.
+        // from the fill toggle) used to blank the captured frame back to the
+        // opaque root background.
+        if (_weCapture?.IsRunning == true)
+            return;
+
         var path = _settings.WallpaperPath;
         if (!string.IsNullOrEmpty(path) && File.Exists(path))
         {
@@ -6114,6 +6334,13 @@ public sealed partial class MainWindow : Window
             _settings.WallpaperOpacity = 0.5;
         SettingsStore.Save(_settings);
 
+        // A static image replaces the video wallpaper (mutually exclusive
+        // background layers). In WE capture mode the capture must also stop,
+        // otherwise it keeps feeding frames over the freshly picked image and
+        // the next OnWeBitmapReplaced (any resize) pushes it out again.
+        StopVideoWallpaper();
+        StopWallpaperEngineCapture();
+
         _suppressSettingEvents = true;
         try
         {
@@ -6139,8 +6366,115 @@ public sealed partial class MainWindow : Window
             // best effort — the setting is cleared regardless
         }
         _settings.WallpaperPath = "";
+        StopVideoWallpaper();
         SettingsStore.Save(_settings);
         ApplyWallpaper();
+        // In WallpaperEngine material mode the static image just cleared was
+        // covering the capture/video: re-run the material so the remembered
+        // WE wallpaper (or the desktop capture) comes back.
+        if (_settings.WindowMaterial == "WallpaperEngine")
+            ApplyWindowMaterial();
+    }
+
+    // ---------- Wallpaper Engine library ----------
+
+    private void BtnWallpaperWe_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnWallpaperWeAsync, "选择 Wallpaper Engine 壁纸");
+
+    private async Task BtnWallpaperWeAsync()
+    {
+        var win = new WallpaperLibraryWindow(_settings.ThemeMode != "Light");
+        var done = new TaskCompletionSource<WeWallpaperInfo?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        win.Closed += (_, _) => done.TrySetResult(win.Selected);
+        win.Activate();
+
+        var picked = await done.Task;
+        if (picked == null)
+            return;
+
+        // Video and image wallpapers render natively; scene/web/application
+        // need the WE scene engine and fall back to the capture mode.
+        bool renderable = picked.Type is "video" or "image";
+        if (renderable)
+            _settings.WallpaperWeLast = picked.FilePath;
+        _settings.WallpaperPath = "";
+        StopVideoWallpaper();
+        StopWallpaperEngineCapture();
+        if (renderable)
+        {
+            // Selecting from the library switches to the WE material, which
+            // re-applies the remembered pick (video plays / image shows).
+            _settings.WindowMaterial = "WallpaperEngine";
+            SettingsStore.Save(_settings);
+            _suppressSettingEvents = true;
+            try { MaterialWallpaperEngine.IsChecked = true; }
+            finally { _suppressSettingEvents = false; }
+            ApplyWindowMaterial();
+            ShowInfoBar($"已应用：{picked.Title}（{picked.TypeDisplay}）");
+        }
+        else
+        {
+            SettingsStore.Save(_settings);
+            ApplyWindowMaterial();
+            ShowInfoBar("场景 / 网页类壁纸请在 Wallpaper Engine 中启用后，使用材质区的「Wallpaper Engine（动态桌面壁纸）」模式捕获桌面画面。");
+        }
+    }
+
+    /// <summary>Play a Wallpaper Engine video as the looping muted background
+    /// through a MediaPlayerElement (GPU decode, no CPU copy). Opacity and
+    /// stretch follow the shared wallpaper settings.</summary>
+    private void StartVideoWallpaper(string videoPath)
+    {
+        _weCapture?.Stop();
+        WallpaperImage.Source = null;
+        WallpaperImage.Visibility = Visibility.Collapsed;
+
+        // Same video still assigned and visible: keep playing. Rebuilding the
+        // source on every re-apply (theme toggle, tray restore, activation
+        // patch) used to restart the loop from 0:00.
+        var keepPlaying =
+            _videoWallpaperSource != null
+            && string.Equals(_videoWallpaperSourcePath, videoPath, StringComparison.OrdinalIgnoreCase)
+            && WallpaperVideoPlayer.Visibility == Visibility.Visible;
+        if (!keepPlaying)
+        {
+            var old = _videoWallpaperSource;
+            _videoWallpaperSource = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(videoPath));
+            _videoWallpaperSourcePath = videoPath;
+            WallpaperVideoPlayer.Source = _videoWallpaperSource;
+            old?.Dispose(); // only after the player dropped the reference
+            WallpaperVideoPlayer.MediaPlayer.IsMuted = true;
+            WallpaperVideoPlayer.MediaPlayer.IsLoopingEnabled = true;
+            WallpaperVideoPlayer.MediaPlayer.Play();
+        }
+        WallpaperVideoPlayer.Stretch = _settings.WallpaperFill
+            ? Stretch.Fill
+            : Stretch.Uniform;
+        WallpaperVideoPlayer.Opacity = _settings.WallpaperOpacity;
+        WallpaperVideoPlayer.Visibility = Visibility.Visible;
+    }
+
+    // Currently assigned video-wallpaper source. MediaSource is IDisposable:
+    // replaced / stopped sources are released here instead of leaking.
+    private Windows.Media.Core.MediaSource? _videoWallpaperSource;
+    private string? _videoWallpaperSourcePath;
+
+    private void StopVideoWallpaper()
+    {
+        try
+        {
+            WallpaperVideoPlayer.MediaPlayer?.Pause();
+            WallpaperVideoPlayer.Source = null;
+        }
+        catch
+        {
+            // player may already be torn down
+        }
+        var old = _videoWallpaperSource;
+        _videoWallpaperSource = null;
+        _videoWallpaperSourcePath = null;
+        old?.Dispose();
+        WallpaperVideoPlayer.Visibility = Visibility.Collapsed;
     }
 
     private void WallpaperOpacitySlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
@@ -6149,8 +6483,13 @@ public sealed partial class MainWindow : Window
             return;
         _settings.WallpaperOpacity = WallpaperOpacitySlider.Value / 100.0;
         WallpaperImage.Opacity = _settings.WallpaperOpacity;
+        WallpaperVideoPlayer.Opacity = _settings.WallpaperOpacity;
         WallpaperOpacityText.Text = $"{(int)Math.Round(WallpaperOpacitySlider.Value)}%";
-        SettingsStore.Save(_settings);
+        // Dragging fires one event per tick: a synchronous SettingsStore.Save
+        // here (DPAPI + serialize + temp-file replace, all on the UI thread)
+        // stalled the slider. Coalesce instead — the opacity itself is still
+        // applied instantly above.
+        ScheduleSettingsSave();
     }
 
     private void WallpaperFillToggle_Toggled(object sender, RoutedEventArgs e)
@@ -6160,6 +6499,11 @@ public sealed partial class MainWindow : Window
         _settings.WallpaperFill = WallpaperFillToggle.IsOn;
         SettingsStore.Save(_settings);
         ApplyWallpaper();
+        // Same semantics as StartVideoWallpaper: the fill switch governs the
+        // video layer too, not only the static image.
+        WallpaperVideoPlayer.Stretch = _settings.WallpaperFill
+            ? Stretch.Fill
+            : Stretch.Uniform;
     }
 
     // ---------- Sidebar collapse ----------
@@ -6762,24 +7106,42 @@ public sealed partial class MainWindow : Window
 
     private void MainWindow_Closed(object? sender, WindowEventArgs e)
     {
-        // Scrobbles sitting in the 2s debounce window (or mid-flight batch)
-        // used to be dropped on exit.
-        FlushScrobbleQueue();
         // "最小化到托盘": cancel the close, hide the window and keep running
         // (playback and the desktop lyrics stay alive). Real exit paths set
         // _forceExit first (tray menu) or use the "Exit" setting.
         if (!_forceExit && _settings.CloseAction == "Tray")
         {
+            // Fire-and-forget is fine here: the process stays alive and the
+            // 2s debounce window flushes on the background task.
+            FlushScrobbleQueue();
             e.Handled = true;
             try { this.AppWindow.Hide(); }
             catch { /* best-effort */ }
             EnsureTrayIcon();
+            // Hidden window = nothing to composite: pause the WE capture and
+            // resume it when the window is restored.
+            _weCapture?.Stop();
+            // Remember the hidden state: the next activation re-applies the
+            // window material (the compositor drops the backdrop target for
+            // a hidden window; see OnFirstActivatedReapplyMaterial).
+            _windowHiddenSinceActivation = true;
             if (!_trayHintShown)
             {
                 _trayHintShown = true;
                 _tray?.ShowBalloon("MusicPlayer", "已最小化到托盘，点击托盘图标可恢复窗口。");
             }
             return;
+        }
+
+        // Scrobbles sitting in the 2s debounce window (or a mid-flight batch)
+        // used to be dropped on exit: the process was gone before the HTTP
+        // request went out. Wait — bounded, and faults ignored — for the
+        // upload task; batches that still miss the window are persisted by
+        // LastFmService and retried on the next startup.
+        try { FlushScrobbleQueueAsync().Wait(TimeSpan.FromSeconds(3)); }
+        catch
+        {
+            // A faulted/timed-out batch must not block teardown.
         }
 
         _tray?.Dispose();
@@ -6799,6 +7161,17 @@ public sealed partial class MainWindow : Window
             // best effort
         }
         _desktopLyrics = null;
+
+        // Real exit only: release the capture's native hooks and bitmaps
+        // (the tray-hide path above keeps the service alive via Stop()).
+        // The video wallpaper layer goes down with the window as well.
+        StopVideoWallpaper();
+        if (_weCapture != null)
+        {
+            _weCapture.BitmapReplaced -= OnWeBitmapReplaced;
+            _weCapture.Dispose();
+            _weCapture = null;
+        }
 
         PlaylistStore.SaveProgress(_playback.CurrentIndex, _playback.Position, CurrentPath());
 
