@@ -102,6 +102,8 @@ public static class WindowMaterialService
         ISystemBackdropControllerWithTargets controller;
         switch (kind)
         {
+            case WindowMaterialKind.None:
+                return; // pure colour: no backdrop, root fills opaque
             case WindowMaterialKind.Mica:
             case WindowMaterialKind.MicaAlt:
                 if (!MicaController.IsSupported()) return;
@@ -169,11 +171,14 @@ public static class WindowMaterialService
     }
 }
 
-/// <summary>The four window material variants offered in settings.</summary>
 public enum WindowMaterialKind
 {
     Mica,
     MicaAlt,
     Acrylic,
     AcrylicThin,
+
+    /// <summary>No backdrop at all: the root fills with the opaque theme
+    /// background (MainWindow swaps MainGlassBg for AppBackground).</summary>
+    None,
 }

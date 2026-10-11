@@ -275,6 +275,9 @@ public sealed partial class MainWindow : Window
         // Restore the persisted sidebar state (icon-only rail or full).
         ApplySidebarCollapsed(_settings.SidebarCollapsed);
 
+        // Restore the persisted wallpaper (bottom-most image layer).
+        ApplyWallpaper();
+
         UpdateProfileSubtitle();
         UpdateQueueBadge();
         UpdateSoundFxIcon();
@@ -5622,8 +5625,16 @@ public sealed partial class MainWindow : Window
         var material = _settings.WindowMaterial;
         MaterialMica.IsChecked = material == "Mica";
         MaterialMicaAlt.IsChecked = material == "MicaAlt";
-        MaterialAcrylic.IsChecked = material is not ("Mica" or "MicaAlt" or "AcrylicThin");
+        MaterialAcrylic.IsChecked = material is not ("Mica" or "MicaAlt" or "AcrylicThin" or "None");
         MaterialAcrylicThin.IsChecked = material == "AcrylicThin";
+        MaterialNone.IsChecked = material == "None";
+        // Wallpaper controls: Range properties are set in code only (XAML
+        // Range assignment corrupts the XBF — see the Slider rule in notes).
+        WallpaperOpacitySlider.Minimum = 0;
+        WallpaperOpacitySlider.Maximum = 100;
+        WallpaperOpacitySlider.Value = _settings.WallpaperOpacity * 100;
+        WallpaperOpacityText.Text = $"{(int)Math.Round(_settings.WallpaperOpacity * 100)}%";
+        WallpaperFillToggle.IsOn = _settings.WallpaperFill;
         LyricOpacitySlider.Value = _settings.LyricBgOpacity * 100;
         LyricBoldToggle.IsOn = _settings.LyricBold;
         LyricAlignCombo.SelectedIndex = _settings.LyricAlign == "Left" ? 1 : 0;
@@ -5976,7 +5987,9 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>Apply the persisted window material (tubatools-style four
-    /// variants) to this window.</summary>
+    /// variants, plus pure colour) to this window. Pure colour swaps the
+    /// root's translucent glass tint for the opaque theme background — with
+    /// no backdrop behind it the translucent tint would just darken.</summary>
     private void ApplyWindowMaterial()
     {
         var kind = _settings.WindowMaterial switch
@@ -5984,9 +5997,13 @@ public sealed partial class MainWindow : Window
             "Mica" => WindowMaterialKind.Mica,
             "MicaAlt" => WindowMaterialKind.MicaAlt,
             "AcrylicThin" => WindowMaterialKind.AcrylicThin,
+            "None" => WindowMaterialKind.None,
             _ => WindowMaterialKind.Acrylic,
         };
         WindowMaterialService.Apply(this, kind);
+        RootGrid.Background = kind == WindowMaterialKind.None
+            ? FindResource("AppBackground") as Microsoft.UI.Xaml.Media.Brush
+            : FindResource("MainGlassBg") as Microsoft.UI.Xaml.Media.Brush;
     }
 
     private bool _materialReappliedOnActivate;
@@ -6010,6 +6027,139 @@ public sealed partial class MainWindow : Window
             SettingsStore.Save(_settings);
             ApplyWindowMaterial();
         }
+    }
+
+    // ---------- Window wallpaper ----------
+
+    /// <summary>Load the persisted wallpaper (if any) into the bottom-most
+    /// layer of the root grid.</summary>
+    private void ApplyWallpaper()
+    {
+        var path = _settings.WallpaperPath;
+        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+        {
+            try
+            {
+                WallpaperImage.Source = new BitmapImage(new Uri(path));
+                WallpaperImage.Opacity = _settings.WallpaperOpacity;
+                // Stretch (Fill) distorts the image to cover the whole window;
+                // Uniform scales it down so the entire image stays visible.
+                WallpaperImage.Stretch = _settings.WallpaperFill
+                    ? Stretch.Fill
+                    : Stretch.Uniform;
+                WallpaperImage.Visibility = Visibility.Visible;
+                WallpaperFileText.Text = Path.GetFileName(path);
+                BtnWallpaperClear.IsEnabled = true;
+                return;
+            }
+            catch
+            {
+                // Unreadable image: fall through to the empty state.
+            }
+        }
+        WallpaperImage.Source = null;
+        WallpaperImage.Visibility = Visibility.Collapsed;
+        WallpaperFileText.Text = "未设置";
+        BtnWallpaperClear.IsEnabled = false;
+    }
+
+    private void BtnWallpaperPick_Click(object sender, RoutedEventArgs e)
+        => SafeRun(BtnWallpaperPickAsync, "选择壁纸");
+
+    private async Task BtnWallpaperPickAsync()
+    {
+        var picker = new FileOpenPicker();
+        InitPicker(picker);
+        picker.ViewMode = PickerViewMode.Thumbnail;
+        picker.SuggestedStartLocation = PickerLocationId.PicturesLibrary;
+        foreach (var ext in new[] { ".jpg", ".jpeg", ".png", ".bmp" })
+            picker.FileTypeFilter.Add(ext);
+
+        var file = await picker.PickSingleFileAsync();
+        if (file == null)
+            return;
+
+        // Crop dialog: the frame ratio locks to the main window's client
+        // aspect, so the cropped image covers the window with no distortion.
+        double ratio = Math.Max(0.5, RootGrid.ActualWidth / Math.Max(1, RootGrid.ActualHeight));
+        WallpaperCropWindow cropWin;
+        try
+        {
+            cropWin = new WallpaperCropWindow(file.Path, ratio, _settings.ThemeMode != "Light");
+            cropWin.Activate();
+        }
+        catch (Exception ex)
+        {
+            // Surface the inner XAML/parse detail instead of a bare
+            // "XAML parsing failed" so a broken element is identifiable.
+            var detail = ex.Message;
+            var inner = ex.InnerException;
+            while (inner != null)
+            {
+                detail += " ← " + inner.Message;
+                inner = inner.InnerException;
+            }
+            throw new Exception(detail);
+        }
+        var done = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        cropWin.Closed += (_, _) => done.TrySetResult(cropWin.ResultPath);
+        cropWin.Activate();
+
+        var result = await done.Task;
+        if (string.IsNullOrEmpty(result) || !File.Exists(result))
+            return;
+
+        _settings.WallpaperPath = result;
+        if (_settings.WallpaperOpacity <= 0)
+            _settings.WallpaperOpacity = 0.5;
+        SettingsStore.Save(_settings);
+
+        _suppressSettingEvents = true;
+        try
+        {
+            WallpaperOpacitySlider.Value = _settings.WallpaperOpacity * 100;
+        }
+        finally
+        {
+            _suppressSettingEvents = false;
+        }
+        WallpaperOpacityText.Text = $"{(int)Math.Round(_settings.WallpaperOpacity * 100)}%";
+        ApplyWallpaper();
+    }
+
+    private void BtnWallpaperClear_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(_settings.WallpaperPath))
+                File.Delete(_settings.WallpaperPath);
+        }
+        catch
+        {
+            // best effort — the setting is cleared regardless
+        }
+        _settings.WallpaperPath = "";
+        SettingsStore.Save(_settings);
+        ApplyWallpaper();
+    }
+
+    private void WallpaperOpacitySlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.WallpaperOpacity = WallpaperOpacitySlider.Value / 100.0;
+        WallpaperImage.Opacity = _settings.WallpaperOpacity;
+        WallpaperOpacityText.Text = $"{(int)Math.Round(WallpaperOpacitySlider.Value)}%";
+        SettingsStore.Save(_settings);
+    }
+
+    private void WallpaperFillToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.WallpaperFill = WallpaperFillToggle.IsOn;
+        SettingsStore.Save(_settings);
+        ApplyWallpaper();
     }
 
     // ---------- Sidebar collapse ----------
@@ -6112,6 +6262,10 @@ public sealed partial class MainWindow : Window
         {
             _applyingThemeMode = false;
         }
+
+        // Pure-colour mode fills the root from the theme dictionaries — the
+        // brush instance changes with the theme, so re-resolve it.
+        ApplyWindowMaterial();
     }
 
     /// <summary>Resolves a resource key the way the {ThemeResource} markup extension does.

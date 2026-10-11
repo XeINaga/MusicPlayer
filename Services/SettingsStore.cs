@@ -38,6 +38,23 @@ public sealed class AppSettings
     public bool SidebarCollapsed { get; set; }
 
     /// <summary>
+    /// Custom wallpaper image (copied next to settings.json on pick). Empty =
+    /// no wallpaper; the image composites over the window material with
+    /// <see cref="WallpaperOpacity"/>.
+    /// </summary>
+    public string WallpaperPath { get; set; } = "";
+
+    /// <summary>Wallpaper opacity 0..1 (1 = fully covering the material).</summary>
+    public double WallpaperOpacity { get; set; } = 0.5;
+
+    /// <summary>
+    /// Wallpaper stretch: true = Fill (stretch to cover the window, the image
+    /// distorts), false = Uniform (scale to show the whole image, the sides
+    /// show the material/colour beneath).
+    /// </summary>
+    public bool WallpaperFill { get; set; }
+
+    /// <summary>
     /// One-shot migration flag: pre-EchoMusic installs stored the old defaults
     /// (Dark + QQ green). On first load after the UI rework they are switched
     /// to the EchoMusic look once; anything the user customised afterwards is

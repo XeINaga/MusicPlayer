@@ -790,10 +790,35 @@ static void ApplyCommand(const std::string& line) {
         LARGE_INTEGER now{}, freq{};
         QueryPerformanceCounter(&now);
         QueryPerformanceFrequency(&freq);
+
+        auto newOrig = Utf8ToWide(a && a->type == JsonVal::STR ? a->str : "");
+        auto newRoma = Utf8ToWide(r && r->type == JsonVal::STR ? r->str : "");
+        auto newTrans = Utf8ToWide(tr && tr->type == JsonVal::STR ? tr->str : "");
+
         EnterCriticalSection(&g_cs);
-        g_state.orig  = Utf8ToWide(a && a->type == JsonVal::STR ? a->str : "");
-        g_state.roma  = Utf8ToWide(r && r->type == JsonVal::STR ? r->str : "");
-        g_state.trans = Utf8ToWide(tr && tr->type == JsonVal::STR ? tr->str : "");
+        // Jitter guard: within the same line the progress must never move
+        // backward. The host's position reads are quantized and occasionally
+        // read a stale value; accepting a slightly-backward sample made the
+        // sweep visibly jerk back, then race forward again, over and over.
+        // Line changes (different text) and real seeks (well past the
+        // threshold) are still accepted.
+        bool sameLine = newOrig == g_state.orig && newRoma == g_state.roma && newTrans == g_state.trans;
+        if (sameLine && newProg >= 0 && g_state.prog >= 0) {
+            double dtNow = (double)(now.QuadPart - g_state.progAt.QuadPart) / (double)freq.QuadPart;
+            double expected = g_state.prog + g_state.progRate * dtNow;
+            if (newProg < expected - 0.05) {
+                // Backward seek inside the line — fall through and accept.
+            } else if (newProg < expected - 0.004) {
+                // Small backward jitter: ignore the sample entirely and keep
+                // extrapolating from the last good one.
+                LeaveCriticalSection(&g_cs);
+                return;
+            }
+        }
+
+        g_state.orig = newOrig;
+        g_state.roma = newRoma;
+        g_state.trans = newTrans;
         if (newProg >= 0 && g_state.prog >= 0 && g_state.progPrev >= 0)
         {
             double dt = (double)(g_state.progAt.QuadPart - g_state.progPrevAt.QuadPart) / (double)freq.QuadPart;
