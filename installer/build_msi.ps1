@@ -42,11 +42,14 @@ Write-Host "1/4  dotnet publish -c Release (self-contained, trims locales) ..." 
 if (Test-Path $publishDir) {
     Remove-Item "$publishDir/*" -Recurse -Force -ErrorAction SilentlyContinue
 }
-# Self-contained is REQUIRED: the machines building/running this have no x64
-# .NET 10 runtime installed (only x86), so a framework-dependent publish
-# crashes on launch with "No frameworks were found" and the MSI could not
-# run on a machine without the runtime.
-dotnet publish -c Release -r win-x64 --self-contained true
+# Framework-dependent on purpose: the MSI targets machines with the
+# "Windows Desktop Runtime 10.0 x64" installed (the developer machine has
+# 10.0.12 x64). Do NOT pass --self-contained here: a self-contained publish
+# would drop the .NET runtime files into bin publish, and mixing them into
+# the app dir makes the apphost resolve the (incomplete) local runtime
+# instead of the installed one — crashing with a misleading
+# "No frameworks were found" even though the runtime IS installed.
+dotnet publish -c Release
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
 Ensure-Ffmpeg
 
