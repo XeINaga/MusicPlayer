@@ -42,7 +42,11 @@ Write-Host "1/4  dotnet publish -c Release (self-contained, trims locales) ..." 
 if (Test-Path $publishDir) {
     Remove-Item "$publishDir/*" -Recurse -Force -ErrorAction SilentlyContinue
 }
-dotnet publish -c Release
+# Self-contained is REQUIRED: the machines building/running this have no x64
+# .NET 10 runtime installed (only x86), so a framework-dependent publish
+# crashes on launch with "No frameworks were found" and the MSI could not
+# run on a machine without the runtime.
+dotnet publish -c Release -r win-x64 --self-contained true
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
 Ensure-Ffmpeg
 
