@@ -468,6 +468,12 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <!-- Custom wallpaper layer: bottom-most child, spans titlebar + body.
+             Opacity is user-set; it composites OVER the window material /
+             pure-colour root background. -->
+        <Image x:Name="WallpaperImage" Grid.RowSpan="2" Stretch="UniformToFill"
+               Visibility="Collapsed" IsHitTestVisible="False" />
+
         <!-- Title bar strip: content extends into the caption area (see
              ExtendsContentIntoTitleBar / SetTitleBar in code-behind). The whole
              strip is the drag region; system caption buttons sit on the right. -->
@@ -935,15 +941,16 @@
                                             <TextBlock Text="主窗口背景的云母 / 磨砂玻璃效果（系统关闭透明效果时显示为纯色）" Style="{StaticResource SettingsHint}" />
                                         </StackPanel>
                                         <Grid ColumnSpacing="10" RowSpacing="10">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Grid.RowDefinitions>
-                                                <RowDefinition Height="Auto" />
-                                                <RowDefinition Height="Auto" />
-                                            </Grid.RowDefinitions>
-                                            <RadioButton x:Name="MaterialMica" Grid.Row="0" Grid.Column="0" GroupName="WindowMaterial" Tag="Mica"
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+                                        <RadioButton x:Name="MaterialMica" Grid.Row="0" Grid.Column="0" GroupName="WindowMaterial" Tag="Mica"
                                                          Style="{StaticResource MaterialOptionStyle}" Checked="WindowMaterial_Checked">
                                                 <StackPanel Orientation="Horizontal" Spacing="10">
                                                     <Border Width="42" Height="28" CornerRadius="6" Background="{ThemeResource Surface2}"
@@ -987,6 +994,64 @@
                                                     </StackPanel>
                                                 </StackPanel>
                                             </RadioButton>
+                                            <RadioButton x:Name="MaterialNone" Grid.Row="2" Grid.Column="0" GroupName="WindowMaterial" Tag="None"
+                                                         Style="{StaticResource MaterialOptionStyle}" Checked="WindowMaterial_Checked">
+                                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                                    <Border Width="42" Height="28" CornerRadius="6" Background="{ThemeResource AppBackground}"
+                                                            BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+                                                    <StackPanel Spacing="1" VerticalAlignment="Center">
+                                                        <TextBlock Text="纯色" FontSize="13" Foreground="{ThemeResource TextPrimary}" />
+                                                        <TextBlock Text="关闭云母 / 磨砂" FontSize="11" Foreground="{ThemeResource TextSecondary}" />
+                                                    </StackPanel>
+                                                </StackPanel>
+                                            </RadioButton>
+                                        </Grid>
+                                    </StackPanel>
+
+                                    <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
+
+                                    <StackPanel Padding="0,12" Spacing="10">
+                                        <StackPanel Spacing="3">
+                                            <TextBlock Text="窗口壁纸" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
+                                            <TextBlock Text="自定义背景图片，叠加在窗口材质之上，透明度可调" Style="{StaticResource SettingsHint}" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Button x:Name="BtnWallpaperPick" Content="选择图片…" MinWidth="100" MinHeight="32" FontSize="12"
+                                                    Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                                                    Background="{ThemeResource ButtonBackground}" BorderBrush="{ThemeResource ButtonBorderBrush}"
+                                                    BorderThickness="1" Click="BtnWallpaperPick_Click" />
+                                            <Button x:Name="BtnWallpaperClear" Content="清除壁纸" MinWidth="90" MinHeight="32" FontSize="12"
+                                                    Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                                                    Background="{ThemeResource ButtonBackground}" BorderBrush="{ThemeResource ButtonBorderBrush}"
+                                                    BorderThickness="1" Click="BtnWallpaperClear_Click" IsEnabled="False" />
+                                            <TextBlock x:Name="WallpaperFileText" Text="未设置" VerticalAlignment="Center" FontSize="12"
+                                                       Foreground="{ThemeResource TextSecondary}" TextTrimming="CharacterEllipsis"
+                                                       MaxWidth="180" ToolTipService.ToolTip="{x:Null}" />
+                                        </StackPanel>
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="壁纸透明度" Grid.Column="0" VerticalAlignment="Center" FontSize="13"
+                                                       Foreground="{ThemeResource TextPrimary}" />
+                                            <Slider x:Name="WallpaperOpacitySlider" Grid.Column="1" VerticalAlignment="Center"
+                                                    Foreground="{StaticResource QqGreen}" ValueChanged="WallpaperOpacitySlider_ValueChanged" />
+                                            <TextBlock x:Name="WallpaperOpacityText" Grid.Column="2" Text="50%" Width="40" TextAlignment="Center"
+                                                       VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource TextSecondary}" />
+                                        </Grid>
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="显示方式" Grid.Column="0" VerticalAlignment="Center" FontSize="13"
+                                                       Foreground="{ThemeResource TextPrimary}" />
+                                            <ToggleSwitch x:Name="WallpaperFillToggle" Grid.Column="1" HorizontalAlignment="Left"
+                                                          OnContent="拉伸" OffContent="完整显示" Margin="0,0,0,0"
+                                                          Toggled="WallpaperFillToggle_Toggled"
+                                                          ToolTipService.ToolTip="拉伸会把图片不等比放大到填满窗口（可能变形）；完整显示会等比缩小到完整可见（两侧露出背景）" />
                                         </Grid>
                                     </StackPanel>
                                 </StackPanel>
