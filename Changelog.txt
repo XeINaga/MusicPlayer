@@ -23,6 +23,12 @@ commit a6c861e  2026-10-07
 ----
 
 ----
+commit 576c7af  2026-10-07
+修从托盘恢复窗口后材质变纯色：AppWindow.Hide() 时合成系统丢弃窗口的 backdrop 目标，重新 Show 后控制器存活但玻璃不自动恢复。RestoreFromTray 在 Show+Activate 后调用 ApplyWindowMaterial() 重建控制器并重新附加目标（毫秒级，无感）。版本 1.6.20。
+
+----
+
+----
 commit 1a11337  2026-10-07
 修启动时窗口材质不是所存设置：ctor 里挂 backdrop 控制器时窗口从未激活过，渲染策略不生效（观察=保存的细亚克力启动后显示为暗色错误材质，手动重切才对）。修复：ctor 保留首次 Apply，另订阅 Window.Activated 首次激活（非 Deactivated）时重建一次材质并退订——重建路径与手动切换完全同条件，同时覆盖"attach 时机未就绪"与"首次 attach 时 ActualTheme/配置未同步"两种根因。版本 1.6.14。
 
