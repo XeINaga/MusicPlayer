@@ -53,11 +53,12 @@
 // ---------- minimal JSON (flat objects: string / number / bool) ----------
 static void AppendUtf8(std::string& out, unsigned int cp);  // defined later, near Utf8ToWide
 struct JsonVal {
-    enum Type { NUL, STR, NUM, BOOL, OBJ } type = NUL;
+    enum Type { NUL, STR, NUM, BOOL, OBJ, ARR } type = NUL;
     std::string str;
     double num = 0;
     bool boolean = false;
     std::vector<std::pair<std::string, JsonVal>> members;
+    std::vector<JsonVal> items;    // ARR
 };
 
 static void SkipWs(const std::string& s, size_t& i) {
@@ -122,6 +123,20 @@ static bool ParseValue(const std::string& s, size_t& i, JsonVal& out) {
             if (i >= s.size()) return false;
             if (s[i] == ',') { i++; continue; }
             if (s[i] == '}') { i++; break; }
+            return false;
+        }
+        return true;
+    } else if (c == '[') {
+        i++; out.type = JsonVal::ARR;
+        SkipWs(s, i);
+        if (i < s.size() && s[i] == ']') { i++; return true; }
+        while (true) {
+            JsonVal val; if (!ParseValue(s, i, val)) return false;
+            out.items.push_back(std::move(val));
+            SkipWs(s, i);
+            if (i >= s.size()) return false;
+            if (s[i] == ',') { i++; continue; }
+            if (s[i] == ']') { i++; break; }
             return false;
         }
         return true;
@@ -201,6 +216,16 @@ struct State {
     double progRate = 0.0;         // progress per second, from the last two samples
     LARGE_INTEGER progPrevAt{};    // timestamp of the previous sample
     LARGE_INTEGER progAt{};        // timestamp of the latest sample
+    // Self-owned playback clock (word-timed lines): the host streams the
+    // line's per-word timing once and then only calibrates the clock with
+    // low-weight corrections — the sweep is advanced locally from QPC, so
+    // sample jitter can no longer kick the sweep position around.
+    struct WordTime { double start, dur; int chars; };
+    std::vector<WordTime> wtimes;  // relative to line start, seconds; empty = legacy path
+    double lineStart = 0.0;        // absolute playback position of the line start, seconds
+    double hostSec = -1.0;         // last calibrated host playback position, seconds
+    double hostRate = 1.0;         // local clock rate vs wall clock (≈1 while playing)
+    LARGE_INTEGER hostSecAt{};     // QPC of the last calibration
     D2D1_COLOR_F accent = D2D1::ColorF(0.19f, 0.76f, 0.49f, 1.f); // karaoke sung color
     D2D1_COLOR_F unsung = D2D1::ColorF(1, 1, 1, 1);               // karaoke unsung color
 };
@@ -289,9 +314,56 @@ static double EffectiveProg() {
     LARGE_INTEGER now{}, freq{};
     QueryPerformanceCounter(&now);
     QueryPerformanceFrequency(&freq);
+
+    // Preferred path: the host shipped this line's per-word timing, so the
+    // sweep position is computed locally from the self-owned playback clock
+    // (calibrated by low-weight host corrections, advanced by QPC between
+    // them). The 25 Hz sample jitter never touches the position directly.
+    // The whole branch holds g_cs: wtimes is a vector the pipe thread swaps
+    // wholesale on line changes, so lock-free reads here would race it.
+    EnterCriticalSection(&g_cs);
+    if (!g_state.wtimes.empty() && g_state.hostSec >= 0.0) {
+        double clock = g_state.hostSec;
+        if (!g_state.paused && g_state.hostSecAt.QuadPart > 0 && freq.QuadPart > 0) {
+            double dt = (double)(now.QuadPart - g_state.hostSecAt.QuadPart) / (double)freq.QuadPart;
+            clock += g_state.hostRate * dt;
+        }
+        double tIn = clock - g_state.lineStart;
+        // Same formula the host panel uses: character-count space, linear
+        // inside the current word.
+        int total = 0;
+        for (const auto& w : g_state.wtimes) total += w.chars;
+        double result;
+        if (total <= 0) {
+            result = g_state.prog;
+        } else if (tIn <= 0) {
+            result = 0.0;
+        } else {
+            double done = 0;
+            for (const auto& w : g_state.wtimes) {
+                if (tIn >= w.start + w.dur) {
+                    done += w.chars;                   // word fully sung
+                } else if (tIn > w.start) {
+                    double frac = w.dur > 0 ? (tIn - w.start) / w.dur : 1.0;
+                    if (frac > 1.0) frac = 1.0;
+                    done += w.chars * frac;
+                    break;                             // inside this word
+                } else {
+                    break;                             // before this word
+                }
+            }
+            result = (double)done / (double)total;
+            if (result > 1) result = 1;
+        }
+        LeaveCriticalSection(&g_cs);
+        return result;
+    }
+    LeaveCriticalSection(&g_cs);
+
+    // Legacy path (no word timing shipped): extrapolate the last prog sample
+    // with the measured rate, capped at half a second of coasting so a
+    // stalled host cannot push the sweep past the line.
     double dt = (double)(now.QuadPart - g_state.progAt.QuadPart) / (double)freq.QuadPart;
-    // Extrapolate with the measured rate, capped at half a second of coasting
-    // so a stalled host cannot push the sweep past the line.
     double coast = dt > 0 ? g_state.progRate * dt : 0.0;
     if (coast > 0.5) coast = 0.5;
     if (coast < -0.5) coast = -0.5;
@@ -299,6 +371,69 @@ static double EffectiveProg() {
     if (p < 0) p = 0;
     if (p > 1) p = 1;
     return p;
+}
+
+// ---------- smoothed display progress ----------
+// The host streams progress samples at ~25 Hz; feeding each one straight
+// into the sweep makes every sample that disagrees with the local
+// extrapolation show up as a visible jump: the smoothed rate lags the real
+// per-word speed inside a line, and pipe/timer jitter moves the correction
+// around. The window thread therefore keeps a display position that eases
+// toward the extrapolated target with a ~28 ms time constant — corrections
+// become a slight acceleration the eye cannot see, and the overshoot-pop of
+// a frame that was late because UpdateLayeredWindow blocked (50-80 ms under
+// DWM) lands softly too. Window-thread state; no locking.
+static double g_dispProg = -1.0;
+static std::wstring g_dispLO, g_dispLR, g_dispLT;   // line signature at reset
+static LARGE_INTEGER g_dispAt{};
+static double DisplayProgress() {
+    double target = EffectiveProg();
+    if (target < 0) {                   // not a word-timed line
+        g_dispProg = -1.0;
+        g_dispLO.clear(); g_dispLR.clear(); g_dispLT.clear();
+        return target;
+    }
+    if (g_state.paused) {               // frozen: display exactly the sample
+        g_dispProg = target;
+        return target;
+    }
+    EnterCriticalSection(&g_cs);
+    bool lineChanged = g_dispLO != g_state.orig || g_dispLR != g_state.roma
+                    || g_dispLT != g_state.trans;
+    if (lineChanged) {
+        g_dispLO = g_state.orig; g_dispLR = g_state.roma; g_dispLT = g_state.trans;
+    }
+    LeaveCriticalSection(&g_cs);
+    LARGE_INTEGER now{}, freq{};
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    if (lineChanged) {                  // new line: snap, never ease across
+        g_dispProg = target;
+        g_dispAt = now;
+        return target;
+    }
+    double dt = g_dispAt.QuadPart > 0
+        ? (double)(now.QuadPart - g_dispAt.QuadPart) / (double)freq.QuadPart : 0.0;
+    g_dispAt = now;
+    // Real seek, or the render stalled long enough for easing to be pointless
+    // (host resumed after a pause uses the same path): snap.
+    if (dt <= 0 || dt > 0.25 || target - g_dispProg > 0.12 || g_dispProg - target > 0.12) {
+        g_dispProg = target;
+        return target;
+    }
+    double a = 1.0 - exp(-dt / 0.028);
+    // A late frame (UpdateLayeredWindow blocked 50-80 ms under DWM) makes the
+    // ease factor jump to ~0.95 — the catch-up would land as a pop. Cap the
+    // per-frame correction so a stalled frame recovers over two or three
+    // frames as a slight acceleration instead.
+    if (a > 0.5) a = 0.5;
+    double d = g_dispProg + (target - g_dispProg) * a;
+    if (d > target) d = target;                 // never show past the sung position
+    if (target - d > 0.06) d = target - 0.06;   // cap the lag after a late frame
+    if (d < 0) d = 0;
+    if (d > 1) d = 1;
+    g_dispProg = d;
+    return d;
 }
 
 // ---------- per-role text layout cache ----------
@@ -373,18 +508,32 @@ static DWORD WINAPI RenderPumpThread(LPVOID) {
     while (WaitForSingleObject(g_renderQuit, 25) != WAIT_OBJECT_0) {
         if (!KaraokeActive()) continue;
         while (KaraokeActive() && WaitForSingleObject(g_renderQuit, 0) != WAIT_OBJECT_0) {
-            // On displays/remote sessions without composition DwmFlush fails
-            // immediately — fall back to a fixed 15 ms beat instead of
-            // spinning at 100% CPU. Some drivers also return S_OK instantly:
-            // time the call and sleep briefly when it clearly did not wait
-            // for a vsync, so the loop never busy-spins either way.
+            // DwmFlush can return S_OK instantly when the call lands inside a
+            // just-completed composition slot — and once the render loop
+            // settles into that rhythm it stays phase-locked. Sleeping 1 ms
+            // here would pace frames by the system timer tick (1-15.6 ms of
+            // jitter, visible as uneven sweep speed), so flush a second time
+            // instead: after an instant return the next call genuinely waits
+            // for the following composition. Two instant returns in a row
+            // mean there is no real composition beat (remote session,
+            // headless) — fall back to a fixed beat.
             LARGE_INTEGER t0{}, t1{};
             QueryPerformanceCounter(&t0);
-            if (FAILED(DwmFlush())) Sleep(15);
+            HRESULT hr = DwmFlush();
             QueryPerformanceCounter(&t1);
-            if (freq.QuadPart > 0 &&
-                (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart < 0.004)
-                Sleep(1);
+            double waited = freq.QuadPart > 0
+                ? (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart : 1.0;
+            if (FAILED(hr)) {
+                Sleep(15);
+            } else if (waited < 0.004) {
+                QueryPerformanceCounter(&t0);
+                hr = DwmFlush();
+                QueryPerformanceCounter(&t1);
+                double w2 = freq.QuadPart > 0
+                    ? (double)(t1.QuadPart - t0.QuadPart) / (double)freq.QuadPart : 1.0;
+                if (FAILED(hr) || w2 < 0.002)
+                    Sleep(15);
+            }
             if (InterlockedCompareExchange(&g_renderPending, 1, 0) == 0)
                 PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
         }
@@ -606,8 +755,11 @@ static void Render() {
                 // a float — whole clusters plus the fractional slice of the
                 // current one. The previous char-rounded clip width made the
                 // sweep jump a whole character at a time, the main source of
-                // the "not flowing" feel reported on desktop lyrics.
-                double exact = EffectiveProg() * (double)actual;
+                // the "not flowing" feel reported on desktop lyrics. The
+                // position comes from the display smoother, not straight from
+                // the extrapolated target, so 25 Hz sample corrections and
+                // late-frame recoveries ease in instead of popping.
+                double exact = DisplayProgress() * (double)actual;
                 UINT32 full = (UINT32)exact;
                 if (full > actual) full = actual;
                 double frac = exact - (double)full;
@@ -827,6 +979,32 @@ static void ApplyCommand(const std::string& line) {
         // reach (UINT32)NaN in the render sweep — undefined behavior. Garbage
         // and negative samples mean "not word-timed" (-1, the protocol value).
         if (!std::isfinite(newProg) || newProg < 0.0) newProg = -1.0;
+        // Self-owned clock fields: "s" = the host playback position this
+        // sample was taken at (seconds), "ls" = the line start position,
+        // "wt" = flat per-word timing [start, dur, chars, ...] relative to
+        // the line start. All optional — an older host (or a non-word-timed
+        // line) simply omits them and the legacy sample path keeps working.
+        auto* ss = FindMember(root, "s");
+        double posSec = (ss && ss->type == JsonVal::NUM) ? ss->num : -1.0;
+        if (!std::isfinite(posSec) || posSec < 0.0) posSec = -1.0;
+        auto* ls = FindMember(root, "ls");
+        double lineStartSec = (ls && ls->type == JsonVal::NUM) ? ls->num : 0.0;
+        if (!std::isfinite(lineStartSec) || lineStartSec < 0.0) lineStartSec = 0.0;
+        auto* wt = FindMember(root, "wt");
+        std::vector<State::WordTime> newTimes;
+        if (wt && wt->type == JsonVal::ARR && wt->items.size() >= 3) {
+            for (size_t k = 0; k + 2 < wt->items.size(); k += 3) {
+                const JsonVal& s0 = wt->items[k];
+                const JsonVal& d0 = wt->items[k + 1];
+                const JsonVal& c0 = wt->items[k + 2];
+                if (s0.type != JsonVal::NUM || d0.type != JsonVal::NUM || c0.type != JsonVal::NUM)
+                    continue;
+                if (!std::isfinite(s0.num) || !std::isfinite(d0.num)) continue;
+                int chars = (int)c0.num;
+                if (chars <= 0) continue;
+                newTimes.push_back({ s0.num, d0.num > 0 ? d0.num : 0.0, chars });
+            }
+        }
         // Keep the last two samples so the vsync pump can interpolate the
         // sweep locally (25 Hz pipe updates judder; 60 Hz local extrapolation
         // is as smooth as the in-app panel).
@@ -839,6 +1017,43 @@ static void ApplyCommand(const std::string& line) {
         auto newTrans = Utf8ToWide(tr && tr->type == JsonVal::STR ? tr->str : "");
 
         EnterCriticalSection(&g_cs);
+        // Calibrate the self-owned playback clock. The correction is split:
+        // a small fraction of the error snaps into the position (invisible
+        // at ≤ a few ms), the rest trims the clock rate — so host position
+        // read jitter can no longer kick the sweep around, it only bends the
+        // local clock slightly toward the true one.
+        if (posSec >= 0.0) {
+            double predicted = g_state.hostSec;
+            if (g_state.hostSec < 0.0) {
+                predicted = posSec;
+            } else if (g_state.hostSecAt.QuadPart > 0 && freq.QuadPart > 0) {
+                double dtc = (double)(now.QuadPart - g_state.hostSecAt.QuadPart) / (double)freq.QuadPart;
+                if (!g_state.paused) predicted += g_state.hostRate * dtc;
+            }
+            double err = posSec - predicted;
+            if (!g_state.paused && (fabs(err) > 0.35 || g_state.hostSec < 0.0)) {
+                // Seek (or first sample): adopt the host position outright.
+                g_state.hostSec = posSec;
+                g_state.hostRate = 1.0;
+            } else if (g_state.paused) {
+                g_state.hostSec = posSec;   // frozen: just track the sample
+            } else {
+                g_state.hostSec = predicted + err * 0.12;
+                g_state.hostRate += err * 0.06;
+                if (g_state.hostRate < 0.95) g_state.hostRate = 0.95;
+                if (g_state.hostRate > 1.05) g_state.hostRate = 1.05;
+            }
+            g_state.hostSecAt = now;
+        }
+        // Word timing ships with the line: replace it wholesale (also on line
+        // changes, where text equality below would otherwise keep stale
+        // timing). Empty wt for a line = no word timing = legacy path.
+        bool lineChanged = newOrig != g_state.orig || newRoma != g_state.roma || newTrans != g_state.trans;
+        if (!newTimes.empty())
+            g_state.wtimes = newTimes;
+        else if (lineChanged)
+            g_state.wtimes.clear();
+        g_state.lineStart = lineStartSec;
         // Jitter guard: within the same line the progress must never move
         // backward. The host's position reads are quantized and occasionally
         // read a stale value; accepting a slightly-backward sample made the
@@ -867,11 +1082,14 @@ static void ApplyCommand(const std::string& line) {
             double dt = (double)(g_state.progAt.QuadPart - g_state.progPrevAt.QuadPart) / (double)freq.QuadPart;
             double dp = g_state.prog - g_state.progPrev;
             if (dt > 0.005 && dp > -0.5 && dp < 0.5) {
-                // Exponential smoothing: one off-beat sample would otherwise
-                // read as a twitch on the interpolated sweep.
+                // Weight the fresh sample above the running average: the real
+                // per-word speed changes fast inside a line, and a sluggish
+                // estimate makes every incoming sample correct the sweep with
+                // a visible jump. The display smoother absorbs the leftover
+                // noise, so the estimate can afford to be twitchy here.
                 double inst = dp / dt;
                 g_state.progRate = (g_state.progRate == 0.0) ? inst
-                                        : g_state.progRate * 0.6 + inst * 0.4;
+                                        : g_state.progRate * 0.4 + inst * 0.6;
             }
             // Seek detection: when the sample is far from what the current
             // rate predicts the user dragged — drop the rate so the sweep
@@ -904,9 +1122,16 @@ static void ApplyCommand(const std::string& line) {
         // reusing the stale pre-pause rate would glide past the new position.
         auto* on = FindMember(root, "on");
         bool v = on && on->type == JsonVal::BOOL ? on->boolean : (on && on->type == JsonVal::NUM ? on->num != 0 : false);
+        LARGE_INTEGER nowp{};
+        QueryPerformanceCounter(&nowp);
         EnterCriticalSection(&g_cs);
         g_state.paused = v;
-        if (!v) g_state.progRate = 0.0;
+        if (!v) {
+            g_state.progRate = 0.0;
+            // Re-anchor the self-owned clock at the resume instant: the pause
+            // gap must not be advanced over by hostRate * (minutes of dt).
+            g_state.hostSecAt = nowp;
+        }
         LeaveCriticalSection(&g_cs);
         PostMessage(g_hwnd, WM_APP_RENDER, 0, 0);
     } else if (type == "style") {

@@ -53,6 +53,7 @@ public sealed class DesktopLyricsOverlay : IDisposable
         System.Threading.Channels.Channel.CreateUnbounded<string>(
             new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true });
     private Task? _sendLoop;
+    private bool _freshStart;      // a brand-new overlay process was started
     private bool _disposed;
 
     /// <summary>The overlay reports its window position (drag end / quit)
@@ -62,6 +63,14 @@ public sealed class DesktopLyricsOverlay : IDisposable
     /// <summary>The overlay reports the user-set wrap width (resize end)
     /// as {"t":"size","w":…} — raised on a background thread.</summary>
     public event Action<int>? SizeReported;
+
+    /// <summary>Raised on the send worker thread after a brand-new overlay
+    /// process came up and both pipes connected. The host must replay the
+    /// full state (style, click-through, position, show) — the fresh window
+    /// starts hidden at the default spot with default styling, and the
+    /// toggle-on path that pushes all of that ran long before this process
+    /// existed (crash or hot-swap restart).</summary>
+    public event Action? OverlayRestarted;
 
     /// <summary>
     /// Launch the overlay process (if needed) and connect both pipes.
@@ -104,6 +113,7 @@ public sealed class DesktopLyricsOverlay : IDisposable
                         }
                     };
                     _proc.Start();
+                    _freshStart = true;
                 }
                 catch
                 {
@@ -171,6 +181,14 @@ public sealed class DesktopLyricsOverlay : IDisposable
             }
             _pipe = main;
             _pipeRpt = rpt;
+        }
+
+        // Fresh process: the host replays style/position/show — the toggle-on
+        // path fired once, long before this process existed.
+        if (_freshStart)
+        {
+            _freshStart = false;
+            OverlayRestarted?.Invoke();
         }
 
         StartReadLoop(rpt);
@@ -353,20 +371,32 @@ public sealed class DesktopLyricsOverlay : IDisposable
     public void SetPaused(bool paused) =>
         Send(JsonSerializer.Serialize(new { t = "pause", on = paused ? 1 : 0 }, JsonOptions));
 
-    /// <summary>Push the current lyric line (original / romaji / translation).</summary>
-    public void UpdateLyric(MusicPlayer.Models.Track? track, string original, string? romaji, string? translation, double progress = -1)
+    /// <summary>Push the current lyric line (original / romaji / translation).
+    /// When the caller has the line's word timing it also ships the playback
+    /// clock data: <paramref name="posSec"/> (host position this sample was
+    /// taken at), <paramref name="lineStartSec"/> (absolute line start) and
+    /// <paramref name="wordTimes"/> (flat [start, dur, chars, ...] relative to
+    /// the line start, seconds) — the overlay then advances the sweep with its
+    /// own QPC clock and only calibrates against these, so 25 Hz sample jitter
+    /// can no longer kick the sweep position around.</summary>
+    public void UpdateLyric(MusicPlayer.Models.Track? track, string original, string? romaji, string? translation, double progress = -1,
+        double posSec = -1, double lineStartSec = -1, double[]? wordTimes = null)
     {
         // progress: continuous karaoke position of the current word-timed line
         // (0..1, interpolated inside words; -1 = not word-timed). The overlay
         // clips ALL lines (original/romaji/translation) to this fraction.
-        Send(JsonSerializer.Serialize(new
+        var payload = new Dictionary<string, object?>
         {
-            t = "lyric",
-            orig = original ?? "",
-            roma = romaji ?? "",
-            trans = translation ?? "",
-            prog = progress,
-        }, JsonOptions));
+            ["t"] = "lyric",
+            ["orig"] = original ?? "",
+            ["roma"] = romaji ?? "",
+            ["trans"] = translation ?? "",
+            ["prog"] = progress,
+        };
+        if (posSec >= 0) payload["s"] = posSec;
+        if (lineStartSec >= 0 && wordTimes is { Length: >= 3 }) payload["ls"] = lineStartSec;
+        if (lineStartSec >= 0 && wordTimes is { Length: >= 3 }) payload["wt"] = wordTimes;
+        Send(JsonSerializer.Serialize(payload, JsonOptions));
     }
 
     /// <summary>Show the overlay window (also lazily starts the process).</summary>
