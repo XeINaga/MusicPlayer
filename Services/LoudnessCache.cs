@@ -30,6 +30,37 @@ internal static class LoudnessCache
         return await Task.Run(() => GetGainDbCore(audioPath));
     }
 
+    /// <summary>
+    /// Warm the cache for a track that is likely to play next. A cold miss
+    /// runs the ffmpeg loudness scan in the background (up to two minutes on
+    /// an uncached file), so the eventual switch applies its gain instantly
+    /// instead of blocking the load. Cheap no-op when already cached; safe to
+    /// call repeatedly.
+    /// </summary>
+    public static void WarmAsync(string? audioPath)
+    {
+        if (string.IsNullOrEmpty(audioPath) || !System.IO.File.Exists(audioPath))
+            return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var key = new LoudnessKey(audioPath, System.IO.File.GetLastWriteTimeUtc(audioPath).Ticks).ToString();
+                lock (Gate)
+                {
+                    _cache ??= LoadSync();
+                    if (_cache.ContainsKey(key))
+                        return; // already warm
+                }
+                GetGainDbCore(audioPath); // fills the cache (miss path)
+            }
+            catch
+            {
+                // Pre-warming is best effort; the real load path re-runs it.
+            }
+        });
+    }
+
     private static double GetGainDbCore(string audioPath)
     {
         try

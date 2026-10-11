@@ -569,6 +569,35 @@ public sealed class PlaybackService
             if (token == _loadToken)
                 _dispatcher.TryEnqueue(() => MediaFailed?.Invoke(ex.Message));
         }
+
+        // Whatever path the load took, the current track is settled — warm the
+        // loudness cache for the next one so a switch never blocks on a scan.
+        PreprocessNextTrack();
+    }
+
+    /// <summary>
+    /// Loudness-normalization warm-up: when the current track is loaded, run
+    /// the loudness scan for the NEXT track in list order in the background,
+    /// so switching to it applies its gain instantly instead of blocking on a
+    /// cold ffmpeg scan. List order only — in random mode the next draw is
+    /// unknown by design, and single-track loop already has its gain warm.
+    /// </summary>
+    private void PreprocessNextTrack()
+    {
+        if (!LoudnessNormalization || _queue == null || _queue.Count == 0)
+            return;
+        if (_mode != PlayMode.Sequential && _mode != PlayMode.LoopAll)
+            return;
+        var next = _index + 1;
+        if (next >= _queue.Count)
+        {
+            if (_mode != PlayMode.LoopAll)
+                return; // sequential list reached its end
+            next = 0;
+        }
+        var path = _queue[next].Path;
+        if (!string.IsNullOrEmpty(path))
+            LoudnessCache.WarmAsync(path);
     }
 
     /// <summary>
