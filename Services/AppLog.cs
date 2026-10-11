@@ -97,9 +97,14 @@ public static class AppLog
     {
         try
         {
+            // Persistence failures repeat on every save attempt, so apply the
+            // same 5 MB rotation as the lyric log — the file must not grow
+            // without bound.
+            var log = Path.Combine(LogDir, "MusicPlayer.log");
+            RotateIfNeeded(log);
             var line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] Persistence failure: {path}{Environment.NewLine}" +
                        $"{exception}{Environment.NewLine}";
-            File.AppendAllText(Path.Combine(LogDir, "MusicPlayer.log"), line, new UTF8Encoding(false));
+            File.AppendAllText(log, line, new UTF8Encoding(false));
         }
         catch
         {

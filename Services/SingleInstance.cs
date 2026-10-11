@@ -31,16 +31,12 @@ internal static class SingleInstance
     {
         _dispatcher = DispatcherQueue.GetForCurrentThread();
 
+        // No AbandonedMutexException handling here: that exception can only
+        // surface on WaitOne, and this thread never waits on the mutex. A
+        // crashed previous instance is a non-issue anyway — the OS destroys
+        // the mutex with its last handle, so createdNew then comes back true.
         bool createdNew;
-        try
-        {
-            _mutex = new Mutex(false, MutexName, out createdNew);
-        }
-        catch (AbandonedMutexException)
-        {
-            // Previous instance crashed without releasing — treat as new owner.
-            createdNew = true;
-        }
+        _mutex = new Mutex(false, MutexName, out createdNew);
 
         if (!createdNew)
         {
@@ -88,13 +84,22 @@ internal static class SingleInstance
     {
         var thread = new Thread(() =>
         {
-            while (_activateEvent != null)
+            // Local copy: Release() nulls the field concurrently, and reading
+            // the static twice (loop condition + WaitOne target) could observe
+            // null in between — an NRE on a background thread tears down the
+            // process.
+            var evt = _activateEvent;
+            // Poll instead of waiting forever: no wait must straddle Release()
+            // (see there for why the event is never disposed). 500 ms costs
+            // nothing and guarantees the loop re-checks the field promptly.
+            while (evt != null)
             {
-                if (_activateEvent.WaitOne())
+                if (evt.WaitOne(500))
                 {
                     // Signal received — marshal to the UI thread to restore the window.
                     _dispatcher?.TryEnqueue(() => ActivateWindow());
                 }
+                evt = _activateEvent;
             }
         })
         {
@@ -133,8 +138,12 @@ internal static class SingleInstance
     /// </summary>
     public static void Release()
     {
-        // Wake the listener thread FIRST so it can observe the null event and
-        // exit instead of blocking on a disposed handle.
+        // Wake the listener so it re-checks the (now null) field and exits on
+        // its next poll. The event handle is deliberately NOT disposed: the
+        // listener thread may be parked in WaitOne, and disposing a live wait
+        // handle from another thread is undefined behaviour — an exception
+        // there would tear down the process mid-exit. The OS reclaims the
+        // handle when the process ends.
         _activateEvent?.Set();
         _activateEvent = null;
         // This thread never waited on the mutex, so ReleaseMutex would throw;

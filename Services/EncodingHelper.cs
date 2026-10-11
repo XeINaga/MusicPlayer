@@ -80,8 +80,6 @@ public static class EncodingHelper
         // unconditionally as the dominant encoding for this app's files; users
         // with Shift-JIS files pick it explicitly in 设置→歌词→编码.
         return Encoding.GetEncoding("GBK");
-
-        return Encoding.Default;
     }
 
     private static bool IsValidUtf8(byte[] b)

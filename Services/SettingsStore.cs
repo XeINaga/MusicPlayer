@@ -44,6 +44,13 @@ public sealed class AppSettings
     /// </summary>
     public string WallpaperPath { get; set; } = "";
 
+    /// <summary>
+    /// Last wallpaper picked from the Wallpaper Engine library (file path:
+    /// .mp4/.webm = video, .jpg/.png = image). Re-applied automatically when
+    /// the Wallpaper Engine material is selected.
+    /// </summary>
+    public string WallpaperWeLast { get; set; } = "";
+
     /// <summary>Wallpaper opacity 0..1 (1 = fully covering the material).</summary>
     public double WallpaperOpacity { get; set; } = 0.5;
 
@@ -329,18 +336,26 @@ public sealed class SettingsStore
                 var data = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath, Encoding.UTF8));
                 if (data != null)
                 {
-                    // The QQ login cookie is stored DPAPI-encrypted (Current
-                    // User scope). Plaintext values from older versions are
-                    // transparently migrated on the next Save.
+                    // Secret fields are stored DPAPI-encrypted (Current User
+                    // scope). Plaintext values from older versions pass
+                    // through Unprotect untouched and are encrypted on the
+                    // next Save.
                     data.QqCookie = Unprotect(data.QqCookie);
+                    data.LastFmApiKey = Unprotect(data.LastFmApiKey);
+                    data.LastFmApiSecret = Unprotect(data.LastFmApiSecret);
+                    data.LastFmSessionKey = Unprotect(data.LastFmSessionKey);
+                    data.LastFmUsername = Unprotect(data.LastFmUsername);
                     MigrateToEchoLook(data);
                     return data;
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // fall through to defaults
+            // Corrupt settings must not vanish silently: park a copy next to
+            // the file (same pattern as PlaylistStore.BackupCorruptFile) so
+            // the damage stays recoverable, then fall through to defaults.
+            BackupCorruptFile(FilePath, ex);
         }
 
         return new AppSettings();
@@ -350,18 +365,29 @@ public sealed class SettingsStore
     {
         try
         {
-            // Encrypt the QQ cookie at rest: swap in the protected value for
+            // Encrypt secret fields at rest: swap in the protected values for
             // serialization, restore the plaintext on the live instance.
-            var plainCookie = settings.QqCookie;
+            // Empty strings stay empty — there is nothing to protect.
             var live = settings;
+            var plain = (Cookie: live.QqCookie, ApiKey: live.LastFmApiKey,
+                Secret: live.LastFmApiSecret, Session: live.LastFmSessionKey,
+                User: live.LastFmUsername);
             try
             {
-                live.QqCookie = string.IsNullOrEmpty(plainCookie) ? "" : Protect(plainCookie);
+                live.QqCookie = ProtectIfPresent(plain.Cookie);
+                live.LastFmApiKey = ProtectIfPresent(plain.ApiKey);
+                live.LastFmApiSecret = ProtectIfPresent(plain.Secret);
+                live.LastFmSessionKey = ProtectIfPresent(plain.Session);
+                live.LastFmUsername = ProtectIfPresent(plain.User);
                 AtomicFile.WriteAllText(FilePath, JsonSerializer.Serialize(live, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
             }
             finally
             {
-                live.QqCookie = plainCookie;
+                live.QqCookie = plain.Cookie;
+                live.LastFmApiKey = plain.ApiKey;
+                live.LastFmApiSecret = plain.Secret;
+                live.LastFmSessionKey = plain.Session;
+                live.LastFmUsername = plain.User;
             }
         }
         catch
@@ -370,7 +396,7 @@ public sealed class SettingsStore
         }
     }
 
-    private const string CookiePrefix = "dpapi:";
+    private const string DpapiPrefix = "dpapi:";
 
     /// <summary>
     /// One-time switch to the EchoMusic look for installs created before the
@@ -393,21 +419,46 @@ public sealed class SettingsStore
     private static string Protect(string plain)
     {
         var blob = ProtectedData.Protect(Encoding.UTF8.GetBytes(plain), null, DataProtectionScope.CurrentUser);
-        return CookiePrefix + Convert.ToBase64String(blob);
+        return DpapiPrefix + Convert.ToBase64String(blob);
     }
+
+    /// <summary>Protect a value before it is serialized; empty stays empty
+    /// (never encrypt "" into a useless dpapi blob).</summary>
+    private static string ProtectIfPresent(string plain) =>
+        string.IsNullOrEmpty(plain) ? "" : Protect(plain);
 
     private static string Unprotect(string? stored)
     {
-        if (string.IsNullOrEmpty(stored) || !stored.StartsWith(CookiePrefix, StringComparison.Ordinal))
+        if (string.IsNullOrEmpty(stored) || !stored.StartsWith(DpapiPrefix, StringComparison.Ordinal))
             return stored ?? ""; // plaintext from an older version — migrated on save
         try
         {
-            var blob = Convert.FromBase64String(stored[CookiePrefix.Length..]);
+            var blob = Convert.FromBase64String(stored[DpapiPrefix.Length..]);
             return Encoding.UTF8.GetString(ProtectedData.Unprotect(blob, null, DataProtectionScope.CurrentUser));
         }
         catch
         {
             return ""; // undecryptable (different user profile) — start clean
+        }
+    }
+
+    /// <summary>Park an unreadable file next to the original (same pattern as
+    /// PlaylistStore.BackupCorruptFile) so the damage stays diagnosable; the
+    /// original is left in place for the next Save to overwrite.</summary>
+    private static void BackupCorruptFile(string path, Exception exception)
+    {
+        AppLog.WritePersistenceFailure(path, exception);
+        try
+        {
+            if (File.Exists(path))
+            {
+                var backup = path + ".corrupt-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + ".bak";
+                File.Copy(path, backup);
+            }
+        }
+        catch (Exception backupException)
+        {
+            AppLog.WritePersistenceFailure(path + " (backup)", backupException);
         }
     }
 }

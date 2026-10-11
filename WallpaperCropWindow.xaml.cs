@@ -56,6 +56,13 @@ public sealed partial class WallpaperCropWindow : Window
             SrcText.Text = $"原图 {_srcW}×{_srcH}";
             LayoutImage();
         };
+        // Without this the source size stays 0 on a bad file and OK silently
+        // did nothing — tell the user the image is unreadable.
+        bmp.ImageFailed += (_, e) =>
+        {
+            SrcText.Text = $"图片加载失败：{e.ErrorMessage}";
+            HintText.Text = "无法读取该图片，请取消后另选文件";
+        };
         PreviewImage.Source = bmp;
 
         CanvasHost.SizeChanged += (_, _) => LayoutImage();
@@ -255,14 +262,22 @@ public sealed partial class WallpaperCropWindow : Window
         {
             OkBtn.IsEnabled = false;
             if (_srcW <= 0 || _dispW <= 0)
+            {
+                OkBtn.IsEnabled = true;
+                HintText.Text = "图片尚未加载完成，请稍候再试";
                 return;
+            }
             double scale = _srcW / _dispW;
             int sx = (int)Math.Max(0, Math.Round((_fx - _dispX) * scale));
             int sy = (int)Math.Max(0, Math.Round((_fy - _dispY) * scale));
             int sw = (int)Math.Min(_srcW - sx, Math.Round(_fw * scale));
             int sh = (int)Math.Min(_srcH - sy, Math.Round(_fh * scale));
             if (sw < 8 || sh < 8)
+            {
+                OkBtn.IsEnabled = true;
+                HintText.Text = "裁剪区域太小，请扩大选区";
                 return;
+            }
 
             var dest = Path.Combine(DataLocation.Root, "wallpaper.png");
             using var inStream = System.IO.File.OpenRead(_sourcePath);

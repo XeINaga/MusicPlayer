@@ -22,7 +22,7 @@ public static class AtomicFile
         // Unique per call: a fixed ".tmp" name let two concurrent writers of
         // the same target replace each other's half-written temp file.
         var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(tmp, contents, encoding);
+        WriteAllTextFlushed(tmp, contents, encoding);
 
         try
         {
@@ -50,6 +50,22 @@ public static class AtomicFile
                 TryDelete(tmp);
             }
         }
+    }
+
+    /// <summary>WriteAllText plus durability: the stream opens with
+    /// WriteThrough and flushes to disk before returning, so a power cut
+    /// cannot leave the temp file's bytes in a volatile cache — after
+    /// File.Replace the target would then hold empty/truncated content.
+    /// Byte-identical to File.WriteAllText (encoding preamble included).</summary>
+    private static void WriteAllTextFlushed(string path, string contents, Encoding encoding)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Create, FileAccess.Write, FileShare.None, 4096,
+            FileOptions.WriteThrough);
+        using var writer = new StreamWriter(stream, encoding);
+        writer.Write(contents);
+        writer.Flush();     // StreamWriter buffer → FileStream
+        stream.Flush(true); // FileStream buffer → disk (data + metadata)
     }
 
     private static void TryDelete(string path)

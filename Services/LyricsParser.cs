@@ -45,6 +45,14 @@ public static class LyricsParser
     private static readonly Regex WordTag =
         new(@"[\(<]\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*\d+)?[\)>]", RegexOptions.Compiled);
 
+    // Opening credit rows ("作词：", "作曲：", "编曲：", "混音：", "监制：",
+    // "制作人：", "填词：", "改编词：" ...) — a short label made of credit-only
+    // characters, optional spaces, then a full- or half-width colon. Anchored
+    // to the LINE START so lyrics that merely CONTAIN 词/曲/':' survive (the
+    // old contains() check deleted lines like "一曲相思" or "他说：...").
+    private static readonly Regex CreditLineStart =
+        new(@"^[词曲编混作监制填写原改人录]{1,6}\s{0,2}[：:]", RegexOptions.Compiled);
+
     private static readonly string[] RomajiSuffixes = { ".romaji", ".roma", ".rom" };
 
     private static readonly string[] TranslationSuffixes =
@@ -218,7 +226,15 @@ public static class LyricsParser
             // line start; QRC/YRC use (s,d) with ABSOLUTE song times.
             var relative = line[tags[0].Index] == '<';
 
-            var lineStartMs = int.Parse(header.Groups[1].Value);
+            // A corrupt row must not blank the whole song: times like
+            // [99999999999999,100] pass the \d+ regex but overflow int.Parse,
+            // and the OverflowException used to escape MergeWordTimed
+            // entirely (the upper layer swallows it → "no lyrics"). Skip just
+            // the bad row and keep the rest.
+            var lineStart = TryParseInt32(header.Groups[1].Value);
+            if (lineStart == null)
+                continue;
+            var lineStartMs = lineStart.Value;
             var words = new List<Models.LyricWord>(tags.Count);
             var sb = new System.Text.StringBuilder();
 
@@ -232,6 +248,7 @@ public static class LyricsParser
             var textBefore = line.Substring(headerEnd, tags[0].Index - headerEnd)
                                  .Trim().Length > 0;
 
+            var rowCorrupt = false;
             for (var i = 0; i < tags.Count; i++)
             {
                 var m = tags[i];
@@ -252,29 +269,38 @@ public static class LyricsParser
                 if (wordText.Length == 0)
                     continue;
 
-                var startMs = int.Parse(m.Groups[1].Value);
-                var durMs = int.Parse(m.Groups[2].Value);
+                var startMs = TryParseInt32(m.Groups[1].Value);
+                var durMs = TryParseInt32(m.Groups[2].Value);
+                if (startMs == null || durMs == null)
+                {
+                    // Corrupt word tag: drop the WHOLE row rather than emit a
+                    // half-parsed line.
+                    rowCorrupt = true;
+                    break;
+                }
+
                 var time = System.TimeSpan.FromMilliseconds(
-                    (relative ? lineStartMs : 0) + startMs) - offset;
+                    (relative ? lineStartMs : 0) + startMs.Value) - offset;
                 if (time < System.TimeSpan.Zero)
                     time = System.TimeSpan.Zero;
-                words.Add(new Models.LyricWord(time, System.TimeSpan.FromMilliseconds(durMs), wordText));
+                words.Add(new Models.LyricWord(time, System.TimeSpan.FromMilliseconds(durMs.Value), wordText));
                 sb.Append(wordText);
             }
 
-            if (sb.Length == 0)
+            if (rowCorrupt || sb.Length == 0)
                 continue;
 
             // KRC/QRC bodies open with a few song-info rows ("晴 天 - 周杰伦",
             // "词：周杰伦", "编曲：...") in the same word-timed markup — the
             // official players hide them, so do we: they sit in the first rows
-            // and carry the credits punctuation.
+            // and START with a credit label + colon (CreditLineStart). Only
+            // the line start counts: the old contains('词'/'曲'/'：') check
+            // also swallowed real lyrics like "一曲相思" or quoted speech
+            // ("他说：...").
             if (linesEmitted < 12)
             {
                 linesEmitted++;
-                var preview = sb.ToString();
-                if (preview.Contains('：') || preview.Contains(':') ||
-                    preview.Contains("词") || preview.Contains("曲"))
+                if (CreditLineStart.IsMatch(sb.ToString()))
                     continue;
             }
 
@@ -287,6 +313,16 @@ public static class LyricsParser
             lyric.Words = words;
         }
     }
+
+    // Word-timed times are plain \d+ fields, but a corrupt row like
+    // [99999999999999,100] overflows int.Parse — the OverflowException used
+    // to escape MergeWordTimed and blank the WHOLE song (the upper layer
+    // swallows it and shows "no lyrics"). Rows parse through this and a null
+    // result skips just that row.
+    private static int? TryParseInt32(string s) =>
+        int.TryParse(s, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value : (int?)null;
 
     // ---------- LRC / TXT ----------
 
@@ -400,6 +436,12 @@ public static class LyricsParser
                 var time = new System.TimeSpan(0, 0, minutes, seconds, milliseconds);
                 if (offsetMs != 0)
                     time -= System.TimeSpan.FromMilliseconds(offsetMs);
+                // A large positive offset can pull early lines below zero; the
+                // word-timed path clamps to 0:00 (MergeWordTimed) — match it
+                // so sorting and the current-line lookup never see a negative
+                // time.
+                if (time < System.TimeSpan.Zero)
+                    time = System.TimeSpan.Zero;
                 result.Add((time, body));
             }
         }

@@ -78,7 +78,19 @@ internal static class LoudnessCache
             var gain = ReadReplayGain(audioPath);
             if (!gain.HasValue)
                 gain = AnalyzeWithFfmpegAsync(audioPath).GetAwaiter().GetResult();
-            gain ??= 0;
+
+            // Null here means the analysis FAILED (no ffmpeg.exe, non-zero
+            // exit code, unparsable output, 2-minute timeout kill, exception)
+            // — not "the track measures at 0 dB". Writing that failure to the
+            // cache as 0 pinned it until the file's mtime changed, so one
+            // transient problem (missing ffmpeg, sleeping drive) muted the
+            // normalization for that file forever. Return the default gain for
+            // THIS play and leave the cache untouched: the key carries the
+            // mtime, so the next play retries the scan. A genuine 0 dB result
+            // (input_i of -14 LUFS) still arrives as a non-null 0 and is
+            // cached as before.
+            if (!gain.HasValue)
+                return 0;
 
             lock (Gate)
             {
@@ -181,8 +193,14 @@ internal static class LoudnessCache
             if (!System.IO.File.Exists(CacheFile))
                 return new Dictionary<string, double>(CaseInsensitiveComparer);
             using var stream = System.IO.File.OpenRead(CacheFile);
-            return JsonSerializer.Deserialize<Dictionary<string, double>>(stream)
-                   ?? new Dictionary<string, double>(CaseInsensitiveComparer);
+            var deserialized = JsonSerializer.Deserialize<Dictionary<string, double>>(stream);
+            // The deserializer builds a case-SENSITIVE dictionary — without
+            // this rebuild, an entry saved under a different-case path would
+            // not be found after a restart and the file would be rescanned,
+            // defeating the case-insensitive comparer used everywhere else.
+            return deserialized == null
+                ? new Dictionary<string, double>(CaseInsensitiveComparer)
+                : new Dictionary<string, double>(deserialized, CaseInsensitiveComparer);
         }
         catch
         {

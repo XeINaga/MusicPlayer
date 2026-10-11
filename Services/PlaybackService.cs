@@ -356,7 +356,13 @@ public sealed class PlaybackService
         // The random bag holds TRACK REFERENCES, which a removal does not
         // renumber — no reset needed (dead references are swept lazily).
         // History is kept on purpose for the same reason.
-        _index = Math.Max(-1, _index + delta);
+        var newIndex = Math.Max(-1, _index + delta);
+        // Same stale-load rule as SetIndexSilent: removing tracks BEFORE the
+        // current one shifts the loading track's object into the new slot
+        // untouched, so its load keeps running; a slot that ends up holding a
+        // different track kills it.
+        InvalidateStaleLoad(newIndex);
+        _index = newIndex;
     }
 
     /// <summary>
@@ -368,7 +374,10 @@ public sealed class PlaybackService
         if (_queue == null || index < 0 || index >= _queue.Count)
             return;
         // Drag-reordering is safe with a reference-based bag: the tracks are
-        // the same objects, only their positions changed.
+        // the same objects, only their positions changed — and the re-pointed
+        // slot still holds the track any in-flight load is for, so that load
+        // keeps running (see InvalidateStaleLoad / _loadingTrack).
+        InvalidateStaleLoad(index);
         _index = index;
     }
 
@@ -389,12 +398,59 @@ public sealed class PlaybackService
         ResetRandomBag();
         CancelCrossfade();
         _queue = tracks;
-        _index = Math.Clamp(currentIndex, 0, tracks.Count - 1);
+        var idx = Math.Clamp(currentIndex, 0, tracks.Count - 1);
+        // "Play next" keeps the current Track object in the snapshot (the
+        // caller passes its index in the NEW list), so an in-flight load for
+        // that object stays wanted; a snapshot that dropped it makes the load
+        // stale and it dies here. The CancelCrossfade above already restored
+        // the volume / cleared a pending hand-off.
+        InvalidateStaleLoad(idx);
+        _index = idx;
+    }
+
+    /// <summary>
+    /// Kill in-flight load work — and a pending crossfade hand-off — when the
+    /// slot the queue is being silently re-pointed at no longer holds the
+    /// track that work is for (see <see cref="_loadingTrack"/>). A
+    /// same-object re-point (drag-reorder, view rebuild, watch-folder sync,
+    /// play-next snapshot) leaves the load untouched; killing it there would
+    /// leave the picked track unloaded with nothing to re-fire the load.
+    /// </summary>
+    private void InvalidateStaleLoad(int newIndex)
+    {
+        var slotTrack = (_queue != null && newIndex >= 0 && newIndex < _queue.Count)
+            ? _queue[newIndex]
+            : null;
+        if (ReferenceEquals(InFlightTrack(), slotTrack))
+            return; // same track — the in-flight work is still the wanted one
+
+        _loadToken++; // abort an in-flight load for the superseded slot
+        _loadingTrack = null;
+        if (_pendingCrossfadeIndex >= 0)
+            CancelCrossfade(); // a dead hand-off must not leave volume at 0
+    }
+
+    /// <summary>
+    /// The track the current async playback work is for: an executing load's
+    /// target, or — while a fade-out is still running (its load not started
+    /// yet), or in the window between a hand-off load finishing and
+    /// MediaOpened — the pending crossfade target. Null when nothing is in
+    /// flight.
+    /// </summary>
+    private Track? InFlightTrack()
+    {
+        if (_loadingTrack != null)
+            return _loadingTrack;
+        if (_pendingCrossfadeIndex >= 0 && _queue != null &&
+            _pendingCrossfadeIndex < _queue.Count)
+            return _queue[_pendingCrossfadeIndex];
+        return null;
     }
 
     public void Clear()
     {
         _loadToken++; // invalidate any in-flight async load
+        _loadingTrack = null; // ...and forget what it was loading
         _fadeTimer.Stop();
         _fadingOut = false;
         _pendingCrossfadeIndex = -1;
@@ -441,6 +497,21 @@ public sealed class PlaybackService
     };
 
     private int _loadToken;
+    // The track the current async work (an in-flight LoadCurrent, or a
+    // crossfade hand-off whose fade-out has started but whose load has not)
+    // is for, or null. The silent queue mutators (SetIndexSilent / ShiftIndex
+    // / ReplaceQueueSilent) compare it against the slot they re-point _index
+    // to: every present-day caller re-points the index while KEEPING the same
+    // Track object in the slot (queue drag-reorder, playlist view rebuild,
+    // watch-folder sync, play-next snapshot), so an in-flight load for that
+    // object is still the wanted one — killing it would leave the track the
+    // user picked permanently unloaded, because nothing re-fires a load after
+    // a silent re-point (QueueList has no SelectionChanged handler, only
+    // ItemClick). Only when the slot no longer holds that track is the
+    // pending work genuinely stale: finishing it would attach the old song
+    // while the UI / SMTC metadata (which read _queue[_index]) already
+    // describe the new one.
+    private Track? _loadingTrack;
     private FFmpegMediaSource? _ffmpegSource;
     // The plain (non-FFmpeg) path produces a MediaSource that owns a handle to
     // the audio file. It has to be released on the next swap, otherwise the
@@ -462,10 +533,16 @@ public sealed class PlaybackService
         if (_queue == null || _index < 0 || _index >= _queue.Count)
             return;
 
-        var path = _queue[_index]?.Path;
+        var track = _queue[_index];
+        var path = track?.Path;
         if (string.IsNullOrEmpty(path))
             return;
 
+        // Publish what this load is for (see _loadingTrack). Cleared on the
+        // way out — but only while this load is still the newest one: a
+        // superseded load resumes after a newer one has already published its
+        // own track, and clearing here would erase the newer marker.
+        _loadingTrack = track;
         var token = ++_loadToken;
         _pendingSeek = resume;
 
@@ -567,7 +644,23 @@ public sealed class PlaybackService
             }
 
             if (token == _loadToken)
+            {
+                // A crossfade hand-off that ends in a failed load must not
+                // leave the player muted: the fade-out already ran to 0 on the
+                // still-attached OLD source. CancelCrossfade stops the (idle)
+                // fade timer, clears the pending hand-off and restores the
+                // volume so the old track stays audible — and the cleared flag
+                // lets a later natural end advance normally (OnMediaEnded
+                // yields while a hand-off is in flight). Token-guarded so a
+                // superseded load cannot stomp the newer load's fade state.
+                CancelCrossfade();
                 _dispatcher.TryEnqueue(() => MediaFailed?.Invoke(ex.Message));
+            }
+        }
+        finally
+        {
+            if (token == _loadToken)
+                _loadingTrack = null;
         }
 
         // Whatever path the load took, the current track is settled — warm the
@@ -625,8 +718,19 @@ public sealed class PlaybackService
         if (_queue == null || _index < 0 || _index >= _queue.Count)
             return;
 
+        // Only reload a track that is actually playing or paused. During
+        // Opening the session has no position yet (Position reads 0:00) and a
+        // pending resume-seek has not been applied either — reloading there
+        // would restart the track from the top AND clobber _pendingSeek
+        // (LoadCurrent overwrites it with the null resume computed here).
+        // Skipping is the right call: the routing change is already stored and
+        // simply takes effect on the next load.
+        var state = PlaybackState;
+        if (state != MediaPlaybackState.Playing && state != MediaPlaybackState.Paused)
+            return;
+
         var pos = Position;
-        var wasPlaying = PlaybackState == MediaPlaybackState.Playing;
+        var wasPlaying = state == MediaPlaybackState.Playing;
         LoadCurrent(resume: pos > TimeSpan.Zero ? pos : null, play: wasPlaying);
     }
 
@@ -801,6 +905,17 @@ public sealed class PlaybackService
 
     private void OnMediaEnded()
     {
+        // A crossfade hand-off is in flight: the fade-out finished and
+        // LoadCurrent for the next track is still awaiting its source, so the
+        // OLD source is still attached and reaching its natural end now is
+        // expected — it was playing when the fade started. _index already
+        // points at the incoming track, so advancing again from here would
+        // skip one (double-advance). The in-flight load drives the hand-off;
+        // if it fails, CancelCrossfade clears the flag and the next natural
+        // end advances normally.
+        if (_pendingCrossfadeIndex >= 0 && InFlightTrack() != null)
+            return;
+
         if (_mode == PlayMode.LoopOne)
         {
             Seek(TimeSpan.Zero);
@@ -983,7 +1098,14 @@ public sealed class PlaybackService
         {
             var ni = _index + 1;
             if (ni >= n)
-                return _mode == PlayMode.LoopAll ? 0 : -1;
+            {
+                // LoopOne wraps here too: the auto-repeat path never reaches
+                // this code (OnMediaEnded handles LoopOne by seeking to 0
+                // first), so the only caller that can hit this branch with
+                // LoopOne is a manual Next on the last track — which must not
+                // silently do nothing.
+                return _mode == PlayMode.LoopAll || _mode == PlayMode.LoopOne ? 0 : -1;
+            }
             return ni;
         }
 
@@ -1016,6 +1138,13 @@ public sealed class PlaybackService
         _fadeFrom = _player.Volume;
         _fadeTo = 0;
         _fadeElapsed = TimeSpan.Zero;
+        // Publish the hand-off target like LoadCurrent does: until the
+        // fade-out completes and LoadCurrent takes over, the silent queue
+        // mutators must treat this track as the one in flight (and
+        // OnMediaEnded must yield to the hand-off — see its comment).
+        _loadingTrack = (_queue != null && nextIndex >= 0 && nextIndex < _queue.Count)
+            ? _queue[nextIndex]
+            : null;
         _pendingCrossfadeIndex = nextIndex;
         _fadeTimer.Start();
     }

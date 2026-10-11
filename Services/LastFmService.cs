@@ -20,7 +20,7 @@ namespace MusicPlayer.Services;
 public sealed class LastFmService
 {
     private const string ApiBase = "https://ws.audioscrobbler.com/2.0/";
-    private static readonly HttpClient Http = new();
+    private static readonly HttpClient Http = CreateClient();
 
     private readonly AppSettings _settings;
 
@@ -30,6 +30,22 @@ public sealed class LastFmService
     public LastFmService(AppSettings settings)
     {
         _settings = settings;
+    }
+
+    // Same factory pattern as the lyric services (see QQLyricService): the
+    // default HttpClient would time out only after 100 s and hold pooled
+    // connections forever.
+    private static HttpClient CreateClient()
+    {
+        var c = new HttpClient(new SocketsHttpHandler
+        {
+            // Long-running desktop app: drop pooled connections so a network /
+            // DNS change recovers on the next request instead of serving
+            // stale sockets until restart.
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
+        c.Timeout = TimeSpan.FromSeconds(15);
+        return c;
     }
 
     // ───────────── Authentication ─────────────
