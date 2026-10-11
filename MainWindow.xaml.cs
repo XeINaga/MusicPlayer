@@ -535,6 +535,11 @@ public sealed partial class MainWindow : Window
         {
             this.AppWindow.Show();
             this.Activate();
+            // Hiding the window makes the composition system drop the backdrop
+            // target; the controller survives but the glass does not come
+            // back on its own. Re-apply the material (rebuilds the controller
+            // and re-attaches the target).
+            ApplyWindowMaterial();
         }
         catch
         {
