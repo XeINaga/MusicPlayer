@@ -3241,6 +3241,20 @@ public sealed partial class MainWindow : Window
             _settings.LyricBoxWidth = w;
             ScheduleSettingsSave();
         });
+        // The overlay process restarted (crash / update hot-swap): replay the
+        // whole toggle-on push — the fresh window comes up hidden at the
+        // default spot with default styling. The next 40 ms lyric tick
+        // re-fills the text on its own.
+        _desktopLyrics.OverlayRestarted += () => _dispatcher.TryEnqueue(() =>
+        {
+            if (_desktopLyrics == null)
+                return;
+            _desktopLyrics.ApplyStyle(_settings);
+            _desktopLyrics.SetClickThrough(_settings.LyricClickThroughDefault);
+            if (_settings.LyricPosSaved)
+                _desktopLyrics.SetPosition(_settings.LyricPosX, _settings.LyricPosY);
+            _desktopLyrics.Activate();
+        });
         _settings.LyricOverlayEnabled = true;
         SettingsStore.Save(_settings);
         _desktopLyrics.ApplyStyle(_settings);
@@ -4280,7 +4294,25 @@ public sealed partial class MainWindow : Window
         _pushedRoma = roma;
         _pushedTrans = trans;
         _pushedProgress = progress;
-        _desktopLyrics.UpdateLyric(_currentTrack, original, roma, trans, progress);
+        // Ship the line's word timing + clock sample alongside: the overlay
+        // advances the sweep on its own QPC clock calibrated by these, so the
+        // 40 ms sample jitter can no longer kick the sweep position around.
+        double posSec = -1, lineStartSec = -1;
+        double[]? wordTimes = null;
+        if (line.Words is { Count: > 0 })
+        {
+            posSec = _playback.Position.TotalSeconds;
+            lineStartSec = line.Time.TotalSeconds;
+            wordTimes = new double[line.Words.Count * 3];
+            int k = 0;
+            foreach (var w in line.Words)
+            {
+                wordTimes[k++] = Math.Max(0, (w.Start - line.Time).TotalSeconds);
+                wordTimes[k++] = Math.Max(0, w.Duration.TotalSeconds);
+                wordTimes[k++] = w.Text.Length;
+            }
+        }
+        _desktopLyrics.UpdateLyric(_currentTrack, original, roma, trans, progress, posSec, lineStartSec, wordTimes);
     }
 
     // ---------- Romaji / translation toggles (in-app + desktop overlay) ----------
