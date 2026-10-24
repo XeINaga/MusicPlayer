@@ -112,4 +112,19 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     public static extern int SetWindowCompositionAttribute(IntPtr hWnd, ref WINCOMPATTRDATA pAttrData);
+
+    // Window visibility probes used to pause the video wallpaper while the
+    // window cannot be seen (minimized / hidden to tray) or lost focus to
+    // another app.
+    [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 }

@@ -55,6 +55,13 @@ public sealed class AppSettings
     public double WallpaperOpacity { get; set; } = 0.5;
 
     /// <summary>
+    /// Pause the video wallpaper / WE capture when the window merely loses
+    /// focus to another app (not just minimize/tray). Off by default — the
+    /// always-on pause only covers minimized and hidden-to-tray.
+    /// </summary>
+    public bool WallpaperPauseOnBlur { get; set; }
+
+    /// <summary>
     /// Wallpaper stretch: true = Fill (stretch to cover the window, the image
     /// distorts), false = Uniform (scale to show the whole image, the sides
     /// show the material/colour beneath).

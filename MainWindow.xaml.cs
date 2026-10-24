@@ -5752,6 +5752,7 @@ public sealed partial class MainWindow : Window
         WallpaperOpacitySlider.Value = _settings.WallpaperOpacity * 100;
         WallpaperOpacityText.Text = $"{(int)Math.Round(_settings.WallpaperOpacity * 100)}%";
         WallpaperFillToggle.IsOn = _settings.WallpaperFill;
+        WallpaperBlurPauseToggle.IsOn = _settings.WallpaperPauseOnBlur;
         LyricOpacitySlider.Value = _settings.LyricBgOpacity * 100;
         LyricBoldToggle.IsOn = _settings.LyricBold;
         LyricAlignCombo.SelectedIndex = _settings.LyricAlign == "Left" ? 1 : 0;
@@ -6224,6 +6225,10 @@ public sealed partial class MainWindow : Window
 
     private void OnFirstActivatedReapplyMaterial(object sender, WindowActivatedEventArgs e)
     {
+        // Focus change drives the video-wallpaper pause instantly (both
+        // directions) — the 500 ms poll is only the safety net.
+        UpdateVideoWallpaperVisibility();
+
         if (e.WindowActivationState == WindowActivationState.Deactivated)
             return;
 
@@ -6274,6 +6279,7 @@ public sealed partial class MainWindow : Window
         _weCapture ??= new WallpaperEngineCaptureService();
         _weCapture.BitmapReplaced -= OnWeBitmapReplaced;
         _weCapture.BitmapReplaced += OnWeBitmapReplaced;
+        _weCapture.PauseOnBlur = _settings.WallpaperPauseOnBlur;
         var hwnd = WindowNative.GetWindowHandle(this);
         _weCapture.Start(_dispatcher, hwnd);
         OnWeBitmapReplaced(_weCapture.Bitmap!);
@@ -6508,6 +6514,18 @@ public sealed partial class MainWindow : Window
             : Stretch.Uniform;
         WallpaperVideoPlayer.Opacity = _settings.WallpaperOpacity;
         WallpaperVideoPlayer.Visibility = Visibility.Visible;
+
+        // Pause while the window is minimized or hidden to the tray: the
+        // loop keeps decoding at full rate otherwise, burning GPU/CPU for a
+        // background nobody can see. The poller also resumes playback from
+        // the pause point when the window becomes visible again.
+        if (_videoVisibilityTimer == null)
+        {
+            _videoVisibilityTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+            _videoVisibilityTimer.Tick += (_, _) => UpdateVideoWallpaperVisibility();
+        }
+        _videoVisibilityTimer.Start();
+        UpdateVideoWallpaperVisibility();   // apply immediately, not one tick late
     }
 
     // Currently assigned video-wallpaper source. MediaSource is IDisposable:
@@ -6515,8 +6533,54 @@ public sealed partial class MainWindow : Window
     private Windows.Media.Core.MediaSource? _videoWallpaperSource;
     private string? _videoWallpaperSourcePath;
 
+    private DispatcherTimer? _videoVisibilityTimer;
+    private bool _videoWallpaperAway;        // paused: window hidden/minimized OR focus lost to another app
+
+    /// <summary>Pause/resume the video wallpaper when the window is "away":
+    /// always when minimized or hidden to tray; additionally on plain focus
+    /// loss to another app when the user enables WallpaperPauseOnBlur.
+    /// Windows of this same process (sound fx panel, lyric search, crop
+    /// dialog…) do NOT count as away: the main window stays visible behind
+    /// them and freezing the wallpaper there would look broken. Resumes from
+    /// the pause point. Window.Activated refreshes this instantly in both
+    /// directions; the 500 ms poll is only the safety net for paths without
+    /// an event (e.g. another app stealing focus via a flash).</summary>
+    private void UpdateVideoWallpaperVisibility()
+    {
+        if (_videoWallpaperSource == null)
+            return;
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        bool away = Services.NativeMethods.IsIconic(hwnd)
+                    || !Services.NativeMethods.IsWindowVisible(hwnd);
+        if (!away && _settings.WallpaperPauseOnBlur)
+        {
+            var fg = Services.NativeMethods.GetForegroundWindow();
+            if (fg != hwnd)
+            {
+                Services.NativeMethods.GetWindowThreadProcessId(fg, out var fgPid);
+                away = fgPid != (uint)Environment.ProcessId;   // fg==0 → pid 0 → away
+            }
+        }
+        if (away == _videoWallpaperAway)
+            return;
+        _videoWallpaperAway = away;
+        try
+        {
+            if (away)
+                WallpaperVideoPlayer.MediaPlayer?.Pause();
+            else
+                WallpaperVideoPlayer.MediaPlayer?.Play();
+        }
+        catch
+        {
+            // player torn down mid-shutdown
+        }
+    }
+
     private void StopVideoWallpaper()
     {
+        _videoVisibilityTimer?.Stop();
+        _videoWallpaperAway = false;
         try
         {
             WallpaperVideoPlayer.MediaPlayer?.Pause();
@@ -6560,6 +6624,20 @@ public sealed partial class MainWindow : Window
         WallpaperVideoPlayer.Stretch = _settings.WallpaperFill
             ? Stretch.Fill
             : Stretch.Uniform;
+    }
+
+    private void WallpaperBlurPauseToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents)
+            return;
+        _settings.WallpaperPauseOnBlur = WallpaperBlurPauseToggle.IsOn;
+        ScheduleSettingsSave();
+        // Push to the capture thread and re-evaluate the video wallpaper
+        // immediately: turning the switch on while unfocused must pause right
+        // now, turning it off must resume right now.
+        if (_weCapture != null)
+            _weCapture.PauseOnBlur = _settings.WallpaperPauseOnBlur;
+        UpdateVideoWallpaperVisibility();
     }
 
     // ---------- Sidebar collapse ----------

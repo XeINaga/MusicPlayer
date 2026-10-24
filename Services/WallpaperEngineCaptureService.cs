@@ -43,6 +43,7 @@ public sealed class WallpaperEngineCaptureService : IDisposable
     private int _printFails;                // consecutive PrintWindow failures (capture thread only)
     private DispatcherQueue? _dispatcher;
     private IntPtr _mainHwnd;
+    private uint _mainPid;                 // host process: own child windows don't count as "away"
 
     private WriteableBitmap? _bitmap;       // UI thread created / replaced
     private FrameTarget? _target;           // immutable (bitmap, ptr, w, h) triple, published under _gate
@@ -94,6 +95,12 @@ public sealed class WallpaperEngineCaptureService : IDisposable
     /// <summary>True once the WE render window has been located.</summary>
     public bool WindowFound => _windowFound;
 
+    /// <summary>Additionally skip frames while the host window merely lost
+    /// focus to another app (minimize/tray always pause regardless). Read by
+    /// the capture thread on every frame; set by the host when the user
+    /// toggles the corresponding setting.</summary>
+    public volatile bool PauseOnBlur;
+
     /// <summary>True between Start() and Stop().</summary>
     public bool IsRunning
     {
@@ -130,6 +137,7 @@ public sealed class WallpaperEngineCaptureService : IDisposable
             _dying = null;
             _dispatcher = dq;
             _mainHwnd = mainHwnd;
+            _mainPid = (uint)Environment.ProcessId;
             _weHwnd = IntPtr.Zero;
             _windowFound = false;
             _printFails = 0;
@@ -362,10 +370,30 @@ public sealed class WallpaperEngineCaptureService : IDisposable
             _nextFindAt = 0;    // re-find immediately
             return;
         }
-        // Minimized: GetWindowRect returns the icon rect, which would feed
-        // the resize path a bogus size and trip a bitmap rebuild — skip.
-        if (IsIconic(_mainHwnd))
+        // Minimized OR hidden (close-to-tray does AppWindow.Hide → SW_HIDE):
+        // GetWindowRect returns the icon rect when minimized (bogus size for
+        // the resize path), and capturing frames nobody can see burns a full
+        // 20 fps PrintWindow/blit loop for nothing. Skip the frame either
+        // way; the loop keeps polling at its normal pace and resumes by
+        // itself once the window is visible again.
+        if (IsIconic(_mainHwnd) || !IsWindowVisible(_mainHwnd))
             return;
+
+        // Focus lost to another app (opt-in via PauseOnBlur — the user
+        // toggle in settings): same pause condition the host applies to its
+        // video wallpaper. Windows of our own process (sound fx panel, lyric
+        // search, crop dialog…) are exempt — the main window stays visible
+        // behind them.
+        if (PauseOnBlur)
+        {
+            var fg = GetForegroundWindow();
+            if (fg != _mainHwnd)
+            {
+                GetWindowThreadProcessId(fg, out var fgPid);
+                if (fgPid != _mainPid)
+                    return;
+            }
+        }
 
         GetWindowRect(_mainHwnd, out var mr);
         int wantW = Math.Max(1, mr.R - mr.L), wantH = Math.Max(1, mr.B - mr.T);
@@ -532,6 +560,9 @@ public sealed class WallpaperEngineCaptureService : IDisposable
 
     [DllImport("user32.dll")]
     private static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(IntPtr hwnd, out RECT r);

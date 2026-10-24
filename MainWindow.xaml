@@ -1083,6 +1083,18 @@
                                                           Toggled="WallpaperFillToggle_Toggled"
                                                           ToolTipService.ToolTip="拉伸会把图片不等比放大到填满窗口（可能变形）；完整显示会等比缩小到完整可见（两侧露出背景）" />
                                         </Grid>
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="失焦时暂停" Grid.Column="0" VerticalAlignment="Center" FontSize="13"
+                                                       Foreground="{ThemeResource TextPrimary}" />
+                                            <ToggleSwitch x:Name="WallpaperBlurPauseToggle" Grid.Column="1" HorizontalAlignment="Left"
+                                                          OnContent="暂停" OffContent="继续播放" Margin="0,0,0,0"
+                                                          Toggled="WallpaperBlurPauseToggle_Toggled"
+                                                          ToolTipService.ToolTip="开启后窗口一失去前台焦点（切到其他程序）就暂停视频壁纸与动态壁纸捕获，最小化/最小化到托盘始终会暂停；关闭时仅最小化/托盘暂停" />
+                                        </Grid>
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
