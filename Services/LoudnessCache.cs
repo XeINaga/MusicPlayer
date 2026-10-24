@@ -61,6 +61,52 @@ internal static class LoudnessCache
         });
     }
 
+    /// <summary>
+    /// Background warm-up for the WHOLE library (startup path). Random mode
+    /// cannot predict the next track, and PreprocessNextTrack only covers
+    /// list order — without this, every first play of an uncached track
+    /// blocks the switch on a full ffmpeg scan (1-3 s per FLAC).
+    /// Two concurrent scans: HDD-friendly, still finishes a 700-track
+    /// library in a few minutes. Already-cached tracks cost one stat each.
+    /// </summary>
+    public static void WarmLibraryAsync(IEnumerable<string?> paths)
+    {
+        _ = Task.Run(async () =>
+        {
+            using var gate = new SemaphoreSlim(2);
+            var tasks = new List<Task>();
+            foreach (var p in paths)
+            {
+                if (string.IsNullOrEmpty(p) || !System.IO.File.Exists(p))
+                    continue;
+                var path = p;
+                string key;
+                try
+                {
+                    key = new LoudnessKey(path, System.IO.File.GetLastWriteTimeUtc(path).Ticks).ToString();
+                }
+                catch
+                {
+                    continue;
+                }
+                lock (Gate)
+                {
+                    _cache ??= LoadSync();
+                    if (_cache.ContainsKey(key))
+                        continue; // already warm
+                }
+                await gate.WaitAsync();
+                tasks.Add(Task.Run(() =>
+                {
+                    try { GetGainDbCore(path); }
+                    catch { /* best effort */ }
+                    finally { gate.Release(); }
+                }));
+            }
+            await Task.WhenAll(tasks.ToArray());
+        });
+    }
+
     private static double GetGainDbCore(string audioPath)
     {
         try
@@ -205,21 +251,72 @@ internal static class LoudnessCache
         }
     }
 
+    // v2 on-disk format: {"V":2,"Gains":{...}}. v1 (a plain dictionary) is
+    // migrated on load — see LoadSync for the 0 dB purge that migration does.
+    private sealed record LoudnessFile(int V, Dictionary<string, double> Gains);
+
     private static Dictionary<string, double> LoadSync()
     {
+        var result = new Dictionary<string, double>(CaseInsensitiveComparer);
         try
         {
             if (!System.IO.File.Exists(CacheFile))
-                return new Dictionary<string, double>(CaseInsensitiveComparer);
-            using var stream = System.IO.File.OpenRead(CacheFile);
-            var deserialized = JsonSerializer.Deserialize<Dictionary<string, double>>(stream);
-            // The deserializer builds a case-SENSITIVE dictionary — without
-            // this rebuild, an entry saved under a different-case path would
-            // not be found after a restart and the file would be rescanned,
-            // defeating the case-insensitive comparer used everywhere else.
-            return deserialized == null
-                ? new Dictionary<string, double>(CaseInsensitiveComparer)
-                : new Dictionary<string, double>(deserialized, CaseInsensitiveComparer);
+                return result;
+
+            Dictionary<string, double>? raw = null;
+            try
+            {
+                using (var stream = System.IO.File.OpenRead(CacheFile))
+                {
+                    var v2 = JsonSerializer.Deserialize<LoudnessFile>(stream);
+                    if (v2?.Gains != null)
+                        raw = v2.Gains;
+                }
+            }
+            catch (JsonException)
+            {
+                // not the v2 shape — fall through to the v1 format below
+            }
+
+            if (raw == null)
+            {
+                try
+                {
+                    using var stream = System.IO.File.OpenRead(CacheFile);
+                    raw = JsonSerializer.Deserialize<Dictionary<string, double>>(stream);
+                }
+                catch (JsonException)
+                {
+                    // corrupt file — start empty, it rebuilds from scans
+                }
+            }
+
+            if (raw == null)
+                return result;
+
+            var purged = false;
+            foreach (var (key, value) in raw)
+            {
+                // v1-era poison: the old "cache a failed scan as 0" bug pinned
+                // 0 dB gains on tracks that actually measure 2-9 dB quieter,
+                // so they played noticeably louder than everything else. Real
+                // 0 dB entries (a track measuring exactly -14 LUFS) are rare
+                // enough that dropping them too is fine — one rescan each.
+                if (value == 0 || string.IsNullOrEmpty(key))
+                {
+                    purged = true;
+                    continue;
+                }
+                result[key] = value;
+            }
+
+            if (purged)
+            {
+                // Persist the migration immediately (v2 shape) so the purge
+                // runs once instead of on every launch.
+                try { SaveSync(result); } catch { /* best effort */ }
+            }
+            return result;
         }
         catch
         {
@@ -234,7 +331,7 @@ internal static class LoudnessCache
         try
         {
             Directory.CreateDirectory(DataLocation.Root);
-            var json = JsonSerializer.Serialize(cache);
+            var json = JsonSerializer.Serialize(new LoudnessFile(2, cache));
             AtomicFile.WriteAllText(CacheFile, json, System.Text.Encoding.UTF8);
         }
         catch

@@ -634,7 +634,16 @@ public sealed partial class MainWindow : Window
     {
         var entries = PlaylistStore.LoadAutoPlaylist();
         if (entries.Count > 0)
+        {
             AddItemsFromStore(entries);
+
+            // Loudness warm-up for the whole library (throttled background
+            // scan). List-order playback already pre-warms its next track,
+            // but random mode cannot — without this, the first play of every
+            // uncached track blocks the switch on a full ffmpeg scan.
+            if (_settings.DynamicVolume)
+                LoudnessCache.WarmLibraryAsync(_library.Select(t => (string?)t.Path));
+        }
 
         LoadRecentFromStore();
         LoadPlaylistsFromStore();
