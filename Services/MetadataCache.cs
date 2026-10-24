@@ -24,12 +24,20 @@ namespace MusicPlayer.Services;
 /// </summary>
 internal static class MetadataCache
 {
+    /// <summary>Whether a track has embedded cover art. Persisted per entry so
+    /// the warm path can tell "no cover" (skip TagLib) from "cover png was
+    /// trimmed from CoverCache" (re-extract). Missing field in old JSON files
+    /// deserializes to <see cref="CoverUnknown"/>, which re-extracts once and
+    /// then settles.</summary>
+    internal const int CoverUnknown = 0, CoverYes = 1, CoverNo = 2;
+
     private sealed record Entry(
         long MtimeTicks,
         string? Title,
         string? Artist,
         string? Album,
-        int DurationMs);
+        int DurationMs,
+        int CoverState = CoverUnknown);
 
     private static readonly object Gate = new();
     private static Dictionary<string, Entry>? _entries; // key: full path, case-insensitive
@@ -41,10 +49,12 @@ internal static class MetadataCache
     /// <summary>Resolve a track's metadata from cache. False when the path is
     /// unknown or the file changed since it was cached.</summary>
     public static bool TryGet(string path, long mtimeTicks,
-        out string? title, out string? artist, out string? album, out TimeSpan duration)
+        out string? title, out string? artist, out string? album, out TimeSpan duration,
+        out int coverState)
     {
         title = artist = album = null;
         duration = TimeSpan.Zero;
+        coverState = CoverUnknown;
 
         if (mtimeTicks == 0)
             return false;
@@ -62,6 +72,7 @@ internal static class MetadataCache
                 artist = e.Artist;
                 album = e.Album;
                 duration = TimeSpan.FromMilliseconds(e.DurationMs);
+                coverState = e.CoverState;
                 return true;
             }
         }
@@ -70,7 +81,8 @@ internal static class MetadataCache
 
     /// <summary>Store a freshly-scanned entry and schedule a debounced save.</summary>
     public static void Put(string path, long mtimeTicks,
-        string? title, string? artist, string? album, TimeSpan duration)
+        string? title, string? artist, string? album, TimeSpan duration,
+        int coverState = CoverUnknown)
     {
         if (mtimeTicks == 0)
             return;
@@ -82,7 +94,7 @@ internal static class MetadataCache
 
             _entries![path] = new Entry(
                 mtimeTicks, title, artist, album,
-                (int)Math.Clamp(duration.TotalMilliseconds, 0, int.MaxValue));
+                (int)Math.Clamp(duration.TotalMilliseconds, 0, int.MaxValue), coverState);
 
             if (!_dirty)
             {

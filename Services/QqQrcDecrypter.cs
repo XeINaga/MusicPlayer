@@ -52,10 +52,16 @@ public static class QqQrcDecrypter
             // an IndexOutOfRangeException (it would be swallowed upstream and look
             // like "no lyrics"), so decrypt only whole blocks and pass the rest through.
             int aligned = bytes.Length - (bytes.Length % 8);
+            // Copy each block into a fixed 8-byte buffer instead of slicing
+            // bytes[i..] — the range expression clones the ENTIRE remaining
+            // tail per block (O(n²) copies; a 1 MB lyric ≈ tens of seconds on
+            // the managed path) while the cipher only ever reads 8 bytes.
+            var block = new byte[8];
+            var temp = new byte[8];
             for (int i = 0; i < aligned; i += 8)
             {
-                var temp = new byte[8];
-                DesHelper.TripleDesCrypt(bytes[i..], temp, schedule);
+                Array.Copy(bytes, i, block, 0, 8);
+                DesHelper.TripleDesCrypt(block, temp, schedule);
                 for (int j = 0; j < 8; j++)
                     data[i + j] = temp[j];
             }
@@ -66,7 +72,19 @@ public static class QqQrcDecrypter
         using var compressed = new MemoryStream(data);
         using var decompressed = new MemoryStream();
         using var zlib = new System.IO.Compression.ZLibStream(compressed, System.IO.Compression.CompressionMode.Decompress);
-        zlib.CopyTo(decompressed);
+        // Decompression bomb guard: QRC lyrics are text well under a megabyte;
+        // without a cap a malicious hex blob inflates into gigabytes (OOM)
+        // before any caller-side catch can react.
+        var chunkBuf = new byte[64 * 1024];
+        long total = 0;
+        int read;
+        while ((read = zlib.Read(chunkBuf, 0, chunkBuf.Length)) > 0)
+        {
+            total += read;
+            if (total > 16 * 1024 * 1024)
+                throw new InvalidDataException("QRC decompressed payload exceeds 16 MB");
+            decompressed.Write(chunkBuf, 0, read);
+        }
         return Encoding.UTF8.GetString(decompressed.ToArray());
     }
 

@@ -628,6 +628,11 @@ public sealed class PlaybackService
                     var oldNativeFallback = _nativeSource;
                     _ffmpegSource = null;
                     _nativeSource = fallback;
+                    // The fallback path skips the loudness scan, so reset the
+                    // gain — leaving the previous track's value in place made
+                    // this track play at the wrong level (up to ±12 dB) until
+                    // the next clean load.
+                    SetTrackGain(0);
                     _player.Source = fallback;
                     oldFfmpegFallback?.Dispose();
                     oldNativeFallback?.Dispose();
@@ -1131,6 +1136,15 @@ public sealed class PlaybackService
     /// </summary>
     private void StartCrossfade(int nextIndex)
     {
+        // Kill any in-flight load for the superseded slot: the fade-out delays
+        // this hand-off's own LoadCurrent by 200 ms, so a load started for an
+        // EARLIER GoTo may still be awaiting its source/gain when the user
+        // switches again. Without bumping the token that stale load resumes,
+        // passes every token check (StartCrossfade never invalidated it), and
+        // swaps in the wrong track while _index already describes the new one —
+        // wrong audio, and the next natural end advances from the wrong slot.
+        _loadToken++;
+
         if (_fadeTimer.IsEnabled)
             _fadeTimer.Stop(); // cancel any in-progress fade
 

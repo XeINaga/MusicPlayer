@@ -30,7 +30,20 @@ public static class KrcDecrypter
             using var input = new MemoryStream(body);
             using var zlib = new ZLibStream(input, CompressionMode.Decompress);
             using var output = new MemoryStream();
-            zlib.CopyTo(output);
+            // Lyrics are plain text — even a huge word-timed book is well under
+            // a megabyte. An adversarial .krc (a local file, or a payload
+            // injected before this endpoint moved to HTTPS) could otherwise
+            // decompress into gigabytes and take the process down.
+            var chunk = new byte[64 * 1024];
+            long total = 0;
+            int read;
+            while ((read = zlib.Read(chunk, 0, chunk.Length)) > 0)
+            {
+                total += read;
+                if (total > 16 * 1024 * 1024)
+                    return null;
+                output.Write(chunk, 0, read);
+            }
             var text = Encoding.UTF8.GetString(output.ToArray());
             return text.Length == 0 ? null : text;
         }

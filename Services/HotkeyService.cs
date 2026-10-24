@@ -40,6 +40,14 @@ public sealed class HotkeyService : IDisposable
     private static readonly IntPtr HWND_MESSAGE = new(-3);
 
     private readonly Native.WndProc _proc;
+    // A per-instance class name: Dispose destroys the window but does NOT
+    // unregister the class, and a second instance re-registering the same name
+    // fails silently (ERROR_CLASS_ALREADY_EXISTS) while CreateWindowEx still
+    // succeeds — leaving the new window running on the FIRST instance's
+    // marshaling thunk. Once that instance is collected, the stale thunk turns
+    // every hotkey press into a crash. A unique name keeps each window bound
+    // to its own (rooted) delegate, and Run() unregisters it on the way out.
+    private readonly string _className = "MusicPlayerHotkeyWnd_" + Guid.NewGuid().ToString("N");
     private Thread? _thread;
     private volatile IntPtr _hwnd;
     private bool _registered;
@@ -94,13 +102,19 @@ public sealed class HotkeyService : IDisposable
         var wc = new Native.WNDCLASS
         {
             lpfnWndProc = _proc,
-            lpszClassName = "MusicPlayerHotkeyWnd",
+            lpszClassName = _className,
             hInstance = Native.GetModuleHandle(null),
         };
-        Native.RegisterClass(ref wc);
+        if (Native.RegisterClass(ref wc) == 0)
+        {
+            // Cannot host the message window — report and stop this thread so
+            // StartThread doesn't spin its full wait loops for nothing.
+            _registered = true;
+            return;
+        }
 
         _hwnd = Native.CreateWindowEx(
-            0, "MusicPlayerHotkeyWnd", "", 0, 0, 0, 0, 0,
+            0, _className, "", 0, 0, 0, 0, 0,
             HWND_MESSAGE, IntPtr.Zero, Native.GetModuleHandle(null), IntPtr.Zero);
 
         RegisterAll();
@@ -111,6 +125,10 @@ public sealed class HotkeyService : IDisposable
             Native.DispatchMessage(ref msg);
         }
         _hwnd = IntPtr.Zero;
+        // The window is gone (PostQuitMessage ran) — drop the class so the
+        // process doesn't accumulate one dead registration (and its thunk)
+        // per enable/disable cycle of the hotkey setting.
+        Native.UnregisterClass(_className, Native.GetModuleHandle(null));
     }
 
     private void RegisterAll()
@@ -211,6 +229,9 @@ public sealed class HotkeyService : IDisposable
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern ushort RegisterClass(ref WNDCLASS wc);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        public static extern bool UnregisterClass(string lpClassName, IntPtr hInstance);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr CreateWindowEx(

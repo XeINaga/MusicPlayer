@@ -132,21 +132,25 @@ public sealed class LastFmService
         if (!IsConnected || entries.Count == 0)
             return;
 
+        var serverRejected = 0;
         // Split into chunks of 50
         for (var i = 0; i < entries.Count; i += 50)
         {
             var chunk = entries.Skip(i).Take(50).ToList();
-            var ok = await PostScrobbleChunkAsync(chunk);
-            if (!ok)
+            var (delivered, rejected) = await PostScrobbleChunkAsync(chunk);
+            if (!delivered)
             {
                 // Queue the failed chunk for retry
                 SaveFailedScrobbles(chunk);
                 StatusChanged?.Invoke("Last.fm scrobble 失败，将在下次启动时重试");
                 return;
             }
+            serverRejected += rejected.Count;
         }
 
-        StatusChanged?.Invoke($"Last.fm 已 scrobble {entries.Count} 首歌曲");
+        StatusChanged?.Invoke(serverRejected > 0
+            ? $"Last.fm 已 scrobble {entries.Count - serverRejected} 首，拒收 {serverRejected} 首（时间戳过老或元数据不全）"
+            : $"Last.fm 已 scrobble {entries.Count} 首歌曲");
     }
 
     /// <summary>Retry any previously failed scrobbles (called on app startup).</summary>
@@ -162,10 +166,12 @@ public sealed class LastFmService
         // re-posts the entire pile forever. Walk it in chunks and keep only what
         // is still outstanding.
         var done = 0;
+        var serverRejected = 0;
         for (var i = 0; i < pending.Count; i += 50)
         {
             var chunk = pending.Skip(i).Take(50).ToList();
-            if (!await PostScrobbleChunkAsync(chunk))
+            var (delivered, rejected) = await PostScrobbleChunkAsync(chunk);
+            if (!delivered)
             {
                 // This chunk and everything after it stay queued.
                 WriteFailedScrobbles(pending.Skip(i).ToList());
@@ -173,17 +179,32 @@ public sealed class LastFmService
                     StatusChanged?.Invoke($"Last.fm 重试 scrobble 部分成功：{done} 首");
                 return;
             }
-            done += chunk.Count;
+            done += chunk.Count - rejected.Count;
+            serverRejected += rejected.Count;
         }
 
         ClearFailedScrobbles();
-        StatusChanged?.Invoke($"Last.fm 重试 scrobble 成功：{done} 首");
+        StatusChanged?.Invoke(serverRejected > 0
+            ? $"Last.fm 重试 scrobble 成功：{done} 首，拒收 {serverRejected} 首（已跳过）"
+            : $"Last.fm 重试 scrobble 成功：{done} 首");
     }
 
-    private async Task<bool> PostScrobbleChunkAsync(IList<ScrobbleEntry> entries)
+    /// <summary>
+    /// Post one chunk of scrobbles.
+    /// Returns (delivered, serverRejected): delivered=false means the request
+    /// itself failed (network/session/parse) and the WHOLE chunk should be
+    /// retried; delivered=true means the server processed it, and
+    /// serverRejected lists the individual entries Last.fm refused. Refusals
+    /// are permanent (timestamp too old, missing metadata), so the caller
+    /// drops them with a status report instead of re-queueing — the old
+    /// "accepted > 0" check silently lost them, and re-queueing would just
+    /// re-send the same refused entries on every launch forever.
+    /// </summary>
+    private async Task<(bool Delivered, List<ScrobbleEntry> ServerRejected)> PostScrobbleChunkAsync(
+        IList<ScrobbleEntry> entries)
     {
         if (!IsConnected)
-            return false;
+            return (false, new List<ScrobbleEntry>());
 
         try
         {
@@ -218,23 +239,54 @@ public sealed class LastFmService
             var json = await response.Content.ReadAsStringAsync();
             var doc = JsonDocument.Parse(json);
 
-            // Last.fm returns accepted/rejected counts in the scrobbles response
-            if (doc.RootElement.TryGetProperty("scrobbles", out var scrobbles))
+            // Last.fm returns accepted/rejected counts plus a per-track
+            // scrobble array whose ignoredMessage.code is non-zero for the
+            // refused entries.
+            if (doc.RootElement.TryGetProperty("scrobbles", out var scrobbles) &&
+                scrobbles.TryGetProperty("@attr", out var attr))
             {
-                if (scrobbles.TryGetProperty("@attr", out var attr))
+                var rejectedTs = new HashSet<long>();
+                if (scrobbles.TryGetProperty("scrobble", out var perTrack))
                 {
-                    var accepted = attr.TryGetProperty("accepted", out var a) ? a.GetInt32() : 0;
-                    var rejected = attr.TryGetProperty("rejected", out var r) ? r.GetInt32() : 0;
-                    return accepted > 0 || rejected == 0;
+                    // Single-entry responses come back as an object, batches
+                    // as an array — normalize both.
+                    if (perTrack.ValueKind == JsonValueKind.Object)
+                        CollectRejectedTimestamp(perTrack, rejectedTs);
+                    else if (perTrack.ValueKind == JsonValueKind.Array)
+                        foreach (var s in perTrack.EnumerateArray())
+                            CollectRejectedTimestamp(s, rejectedTs);
                 }
+                var rejected = entries.Where(e => rejectedTs.Contains(e.TimestampUnix)).ToList();
+                return (true, rejected);
             }
 
-            return response.IsSuccessStatusCode;
+            // Parsed but no scrobbles block — treat an HTTP error as
+            // undelivered (retry), a 2xx without the block as delivered.
+            return (response.IsSuccessStatusCode, new List<ScrobbleEntry>());
         }
         catch
         {
-            return false;
+            return (false, new List<ScrobbleEntry>());
         }
+    }
+
+    /// <summary>Add the timestamp of a refused scrobble entry (ignoredMessage
+    /// code non-zero) to <paramref name="into"/>. Timestamp arrives as a
+    /// string or a number depending on the response shape.</summary>
+    private static void CollectRejectedTimestamp(JsonElement s, HashSet<long> into)
+    {
+        var code = s.TryGetProperty("ignoredMessage", out var im) &&
+                   im.TryGetProperty("code", out var c)
+            ? c.GetString()
+            : null;
+        if (string.IsNullOrEmpty(code) || code == "0")
+            return;
+        if (!s.TryGetProperty("timestamp", out var ts))
+            return;
+        if (ts.ValueKind == JsonValueKind.String && long.TryParse(ts.GetString(), out var t))
+            into.Add(t);
+        else if (ts.ValueKind == JsonValueKind.Number && ts.TryGetInt64(out var n))
+            into.Add(n);
     }
 
     // ───────────── Failed scrobble persistence ─────────────

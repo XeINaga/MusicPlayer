@@ -50,8 +50,18 @@ public static class MetadataService
                 // unreadable file → treated as cache miss, TagLib will fail the same way
             }
 
-            if (MetadataCache.TryGet(track.Path, mtime, out title, out artist, out album, out duration))
-                return; // warm path: cover comes from the disk cache below
+            if (MetadataCache.TryGet(track.Path, mtime, out title, out artist, out album, out duration, out var coverState))
+            {
+                // Cover-aware warm path. The decoded png lives in a separate,
+                // size-capped cache (CoverCache.TrimAsync) that evicts
+                // oldest-first; once a track's png is gone a metadata hit used
+                // to mean the tag was never read again — the cover was lost
+                // forever. Exit warm only when the track is KNOWN coverless or
+                // the png is still on disk; otherwise fall through to the tag
+                // read below, which rebuilds the png and settles the state.
+                if (coverState == MetadataCache.CoverNo || CoverCache.IsCached(track.Path))
+                    return;
+            }
 
             try
             {
@@ -79,10 +89,13 @@ public static class MetadataService
             catch
             {
                 // Leave defaults on any read failure (unsupported format, DRM, ...).
+                // On the rebuild path the warm title/artist/... are already
+                // loaded, so a TagLib failure here only costs the cover.
             }
 
             if (mtime != 0)
-                MetadataCache.Put(track.Path, mtime, title, artist, album, duration);
+                MetadataCache.Put(track.Path, mtime, title, artist, album, duration,
+                    coverBytes != null ? MetadataCache.CoverYes : MetadataCache.CoverNo);
         }, ct);
 
         if (ct.IsCancellationRequested)

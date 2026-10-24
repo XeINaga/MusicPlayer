@@ -61,6 +61,13 @@ extern "C" UINT __stdcall NormalizeInstallDir(MSIHANDLE hInstall) {
 
     const wchar_t* name = L"MusicPlayer";
     if (!wendswith_ci(buf, name)) {
+        // Room check before appending: a property of up to 4095 chars fits the
+        // MsiGetPropertyW buffer, but lstrcatW("\\MusicPlayer") on top of it
+        // would write past the end of buf (stack overwrite inside the
+        // elevated custom action). Too long → leave the property untouched,
+        // same as every other bail-out here.
+        if (len + 12 > 4096)
+            return ERROR_SUCCESS;
         lstrcatW(buf, L"\\MusicPlayer");
         MsiSetPropertyW(hInstall, L"INSTALLFOLDER", buf);
     }

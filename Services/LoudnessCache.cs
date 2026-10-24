@@ -164,13 +164,32 @@ internal static class LoudnessCache
                 if (process.ExitCode != 0)
                     return null;
 
-                var match = Regex.Match(stderr.Result, "\"input_i\"\\s*:\\s*\"(?<lufs>-?[0-9]+(?:\\.[0-9]+)?)\"");
-                if (!match.Success || !double.TryParse(
-                        match.Groups["lufs"].Value,
+                // ffmpeg reports "-inf" for silent/near-silent input; the old
+                // numeric-only pattern missed it, the miss was treated as
+                // "analysis failed" (never cached), and every single play of a
+                // silent track re-ran the full two-minute ffmpeg scan.
+                var match = Regex.Match(stderr.Result, "\"input_i\"\\s*:\\s*\"(?<lufs>-?(?:[0-9]+(?:\\.[0-9]+)?|inf))\"");
+                if (!match.Success)
+                    return null;
+
+                double inputLufs;
+                var lufsText = match.Groups["lufs"].Value;
+                if (lufsText.EndsWith("inf", StringComparison.Ordinal))
+                {
+                    // -inf clamps to the +6 dB ceiling below; the samples are
+                    // all zero, so the gain is inaudible either way — the
+                    // point is that the value gets CACHED and the scan never
+                    // re-runs. "+inf" (not produced in practice) clamps to -12.
+                    inputLufs = lufsText.StartsWith('-') ? double.NegativeInfinity : double.PositiveInfinity;
+                }
+                else if (!double.TryParse(
+                        lufsText,
                         System.Globalization.NumberStyles.Float,
                         System.Globalization.CultureInfo.InvariantCulture,
-                        out var inputLufs))
+                        out inputLufs))
+                {
                     return null;
+                }
 
                 return Math.Clamp(-14.0 - inputLufs, -12, 6);
             }

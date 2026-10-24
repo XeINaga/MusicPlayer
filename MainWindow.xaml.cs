@@ -3259,16 +3259,15 @@ public sealed partial class MainWindow : Window
         _library.RemoveAt(idx);
         PersistLibrary();
 
-        // The playing track itself: stop instead of silently continuing.
-        if (_playback.Queue != null && _playback.CurrentIndex >= 0
-            && _playback.CurrentIndex < _playback.Queue.Count
-            && ReferenceEquals(_playback.Queue[_playback.CurrentIndex], track))
-        {
-            _playback.Clear();
-            _boundQueue = null;
-            QueueList.ItemsSource = null;
-            ResetNowPlaying();
-        }
+        // SyncAfterRemoval already owns every case for "the queue IS this
+        // collection": the removed track played → the survivor of the slot
+        // takes over (or Clear when the library emptied), otherwise the
+        // indices after it shift down. The old inline check compared
+        // Queue[CurrentIndex] against the removed track AFTER RemoveAt had
+        // already slid a different track into that slot — it never matched
+        // (dead branch), and the missing shift left CurrentIndex pointing at
+        // the wrong track for the rest of the session.
+        SyncAfterRemoval(_library, new[] { idx });
 
         RefreshDisplay();
     }
@@ -6441,11 +6440,34 @@ public sealed partial class MainWindow : Window
         ApplyWallpaper();
     }
 
+    /// <summary>
+    /// True when <paramref name="path"/> resolves inside the app's data
+    /// directory (used to constrain file deletes to our own generated data).
+    /// </summary>
+    private static bool IsPathInsideDataRoot(string path)
+    {
+        try
+        {
+            // Combine(dir, "") keeps the trailing separator so the prefix
+            // compare can't be fooled by a sibling like E:\data2 vs E:\data.
+            var root = Path.GetFullPath(Path.Combine(DataLocation.Root, ""));
+            return Path.GetFullPath(path).StartsWith(root, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false; // invalid path chars etc. — treat as outside
+        }
+    }
+
     private void BtnWallpaperClear_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            if (!string.IsNullOrEmpty(_settings.WallpaperPath))
+            // Only ever delete our own generated wallpaper. WallpaperPath is
+            // persisted in a user-editable settings.json; an edited/migrated
+            // value pointing anywhere else must not turn this button into
+            // "delete an arbitrary local file".
+            if (!string.IsNullOrEmpty(_settings.WallpaperPath) && IsPathInsideDataRoot(_settings.WallpaperPath))
                 File.Delete(_settings.WallpaperPath);
         }
         catch

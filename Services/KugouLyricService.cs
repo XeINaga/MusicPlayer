@@ -13,11 +13,15 @@ namespace MusicPlayer.Services;
 /// Endpoints (mobile web API):
 ///   search : http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=...
 ///            → data.info[] { songname, singername, album_name, duration(sec), hash }
-///   match  : http://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash=...
+///   match  : https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&hash=...
 ///            → candidates[0] { id, accesskey }
-///   download: http://lyrics.kugou.com/download?ver=1&client=pc&id=..&accesskey=..&fmt=krc|lrc&charset=utf8
+///   download: https://lyrics.kugou.com/download?ver=1&client=pc&id=..&accesskey=..&fmt=krc|lrc&charset=utf8
 ///            → { content: base64, fmt } — KRC content is XOR-encrypted zlib
 ///              (see <see cref="KrcDecrypter"/>), LRC content is plain base64.
+///
+/// match/download use TLS; the search host does not answer on 443 at all
+/// (verified 2026-10), so it stays plain http — only the keyword travels
+/// there, while the lyric payloads (the MITM-injectable part) are encrypted.
 ///
 /// Returns the shared QQSong shape; SongMid carries the song FILE hash the
 /// lyric matcher keys on.
@@ -40,8 +44,8 @@ public static class KugouLyricService
 
     private static async Task<string?> GetAsync(string url, int attempts = 3)
     {
-        // The KuGou endpoints are plain http and occasionally slow / flaky;
-        // a single 10s timeout used to surface as "no lyrics available".
+        // The KuGou endpoints are occasionally slow / flaky; a single 10s
+        // timeout used to surface as "no lyrics available".
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
             try
@@ -125,7 +129,7 @@ public static class KugouLyricService
     public static async Task<(string? Lrc, string? Krc)> FetchLyricAsync(string hash)
     {
         // Match a lyric candidate for this audio hash.
-        var matchUrl = "http://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash=" +
+        var matchUrl = "https://krcs.kugou.com/search?ver=1&man=yes&client=mobi&keyword=&duration=&hash=" +
                        Uri.EscapeDataString(hash);
         var matchJson = await GetAsync(matchUrl);
         if (matchJson == null)
@@ -159,7 +163,7 @@ public static class KugouLyricService
 
     private static async Task<string?> DownloadAsync(string id, string accessKey, string fmt)
     {
-        var url = "http://lyrics.kugou.com/download?ver=1&client=pc&charset=utf8" +
+        var url = "https://lyrics.kugou.com/download?ver=1&client=pc&charset=utf8" +
                   $"&id={Uri.EscapeDataString(id)}&accesskey={Uri.EscapeDataString(accessKey)}&fmt={fmt}";
 
         var json = await GetAsync(url);

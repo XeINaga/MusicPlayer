@@ -47,7 +47,7 @@ internal static class CoverCache
             // artwork invalidates the stale cached image.
             long mtime = 0;
             try { mtime = File.GetLastWriteTimeUtc(audioPath).Ticks; } catch { }
-            var cacheFile = Path.Combine(CacheDir, HashPath(audioPath) + "." + mtime.ToString("x") + ".png");
+            var cacheFile = CacheFileFor(audioPath, mtime);
 
             if (File.Exists(cacheFile))
                 return CreateFromDisk(cacheFile);
@@ -114,6 +114,30 @@ internal static class CoverCache
             }
         });
     }
+
+    /// <summary>
+    /// Whether the decoded png for <paramref name="audioPath"/> is still on
+    /// disk. The warm metadata path uses this to notice a cover that
+    /// <see cref="TrimAsync"/> evicted (or a user-cleared covers folder) and
+    /// re-extract it from the audio tags — without it the track's cover was
+    /// lost forever, because the metadata cache hit skipped the tag read.
+    /// </summary>
+    internal static bool IsCached(string audioPath)
+    {
+        try
+        {
+            long mtime = 0;
+            try { mtime = File.GetLastWriteTimeUtc(audioPath).Ticks; } catch { }
+            return File.Exists(CacheFileFor(audioPath, mtime));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string CacheFileFor(string audioPath, long mtimeTicks) =>
+        Path.Combine(CacheDir, HashPath(audioPath) + "." + mtimeTicks.ToString("x") + ".png");
 
     /// <summary>
     /// Generate a SHA-1 hex string from the full audio file path.
