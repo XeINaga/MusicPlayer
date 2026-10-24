@@ -487,6 +487,8 @@ public sealed partial class MainWindow : Window
         });
         _tray.MenuStateProvider = GetTrayMenuState;
         _tray.MenuCommand += cmd => _dispatcher.TryEnqueue(() => HandleTrayCommand(cmd));
+        _tray.VolumeSet += percent => _dispatcher.TryEnqueue(() =>
+            VolumeSlider.Value = Math.Clamp(percent, 0, 100));
         _tray.Show(iconPath, "MusicPlayer — 音乐播放器");
     }
 
@@ -497,8 +499,14 @@ public sealed partial class MainWindow : Window
         IsPlaying = _isPlaying,
         TrackTitle = _currentTrack?.Title ?? "",
         Favorite = _currentTrack?.Favorite ?? false,
-        VolumePercent = (int)Math.Round(_playback.Volume * 100),
+        // TargetVolume is the level the user picked; Volume dips during
+        // crossfades, which would make the panel jump while it is open.
+        VolumePercent = (int)Math.Round(_playback.TargetVolume * 100),
         DesktopLyricsOn = _settings.LyricOverlayEnabled,
+        DynamicVolume = _settings.DynamicVolume,
+        PlayMode = _playback.Mode,
+        DarkTheme = _settings.ThemeMode != "Light",
+        AccentColor = _settings.AccentColor ?? "#8F0FC2",
     };
 
     private void HandleTrayCommand(TrayMenuCommand cmd)
@@ -522,22 +530,38 @@ public sealed partial class MainWindow : Window
                 PersistLibrary();
                 UpdateBarFavIcon();
                 break;
-            case TrayMenuCommand.VolumeUp:
-                _playback.Volume = Math.Round(_playback.Volume + 0.1, 2);
-                VolumeSlider.Value = _playback.Volume * 100.0;
-                break;
-            case TrayMenuCommand.VolumeDown:
-                _playback.Volume = Math.Round(_playback.Volume - 0.1, 2);
-                VolumeSlider.Value = _playback.Volume * 100.0;
-                break;
             case TrayMenuCommand.ToggleDesktopLyrics:
                 BtnDesktopLyrics.IsChecked = !(BtnDesktopLyrics.IsChecked ?? false);
+                break;
+            case TrayMenuCommand.TogglePlayMode:
+                var idx = Array.IndexOf(_modeOrder, _playback.Mode);
+                _playback.Mode = _modeOrder[(idx + 1) % _modeOrder.Length];
+                _settings.DefaultPlayMode = _playback.Mode.ToString();
+                SettingsStore.Save(_settings);
+                ApplyPlayModeLabel();
+                break;
+            case TrayMenuCommand.ToggleDynamicVolume:
+                // Through the switch so its handler applies and persists the
+                // change exactly like an in-app toggle.
+                DynamicVolumeToggle.IsOn = !DynamicVolumeToggle.IsOn;
+                break;
+            case TrayMenuCommand.WallpaperSettings:
+                RestoreFromTray();
+                ShowView(NavView.Settings);
+                _dispatcher.TryEnqueue(() => WallpaperSection.StartBringIntoView());
                 break;
             case TrayMenuCommand.Settings:
                 RestoreFromTray();
                 ShowView(NavView.Settings);
                 break;
+            case TrayMenuCommand.Open:
+                RestoreFromTray();
+                break;
         }
+
+        // The panel stays open for transport/toggle rows; let it re-read the
+        // state the command just changed.
+        _tray?.RefreshState();
     }
 
     private void RestoreFromTray()

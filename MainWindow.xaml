@@ -1035,7 +1035,7 @@
 
                                     <Border Height="1" Background="{ThemeResource BorderSoft}" Opacity="0.5" />
 
-                                    <StackPanel Padding="0,12" Spacing="10">
+                                    <StackPanel x:Name="WallpaperSection" Padding="0,12" Spacing="10">
                                         <StackPanel Spacing="3">
                                             <TextBlock Text="窗口壁纸" FontSize="14" Foreground="{ThemeResource TextPrimary}" />
                                             <TextBlock Text="自定义背景图片，叠加在窗口材质之上，透明度可调" Style="{StaticResource SettingsHint}" />
