@@ -1559,6 +1559,31 @@ public sealed partial class MainWindow : Window
         _recentSaveTask = _recentSaveTask.ContinueWith(
             _ => PlaylistStore.SaveRecent(snapshot),
             TaskScheduler.Default);
+
+        // While the recent view is on screen, reflect the new entry right
+        // away — the list reference is shared, but nothing re-renders the
+        // TrackList until a view switch calls RefreshDisplay.
+        if (_currentView == NavView.Recent)
+        {
+            _activeTracks = _recent;
+            RefreshDisplay();
+            // The new entry is at index 0, but ReplaceAll keeps the previous
+            // scroll offset: with the list scrolled down the refresh was
+            // invisible (looked like "no live update" until a view switch).
+            // Jump back to the top so the newest entry is on screen. One
+            // dispatcher pass, then UpdateLayout() forces the ReplaceAll
+            // layout synchronously — scrolling before the panel re-laid-out
+            // gets "accepted" but clamped back to the old offset.
+            _dispatcher.TryEnqueue(() =>
+            {
+                Microsoft.UI.Xaml.Controls.ListViewBase list =
+                    TrackGrid.Visibility == Visibility.Visible ? TrackGrid : TrackList;
+                list.UpdateLayout();
+                if (list.Items.Count > 0)
+                    list.ScrollIntoView(list.Items[0]);
+                FindScrollViewerDescendant(list)?.ChangeView(null, 0, null, disableAnimation: true);
+            });
+        }
     }
 
     // ---------- Playlists UI ----------
