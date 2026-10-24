@@ -30,6 +30,10 @@ dotnet publish -o publish
 
 :: Release publish + MSI installer (installer\MusicPlayer.msi)
 powershell -ExecutionPolicy Bypass -File installer/build_msi.ps1
+
+:: Same, but with a MinGW toolchain outside the default location
+:: (the trailing backslash matters for plain dotnet build/publish)
+powershell -ExecutionPolicy Bypass -File installer/build_msi.ps1 -GxxPath "C:\msys2\ucrt64\bin"
 ```
 
 The build automatically compiles both native components with g++, copies the

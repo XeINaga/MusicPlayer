@@ -10,6 +10,15 @@
 # Requires on PATH: dotnet, wix (WiX v4 global tool), python.
 # WiX extensions (WixToolset.UI.wixext / WixToolset.Util.wixext) are restored
 # automatically by `wix build` into .wix/extensions on first run.
+#
+# Optional -GxxPath: bin dir of your MinGW-w64 toolchain when it is NOT at the
+# csproj default (E:\mingw\msys2\ucrt64\bin\). Forwarded to dotnet publish as
+# an MSBuild property. A trailing slash is added if missing.
+#   powershell -ExecutionPolicy Bypass -File installer/build_msi.ps1 -GxxPath "C:\msys2\ucrt64\bin"
+
+param(
+    [string]$GxxPath = ""
+)
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/..").Path
@@ -49,7 +58,13 @@ if (Test-Path $publishDir) {
 # the app dir makes the apphost resolve the (incomplete) local runtime
 # instead of the installed one — crashing with a misleading
 # "No frameworks were found" even though the runtime IS installed.
-dotnet publish -c Release
+$publishProps = @()
+if ($GxxPath -ne "") {
+    if (-not $GxxPath.EndsWith('\') -and -not $GxxPath.EndsWith('/')) { $GxxPath += '\' }
+    $publishProps = @("-p:GxxPath=$GxxPath")
+    Write-Host "MinGW toolchain override: $GxxPath" -ForegroundColor DarkGray
+}
+dotnet publish -c Release @publishProps
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
 Ensure-Ffmpeg
 
