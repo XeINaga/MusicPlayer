@@ -161,23 +161,35 @@ public static class LyricsParser
     {
         try
         {
-            var head = EncodingHelper.ReadText(path, enc);
-            foreach (var raw in head.Split('\n'))
-            {
-                var line = raw.Trim();
-                if (line.Length == 0)
-                    continue;
-                // Metadata preamble ([ti:], [kana:], [offset:] …) — some
-                // downloaders save word-timed files WITH such a header, so
-                // skip those lines and sniff the first real content line.
-                if (line.StartsWith("[") && line.Length > 1 && !char.IsDigit(line[1]))
-                    continue;
-                return WordLineTag.IsMatch(line);
-            }
+            return LooksWordTimed(EncodingHelper.ReadText(path, enc));
         }
         catch
         {
             // unreadable — fall through to the line-level parser
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// True when a lyric TEXT (not a file) carries word-level timing — a line
+    /// head [start,dur] followed somewhere in the line by a word tag
+    /// (QRC/YRC "text(s,d)" are INLINE after each word, KRC "text&lt;s,d,0&gt;"
+    /// likewise; the tag never sits right next to the line head). Used by the
+    /// online-search probe to tell word-timed downloads from a plain LRC.
+    /// Metadata preamble lines ([ti:], [offset:] …) are skipped.
+    /// </summary>
+    public static bool LooksWordTimed(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0)
+                continue;
+            if (line.StartsWith("[") && line.Length > 1 && !char.IsDigit(line[1]))
+                continue;
+            return WordLineTag.IsMatch(line) && WordTag.IsMatch(line);
         }
         return false;
     }

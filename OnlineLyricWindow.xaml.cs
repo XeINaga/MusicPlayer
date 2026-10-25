@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -9,6 +10,7 @@ using Microsoft.UI.Xaml.Media;
 using MusicPlayer.Services;
 using Windows.Graphics;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 namespace MusicPlayer;
 
@@ -16,9 +18,47 @@ namespace MusicPlayer;
 /// <param name="Song">The underlying search hit.</param>
 /// <param name="Subtitle">"artist · album" line.</param>
 /// <param name="Duration">Preformatted "m:ss", empty when unknown.</param>
-public sealed record LyricSearchRow(QQSong Song, string Subtitle, string Duration)
+public sealed class LyricSearchRow : System.ComponentModel.INotifyPropertyChanged
 {
+    public QQSong Song { get; }
+    public string Subtitle { get; }
+    public string Duration { get; }
     public string Title => Song.Title;
+
+    private string _lyricState = "检测中…";
+    /// <summary>Availability badge text: 检测中… / 有逐字歌词 / 无逐字歌词 / 无歌词.</summary>
+    public string LyricState
+    {
+        get => _lyricState;
+        set
+        {
+            if (_lyricState == value) return;
+            _lyricState = value;
+            PropertyChanged?.Invoke(this, new(nameof(LyricState)));
+        }
+    }
+
+    private Windows.UI.Color _stateBrush = Microsoft.UI.Colors.Gray;
+    /// <summary>Badge color matching <see cref="LyricState"/>.</summary>
+    public Windows.UI.Color StateBrush
+    {
+        get => _stateBrush;
+        set
+        {
+            if (_stateBrush == value) return;
+            _stateBrush = value;
+            PropertyChanged?.Invoke(this, new(nameof(StateBrush)));
+        }
+    }
+
+    public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+    public LyricSearchRow(QQSong song, string subtitle, string duration)
+    {
+        Song = song;
+        Subtitle = subtitle;
+        Duration = duration;
+    }
 }
 
 /// <summary>
@@ -260,18 +300,124 @@ public sealed partial class OnlineLyricWindow : Window
         }
 
         ResultsList.Items.Clear();
+        var rows = new List<LyricSearchRow>();
         foreach (var r in results)
         {
             var dur = r.DurationSec > 0 ? $"{r.DurationSec / 60}:{r.DurationSec % 60:D2}" : "";
             var subtitle = string.Join(" · ",
                 new[] { r.Artist, r.Album }.Where(x => !string.IsNullOrEmpty(x)));
-            ResultsList.Items.Add(new LyricSearchRow(r, subtitle, dur));
+            var row = new LyricSearchRow(r, subtitle, dur);
+            rows.Add(row);
+            ResultsList.Items.Add(row);
         }
 
         StatusText.Text = results.Count == 0
             ? "无结果，试试只输入歌曲名"
             : $"共 {results.Count} 条结果";
         SearchBtn.IsEnabled = true;
+
+        if (rows.Count > 0)
+            StartLyricProbing(rows, SourceIndex);
+    }
+
+    // ---------- Per-row lyric availability probing ----------
+
+    // Bumped per search so a stale probe run (older keyword) cannot overwrite
+    // the badges of newer results.
+    private int _probeVersion;
+
+    /// <summary>
+    /// Probe every row's lyric availability in the background (4 concurrent,
+    /// one or two HTTP calls per row) and update the badges as answers come
+    /// in. Never blocks the UI or the download button.
+    /// </summary>
+    private void StartLyricProbing(IReadOnlyList<LyricSearchRow> rows, int source)
+    {
+        var version = ++_probeVersion;
+        var dq = DispatcherQueue;
+        _ = Task.Run(async () =>
+        {
+            using var gate = new SemaphoreSlim(4);
+            var tasks = rows.Select(r => Task.Run(async () =>
+            {
+                await gate.WaitAsync();
+                try
+                {
+                    var (text, color) = await ProbeRowAsync(r.Song, source);
+                    dq.TryEnqueue(() =>
+                    {
+                        if (version != _probeVersion) return; // stale run
+                        r.LyricState = text;
+                        r.StateBrush = color;
+                    });
+                }
+                catch
+                {
+                    dq.TryEnqueue(() =>
+                    {
+                        if (version != _probeVersion) return;
+                        r.LyricState = "无歌词";
+                        r.StateBrush = Microsoft.UI.Colors.Gray;
+                    });
+                }
+                finally
+                {
+                    gate.Release();
+                }
+            })).ToList();
+            await Task.WhenAll(tasks);
+        });
+    }
+
+    /// <summary>One row's availability verdict: (badge text, badge color).</summary>
+    private static async Task<(string Text, Windows.UI.Color Color)> ProbeRowAsync(QQSong song, int source)
+    {
+        var green = Windows.UI.Color.FromArgb(255, 0x31, 0xc2, 0x7c); // app accent (QqGreen)
+        var grey = Microsoft.UI.Colors.Gray;
+
+        switch (source)
+        {
+            case 0: // QQ: the encrypted QRC feed carries the word-timed lyric.
+            {
+                var raw = string.IsNullOrWhiteSpace(song.SongId)
+                    ? null
+                    : await QQLyricService.FetchLyricRawAsync(song.SongMid, song.SongId);
+                var lyric = raw?.Lyric;
+                if (!string.IsNullOrWhiteSpace(lyric))
+                    // QRC word tags are INLINE after each word
+                    // ("[start,dur]word(s,d)word(s,d)"), so the sniff must be
+                    // the parser's own rule — a line-head-only pattern used to
+                    // mark every QRC as "no word timing".
+                    return LyricsParser.LooksWordTimed(lyric)
+                        ? ("有逐字歌词", green)
+                        : ("无逐字歌词", grey);
+                return ("无歌词", grey);
+            }
+
+            case 3: // KuGou: the KRC download IS the word-timed lyric.
+            {
+                var (lrc, krc) = await KugouLyricService.FetchLyricAsync(song.SongMid);
+                if (!string.IsNullOrWhiteSpace(krc)) return ("有逐字歌词", green);
+                if (!string.IsNullOrWhiteSpace(lrc)) return ("无逐字歌词", grey);
+                return ("无歌词", grey);
+            }
+
+            default: // NetEase / LRCLIB
+            {
+                if (source == 1)
+                {
+                    // NetEase serves word-timed YRC from a separate endpoint.
+                    var yrc = await NetEaseLyricService.FetchYrcAsync(song.SongMid);
+                    if (!string.IsNullOrWhiteSpace(yrc)) return ("有逐字歌词", green);
+                }
+                var lyric = source == 1
+                    ? (await NetEaseLyricService.FetchLyricAsync(song.SongMid))?.Lyric
+                    : (await LrclibService.FetchLyricAsync(song.SongMid))?.Lyric;
+                return string.IsNullOrWhiteSpace(lyric)
+                    ? ("无歌词", grey)
+                    : ("无逐字歌词", grey);
+            }
+        }
     }
 
     private void SourceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
