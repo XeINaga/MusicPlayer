@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading;
 using System.Threading.Tasks;
@@ -6508,6 +6509,15 @@ public sealed partial class MainWindow : Window
         WallpaperOpacitySlider.Value = _settings.WallpaperOpacity * 100;
         WallpaperOpacityText.Text = $"{(int)Math.Round(_settings.WallpaperOpacity * 100)}%";
         WallpaperFillToggle.IsOn = _settings.WallpaperFill;
+        _suppressSettingEvents = true;
+        try
+        {
+            WallpaperAspectLockToggle.IsOn = _settings.WallpaperAspectLock;
+        }
+        finally
+        {
+            _suppressSettingEvents = false;
+        }
         WallpaperBlurPauseToggle.IsOn = _settings.WallpaperPauseOnBlur;
         LyricOpacitySlider.Value = _settings.LyricBgOpacity * 100;
         LyricBoldToggle.IsOn = _settings.LyricBold;
@@ -6933,6 +6943,7 @@ public sealed partial class MainWindow : Window
                     : Stretch.Uniform;
                 WallpaperImage.Opacity = _settings.WallpaperOpacity;
                 WallpaperImage.Visibility = Visibility.Visible;
+                UpdateAspectLock();
                 return;
             }
 
@@ -6942,6 +6953,7 @@ public sealed partial class MainWindow : Window
                 (ext is ".mp4" or ".webm" or ".mov" or ".mkv" or ".avi"))
             {
                 StartVideoWallpaper(weLast);
+                UpdateAspectLock();
                 return;
             }
             if (!string.IsNullOrEmpty(weLast) && File.Exists(weLast) &&
@@ -6954,6 +6966,7 @@ public sealed partial class MainWindow : Window
                     : Stretch.Uniform;
                 WallpaperImage.Opacity = _settings.WallpaperOpacity;
                 WallpaperImage.Visibility = Visibility.Visible;
+                UpdateAspectLock();
                 return;
             }
 
@@ -6970,6 +6983,7 @@ public sealed partial class MainWindow : Window
         // The library picker requires the WE material mode.
         BtnWallpaperWe.IsEnabled = false;
         BtnWallpaperClear.IsEnabled = !string.IsNullOrEmpty(_settings.WallpaperPath);
+        UpdateAspectLock();
     }
 
     private bool _materialReappliedOnActivate;
@@ -7058,9 +7072,124 @@ public sealed partial class MainWindow : Window
         // resets a dimmed capture to fully opaque.
         WallpaperImage.Opacity = _settings.WallpaperOpacity;
         WallpaperImage.Visibility = Visibility.Visible;
+        UpdateAspectLock();
     }
 
     // ---------- Window wallpaper ----------
+
+    // ---------- Wallpaper aspect lock (fixed-ratio window resizing) ----------
+
+    // WinUI 3's drag-resize is DWM-driven: WM_SIZING / WM_WINDOWPOSCHANGING
+    // rect edits get overridden by the mouse position, so the lock runs one
+    // layer up — AppWindow.Changed fires for every geometry change (drag or
+    // programmatic), and Resize() on this level always wins. The reentry flag
+    // keeps the correction from feeding back into itself.
+
+    private bool _aspectResizing;
+
+    /// <summary>The wallpaper's current aspect ratio (w/h), or null when no
+    /// wallpaper content is showing. Static image, WE capture frame and video
+    /// wallpaper all resolve here — which is exactly the "image or wallpaper"
+    /// condition: with no wallpaper layer, there's nothing to lock to.</summary>
+    private double? GetWallpaperAspect()
+    {
+        if (WallpaperImage.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage bi &&
+            bi.PixelWidth > 0 && bi.PixelHeight > 0)
+            return (double)bi.PixelWidth / bi.PixelHeight;
+        if (_weCapture?.IsRunning == true && _weCapture.Bitmap is { PixelWidth: > 0, PixelHeight: > 0 } wb)
+            return (double)wb.PixelWidth / wb.PixelHeight;
+        // Video wallpaper: TagLibSharp reads the container's video dimensions
+        // (the WinUI MediaPlayer surface doesn't expose them).
+        if (!string.IsNullOrEmpty(_videoWallpaperSourcePath))
+        {
+            try
+            {
+                using var vf = TagLib.File.Create(_videoWallpaperSourcePath);
+                var props = vf.Properties;
+                if (props?.VideoWidth > 0 && props.VideoHeight > 0)
+                    return (double)props.VideoWidth / props.VideoHeight;
+            }
+            catch
+            {
+                // unreadable/unrecognized container — fall through to no lock
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Subscribe/unsubscribe the ratio correction per the setting and
+    /// the wallpaper's presence. Called after every wallpaper/material change.</summary>
+    private void UpdateAspectLock()
+    {
+        var shouldHook = _settings.WallpaperAspectLock && GetWallpaperAspect() != null;
+        if (shouldHook && _aspectChangedHooked == null)
+        {
+            _aspectChangedHooked = AppWindow;
+            AppWindow.Changed += OnAppWindowChangedForAspect;
+        }
+        else if (!shouldHook && _aspectChangedHooked != null)
+        {
+            _aspectChangedHooked.Changed -= OnAppWindowChangedForAspect;
+            _aspectChangedHooked = null;
+        }
+    }
+
+    private AppWindow? _aspectChangedHooked;
+    private int _aspectFrameW = 16, _aspectFrameH = 39; // window−client frame, refreshed per correction
+
+    private void OnAppWindowChangedForAspect(AppWindow sender, AppWindowChangedEventArgs e)
+    {
+        if (_aspectResizing || !e.DidSizeChange)
+            return;
+        var aspect = GetWallpaperAspect();
+        if (aspect is not { } ratio)
+            return;
+
+        try
+        {
+            NativeMethods.GetClientRect(HwndForAspect, out var cr);
+            _aspectFrameW = Math.Max(0, sender.Size.Width - (cr.Right - cr.Left));
+            _aspectFrameH = Math.Max(0, sender.Size.Height - (cr.Bottom - cr.Top));
+        }
+        catch
+        {
+            // keep the last frame estimate
+        }
+
+        int clientW = sender.Size.Width - _aspectFrameW;
+        int clientH = sender.Size.Height - _aspectFrameH;
+        if (clientW <= 0 || clientH <= 0)
+            return;
+
+        int targetW = (int)Math.Round(clientH * ratio);
+        int targetH = (int)Math.Round(clientW / ratio);
+        int newCW, newCH;
+        // Follow whichever axis the user moved more, correcting the other.
+        if (Math.Abs(targetW - clientW) <= Math.Abs(targetH - clientH))
+        {
+            newCW = Math.Max(1, targetW);
+            newCH = Math.Max(1, (int)Math.Round(newCW / ratio));
+        }
+        else
+        {
+            newCH = Math.Max(1, targetH);
+            newCW = Math.Max(1, (int)Math.Round(newCH * ratio));
+        }
+        if (Math.Abs(newCW - clientW) <= 2 && Math.Abs(newCH - clientH) <= 2)
+            return; // already on-ratio
+
+        _aspectResizing = true;
+        try
+        {
+            sender.Resize(new Windows.Graphics.SizeInt32(newCW + _aspectFrameW, newCH + _aspectFrameH));
+        }
+        finally
+        {
+            _aspectResizing = false;
+        }
+    }
+
+    private IntPtr HwndForAspect => WinRT.Interop.WindowNative.GetWindowHandle(this);
 
     /// <summary>Load the persisted wallpaper (if any) into the bottom-most
     /// layer of the root grid.</summary>
@@ -7088,6 +7217,7 @@ public sealed partial class MainWindow : Window
                 WallpaperImage.Visibility = Visibility.Visible;
                 WallpaperFileText.Text = Path.GetFileName(path);
                 BtnWallpaperClear.IsEnabled = true;
+                UpdateAspectLock();
                 return;
             }
             catch
@@ -7099,6 +7229,7 @@ public sealed partial class MainWindow : Window
         WallpaperImage.Visibility = Visibility.Collapsed;
         WallpaperFileText.Text = "未设置";
         BtnWallpaperClear.IsEnabled = false;
+        UpdateAspectLock();
     }
 
     private void BtnWallpaperPick_Click(object sender, RoutedEventArgs e)
@@ -7389,6 +7520,14 @@ public sealed partial class MainWindow : Window
         // stalled the slider. Coalesce instead — the opacity itself is still
         // applied instantly above.
         ScheduleSettingsSave();
+    }
+
+    private void WallpaperAspectLockToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_suppressSettingEvents) return;
+        _settings.WallpaperAspectLock = WallpaperAspectLockToggle.IsOn;
+        SettingsStore.Save(_settings);
+        UpdateAspectLock();
     }
 
     private void WallpaperFillToggle_Toggled(object sender, RoutedEventArgs e)

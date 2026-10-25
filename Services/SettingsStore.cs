@@ -235,6 +235,14 @@ public sealed class AppSettings
     public int CoverSearchH { get; set; } = 600;
 
     /// <summary>
+    /// Lock the MAIN WINDOW's aspect ratio to the wallpaper's ratio while
+    /// resizing (drag an edge/corner → the window scales with the wallpaper
+    /// ratio, so the picture fills it completely with no letterboxing).
+    /// Only meaningful while an image / Wallpaper Engine wallpaper shows.
+    /// </summary>
+    public bool WallpaperAspectLock { get; set; }
+
+    /// <summary>
     /// Auto cover-search source priority, comma-separated source names in
     /// try-first order. Names match CoverArtService.SourceName keys. The four
     /// dropdowns on the cover-completion page keep this permutation complete.

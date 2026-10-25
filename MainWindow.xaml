@@ -1107,6 +1107,18 @@
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
                                             </Grid.ColumnDefinitions>
+                                            <TextBlock Text="固定比例" Grid.Column="0" VerticalAlignment="Center" FontSize="13"
+                                                       Foreground="{ThemeResource TextPrimary}" />
+                                            <ToggleSwitch x:Name="WallpaperAspectLockToggle" Grid.Column="1" HorizontalAlignment="Left"
+                                                          OnContent="锁定" OffContent="自由" Margin="0,0,0,0"
+                                                          Toggled="WallpaperAspectLockToggle_Toggled"
+                                                          ToolTipService.ToolTip="开启后拖动窗口边缘/角落时，窗口按壁纸的宽高比等比缩放，壁纸始终完整显示且不留黑边；仅在使用图片壁纸或壁纸引擎（Wallpaper Engine）壁纸时生效" />
+                                        </Grid>
+                                        <Grid ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
                                             <TextBlock Text="失焦时暂停" Grid.Column="0" VerticalAlignment="Center" FontSize="13"
                                                        Foreground="{ThemeResource TextPrimary}" />
                                             <ToggleSwitch x:Name="WallpaperBlurPauseToggle" Grid.Column="1" HorizontalAlignment="Left"
