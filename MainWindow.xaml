@@ -597,6 +597,14 @@
                             <TextBlock Text="歌词补全" VerticalAlignment="Center" />
                         </StackPanel>
                     </Button>
+
+                    <Button x:Name="NavCoverFill" Click="NavCoverFill_Click" Style="{StaticResource NavButtonStyle}"
+                            ToolTipService.ToolTip="为没有内嵌封面的歌曲在线搜索专辑图片并写入音频文件">
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE8B9;" FontSize="16" Width="16" />
+                            <TextBlock Text="封面补全" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <Grid x:Name="PlaylistsSection" Grid.Row="2" Margin="10,4,10,12">
@@ -1608,9 +1616,6 @@
                                             Background="{StaticResource QqGreen}" Foreground="White"
                                             CornerRadius="{StaticResource RadiusMedium}"
                                             ToolTipService.ToolTip="扫描全库，为缺歌词的曲目下载歌词，并为已有歌词补齐翻译/罗马音" />
-                                    <Button x:Name="BtnCoverStart" Content="补全封面" Click="BtnCoverStart_Click"
-                                            CornerRadius="{StaticResource RadiusMedium}"
-                                            ToolTipService.ToolTip="扫描当前列表，为没有内嵌封面的歌曲搜索专辑图片并写入（已有封面的跳过）" />
                                     <Button x:Name="BtnLyricStop" Content="停止" Click="BtnLyricStop_Click" IsEnabled="False"
                                             CornerRadius="{StaticResource RadiusMedium}" />
                                     <Button x:Name="BtnLyricRetry" Content="重试失败项" Click="BtnLyricRetry_Click" IsEnabled="False"
@@ -1635,6 +1640,79 @@
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
                                         <Grid Padding="4,7" RightTapped="LyricTask_RightTapped">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="26" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <FontIcon Grid.Column="0" Glyph="{Binding StatusGlyph}" FontSize="14"
+                                                      Foreground="{Binding StatusBrush}" VerticalAlignment="Center" />
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="8,0,0,0">
+                                                <TextBlock Text="{Binding Title}" FontSize="13"
+                                                           Foreground="{ThemeResource TextPrimary}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{Binding Artist}" FontSize="11"
+                                                           Foreground="{ThemeResource TextSecondary}"
+                                                           TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="2" Text="{Binding Detail}" FontSize="11"
+                                                       Foreground="{ThemeResource TextSecondary}"
+                                                       VerticalAlignment="Center" Margin="14,0,6,0" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Border>
+                    </Grid>
+
+                    <!-- Cover completion: same download-manager layout as the lyric
+                         completion, but a fully separate queue/page — the two
+                         features run independently and never share state. -->
+                    <Grid x:Name="CoverCompletionPanel" Visibility="Collapsed" Margin="22,6,22,14">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Style="{StaticResource SettingsCard}" Margin="0,0,0,12">
+                            <StackPanel Spacing="12">
+                                <Grid>
+                                    <TextBlock Text="封面补全" Style="{StaticResource SettingsCardTitle}" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="CoverCountText" Text="共 0 首" HorizontalAlignment="Right"
+                                               VerticalAlignment="Center" FontSize="12"
+                                               Foreground="{ThemeResource TextSecondary}" />
+                                </Grid>
+                                <ProgressBar x:Name="CoverProgressBar" Minimum="0" Maximum="1" Value="0" Height="6" />
+                                <TextBlock x:Name="CoverStatusText" Text="空闲" Style="{StaticResource SettingsHint}" />
+                                <StackPanel Orientation="Horizontal" Spacing="10">
+                                    <Button x:Name="BtnCoverStart" Content="开始补全" Click="BtnCoverStart_Click"
+                                            Background="{StaticResource QqGreen}" Foreground="White"
+                                            CornerRadius="{StaticResource RadiusMedium}"
+                                            ToolTipService.ToolTip="扫描当前列表，为没有内嵌封面的歌曲搜索专辑图片并写入（已有封面的跳过）" />
+                                    <Button x:Name="BtnCoverStop" Content="停止" Click="BtnCoverStop_Click" IsEnabled="False"
+                                            CornerRadius="{StaticResource RadiusMedium}" />
+                                    <Button x:Name="BtnCoverRetry" Content="重试失败项" Click="BtnCoverRetry_Click" IsEnabled="False"
+                                            CornerRadius="{StaticResource RadiusMedium}"
+                                            ToolTipService.ToolTip="只重跑失败或未找到的曲目，成功的不再重来" />
+                                    <ComboBox x:Name="CoverFilterCombo" Width="132" SelectedIndex="0"
+                                              SelectionChanged="CoverFilterCombo_SelectionChanged"
+                                              ToolTipService.ToolTip="按结果过滤列表（过滤不影响补全本身）">
+                                        <ComboBoxItem Content="全部" />
+                                        <ComboBoxItem Content="仅失败" />
+                                        <ComboBoxItem Content="仅成功" />
+                                    </ComboBox>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Grid.Row="1" Background="{ThemeResource CardBg}"
+                                CornerRadius="{StaticResource RadiusLarge}"
+                                BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
+                            <ListView x:Name="CoverTaskList" Background="Transparent" BorderThickness="0"
+                                      SelectionMode="None" Padding="6">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Padding="4,7" RightTapped="CoverTask_RightTapped">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="26" />
                                                 <ColumnDefinition Width="*" />
