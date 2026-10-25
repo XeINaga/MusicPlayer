@@ -43,6 +43,8 @@
             <ComboBox x:Name="SourceCombo" Width="110" MinHeight="32" FontSize="12">
                 <ComboBoxItem Content="自动" IsSelected="True" />
                 <ComboBoxItem Content="网易云" />
+                <ComboBoxItem Content="QQ音乐" />
+                <ComboBoxItem Content="酷狗" />
                 <ComboBoxItem Content="iTunes" />
             </ComboBox>
             <TextBox x:Name="KeywordBox" MinWidth="220" MinHeight="32" FontSize="12"

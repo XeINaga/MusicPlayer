@@ -188,7 +188,9 @@ public sealed partial class OnlineCoverWindow : Window
     private int SourceIndex => SourceCombo.SelectedIndex switch
     {
         1 => CoverArtService.SourceNetEase,
-        2 => CoverArtService.SourceItunes,
+        2 => CoverArtService.SourceQq,
+        3 => CoverArtService.SourceKugou,
+        4 => CoverArtService.SourceItunes,
         _ => CoverArtService.SourceAuto,
     };
 

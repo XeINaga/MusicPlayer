@@ -42,6 +42,10 @@ public static class QQLyricService
     public static void SetCookie(string? cookie) =>
         _cookie = string.IsNullOrWhiteSpace(cookie) ? null : cookie.Trim();
 
+    /// <summary>The cookie currently set (shared with the cover-art service's
+    /// album search, which needs the same logged-in session).</summary>
+    public static string? CurrentCookie => _cookie;
+
     private static HttpClient CreateClient()
     {
         var c = new HttpClient(new SocketsHttpHandler

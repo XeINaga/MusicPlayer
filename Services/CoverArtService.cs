@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 
@@ -23,6 +24,11 @@ public sealed record CoverSearchResult(
 /// Sources (both login-free, verified reachable from CN networks):
 ///  - NetEase album search: music.163.com/api/search/get/web?type=10 — picUrl
 ///    scales via "?param=WxH" (the classic NetEase image-server trick).
+///  - QQ Music album search: musicu.fcg search_type=2 → body.album.list[];
+///    art URL built from the albumMID (T002R800x800M000{mid}.jpg, 800x800).
+///    Needs the y.qq.com cookie (reused from QQLyricService).
+///  - KuGou: song search resolves the album id, then the album-info endpoint
+///    returns an imgurl TEMPLATE ("stdmusic/{size}/...") — {size}→480.
 ///  - iTunes Search API: itunes.apple.com/search?entity=album — JP and CN
 ///    storefronts merged (CJK catalogues live mostly on the JP store);
 ///    artworkUrl100 upscales by swapping the size segment.
@@ -31,7 +37,7 @@ public sealed record CoverSearchResult(
 /// </summary>
 public static class CoverArtService
 {
-    public const int SourceAuto = 0, SourceNetEase = 1, SourceItunes = 2;
+    public const int SourceAuto = 0, SourceNetEase = 1, SourceItunes = 2, SourceQq = 3, SourceKugou = 4;
 
     private static readonly HttpClient Http = CreateClient();
 
@@ -60,11 +66,163 @@ public static class CoverArtService
             return await SearchNetEaseAsync(keyword, limit);
         if (source == SourceItunes)
             return await SearchItunesAsync(keyword, limit);
+        if (source == SourceQq)
+            return await SearchQqAsync(keyword, limit);
+        if (source == SourceKugou)
+            return await SearchKugouAsync(keyword, limit);
 
+        // Auto: CN-native sources first, iTunes last (often unreachable here).
         var ne = await SearchNetEaseAsync(keyword, limit);
         if (ne.Count > 0)
             return ne;
+        var qq = await SearchQqAsync(keyword, limit);
+        if (qq.Count > 0)
+            return qq;
+        var kg = await SearchKugouAsync(keyword, limit);
+        if (kg.Count > 0)
+            return kg;
         return await SearchItunesAsync(keyword, limit);
+    }
+
+    // ---------- QQ Music ----------
+
+    /// <summary>Album search via the same musicu.fcg endpoint the lyric
+    /// service uses — search_type=2 (albums). Logged-out searches return an
+    /// empty list (code 2001), same as the lyric endpoints.</summary>
+    private static async Task<List<CoverSearchResult>> SearchQqAsync(string keyword, int limit)
+    {
+        var results = new List<CoverSearchResult>();
+        try
+        {
+            var body = JsonSerializer.Serialize(new
+            {
+                comm = new { ct = 19, cv = 1873, uin = "0", format = "json", platform = "yqq" },
+                req = new
+                {
+                    method = "DoSearchForQQMusicDesktop",
+                    module = "music.search.SearchCgiService",
+                    param = new { search_type = 2, query = keyword, page_num = 1, num_per_page = limit }
+                }
+            });
+            using var req = new HttpRequestMessage(HttpMethod.Post, "https://u.y.qq.com/cgi-bin/musicu.fcg")
+            { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            req.Headers.Referrer = new Uri("https://y.qq.com/n/ryqq/search");
+            var cookie = QQLyricService.CurrentCookie;
+            if (!string.IsNullOrEmpty(cookie))
+                req.Headers.TryAddWithoutValidation("Cookie", cookie);
+            using var resp = await Http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+                return results;
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("req", out var root) ||
+                !root.TryGetProperty("data", out var data) ||
+                !data.TryGetProperty("body", out var bodyEl) ||
+                !bodyEl.TryGetProperty("album", out var albumWrap) ||
+                albumWrap.ValueKind != JsonValueKind.Object ||
+                !albumWrap.TryGetProperty("list", out var album) ||
+                album.ValueKind != JsonValueKind.Array)
+                return results;
+
+            foreach (var a in album.EnumerateArray())
+            {
+                var mid = GetString(a, "albumMID");
+                if (string.IsNullOrEmpty(mid))
+                    continue;
+                var extra = GetString(a, "publicTime") ?? "";
+                results.Add(new CoverSearchResult(
+                    GetString(a, "albumName") ?? "",
+                    GetString(a, "singerName") ?? "",
+                    $"https://y.gtimg.cn/music/photo_new/T002R800x800M000{mid}.jpg",
+                    $"https://y.gtimg.cn/music/photo_new/T002R180x180M000{mid}.jpg",
+                    "QQ",
+                    extra));
+            }
+        }
+        catch
+        {
+            // offline / blocked / not logged in — empty result
+        }
+        return results;
+    }
+
+    // ---------- KuGou ----------
+
+    /// <summary>KuGou album art in two hops: the HTTPS song search resolves
+    /// the first hit's AlbumID, then the album-info endpoint returns an
+    /// imgurl TEMPLATE — "stdmusic/{size}/..." — where {size} picks the
+    /// rendition (150/240/480 verified live; 480 is the largest that works).
+    /// mobilecdn (the other info host) has no TLS; mobiles does.</summary>
+    private static async Task<List<CoverSearchResult>> SearchKugouAsync(string keyword, int limit)
+    {
+        var results = new List<CoverSearchResult>();
+        try
+        {
+            var searchUrl = "https://songsearch.kugou.com/song_search_v2" +
+                            $"?keyword={Uri.EscapeDataString(keyword)}&page=1&pagesize={Math.Max(1, limit / 2)}";
+            using var resp = await Http.GetAsync(searchUrl);
+            if (!resp.IsSuccessStatusCode)
+                return results;
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data) ||
+                !data.TryGetProperty("lists", out var lists) ||
+                lists.ValueKind != JsonValueKind.Array)
+                return results;
+
+            // One album per distinct AlbumID, in relevance order. The field
+            // arrives as a STRING ("39794135"), not a number.
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var hit in lists.EnumerateArray())
+            {
+                var albumId = hit.TryGetProperty("AlbumID", out var aid) &&
+                              (aid.ValueKind == JsonValueKind.Number || aid.ValueKind == JsonValueKind.String)
+                    ? aid.GetRawText().Trim('"')
+                    : "";
+                if (albumId.Length == 0 || albumId == "0" || !seen.Add(albumId))
+                    continue;
+                var albumName = GetString(hit, "AlbumName") ?? "";
+                var singer = GetString(hit, "SingerName") ?? "";
+                if (albumName.Length == 0)
+                    continue;
+
+                var imgTemplate = await KugouAlbumImgAsync(albumId);
+                if (imgTemplate == null)
+                    continue;
+                var big = imgTemplate.Replace("{size}", "480").Replace("http://", "https://");
+                var thumb = imgTemplate.Replace("{size}", "120").Replace("http://", "https://");
+                results.Add(new CoverSearchResult(albumName, singer, big, thumb, "酷狗", ""));
+                if (results.Count >= limit)
+                    break;
+            }
+        }
+        catch
+        {
+            // offline / blocked — empty result
+        }
+        return results;
+    }
+
+    private static async Task<string?> KugouAlbumImgAsync(string albumId)
+    {
+        try
+        {
+            using var resp = await Http.GetAsync($"https://mobiles.kugou.com/api/v3/album/info?albumid={Uri.EscapeDataString(albumId)}");
+            if (!resp.IsSuccessStatusCode)
+                return null;
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var d) ||
+                !d.TryGetProperty("imgurl", out var img) ||
+                img.ValueKind != JsonValueKind.String)
+                return null;
+            var url = img.GetString();
+            return string.IsNullOrEmpty(url) || !url.Contains("{size}") ? null : url;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? GetString(JsonElement el, string property) =>
