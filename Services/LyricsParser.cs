@@ -128,15 +128,17 @@ public static class LyricsParser
     {
         // Word-timed formats win over plain LRC: when the user opted into
         // karaoke lyrics the .qrc/.yrc/.krc file is the better source.
-        var krc = basePath + ".krc";
-        if (File.Exists(krc))
-            return krc;
+        // Preference order: QQ (.qrc) > NetEase (.yrc) > KuGou (.krc); a
+        // per-track manual binding (explicitLyricPath) overrides this entirely.
         var qrc = basePath + ".qrc";
         if (File.Exists(qrc))
             return qrc;
         var yrc = basePath + ".yrc";
         if (File.Exists(yrc))
             return yrc;
+        var krc = basePath + ".krc";
+        if (File.Exists(krc))
+            return krc;
 
         var lrc = basePath + ".lrc";
         if (File.Exists(lrc))

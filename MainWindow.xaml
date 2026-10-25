@@ -1756,6 +1756,13 @@
                                                          Style="{StaticResource AccentToggleStyle}"
                                                          CornerRadius="{StaticResource RadiusSmall}"
                                                          Checked="LyricTransToggle_Changed" Unchecked="LyricTransToggle_Changed" />
+                                <Button x:Name="BtnLyricFormat" Content="逐字" Padding="9,3" FontSize="11"
+                                        CornerRadius="{StaticResource RadiusSmall}"
+                                        ToolTipService.ToolTip="选择这首歌使用的逐字歌词（QRC / YRC / KRC），选择会按歌曲记住">
+                                    <Button.Flyout>
+                                        <MenuFlyout x:Name="LyricFormatMenu" Opening="LyricFormatMenu_Opening" />
+                                    </Button.Flyout>
+                                </Button>
                             </StackPanel>
 
                             <!-- Scrollbar hidden: the view auto-centers on every line

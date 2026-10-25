@@ -3705,6 +3705,7 @@ public sealed partial class MainWindow : Window
         MiniTitle.Text = track.Title;
         MiniArtist.Text = track.Artist;
         UpdateBarFavIcon();
+        UpdateLyricFormatButton(track);
         _ = SampleCoverColorAsync(track.Cover);
 
         BindCurrentCover(track);
@@ -4390,6 +4391,108 @@ public sealed partial class MainWindow : Window
         _settings.LyricShowTranslation = LyricTransToggle.IsChecked == true;
         SettingsStore.Save(_settings);
         RebuildLyricUi();
+    }
+
+    // ---------- Per-track word-lyric format preference (QRC / YRC / KRC) ----------
+
+    private static readonly (string Ext, string Label)[] WordLyricFormatOrder =
+    {
+        (".qrc", "QRC"),
+        (".yrc", "YRC"),
+        (".krc", "KRC"),
+    };
+
+    /// <summary>Word-timed lyric files that exist next to this track's audio.</summary>
+    private static List<(string Label, string Path)> ExistingWordLyrics(Track track)
+    {
+        var basePath = Path.Combine(
+            Path.GetDirectoryName(track.Path) ?? "",
+            Path.GetFileNameWithoutExtension(track.Path));
+        var list = new List<(string, string)>();
+        foreach (var (ext, label) in WordLyricFormatOrder)
+        {
+            var f = basePath + ext;
+            if (File.Exists(f))
+                list.Add((label, f));
+        }
+        return list;
+    }
+
+    private void LyricFormatMenu_Opening(object sender, object e)
+    {
+        var menu = (MenuFlyout)sender;
+        menu.Items.Clear();
+
+        var track = _currentTrack;
+        if (track == null)
+        {
+            menu.Items.Add(new MenuFlyoutItem { Text = "未在播放", IsEnabled = false });
+            return;
+        }
+
+        var available = ExistingWordLyrics(track);
+        if (available.Count == 0)
+        {
+            menu.Items.Add(new MenuFlyoutItem { Text = "这首歌没有逐字歌词文件", IsEnabled = false });
+            return;
+        }
+
+        var binding = track.LyricPath;
+        var auto = new ToggleMenuFlyoutItem { Text = "自动（QRC › YRC › KRC）" };
+        auto.IsChecked = string.IsNullOrEmpty(binding);
+        auto.Click += (_, _) => ApplyLyricFormatPreference(track, null);
+        menu.Items.Add(auto);
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        foreach (var (label, path) in available)
+        {
+            var item = new ToggleMenuFlyoutItem { Text = label };
+            item.IsChecked = string.Equals(binding, path, StringComparison.OrdinalIgnoreCase);
+            item.Click += (_, _) => ApplyLyricFormatPreference(track, path);
+            menu.Items.Add(item);
+        }
+    }
+
+    /// <summary>
+    /// Remember which word-timed lyric file this track uses — persisted through
+    /// the lyric-binding store (audio path → lyric path), so it survives
+    /// restarts and travels with every other binding-aware load path.
+    /// </summary>
+    private void ApplyLyricFormatPreference(Track track, string? lyricPath)
+    {
+        if (lyricPath == null)
+        {
+            LyricBindingStore.Clear(track.Path);
+            track.LyricPath = null;
+        }
+        else
+        {
+            LyricBindingStore.Set(track.Path, lyricPath);
+            track.LyricPath = lyricPath;
+        }
+        UpdateLyricFormatButton(track);
+        if (_currentTrack == track)
+            ReloadLyricsForCurrent();
+    }
+
+    /// <summary>The button caption mirrors the effective word-lyric source.</summary>
+    private void UpdateLyricFormatButton(Track track)
+    {
+        var binding = track.LyricPath;
+        if (string.IsNullOrEmpty(binding))
+        {
+            BtnLyricFormat.Content = ExistingWordLyrics(track).Count > 0 ? "自动" : "逐字";
+            return;
+        }
+        foreach (var (ext, label) in WordLyricFormatOrder)
+        {
+            if (binding.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            {
+                BtnLyricFormat.Content = label;
+                return;
+            }
+        }
+        BtnLyricFormat.Content = "逐字"; // manual non-word binding — format picker not applicable
     }
 
     // ---------- Lyric offset calibration ----------
