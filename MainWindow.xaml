@@ -859,15 +859,21 @@
                                   SelectionMode="None" IsItemClickEnabled="True" ItemClick="ArtistGrid_ItemClick">
                             <GridView.ItemTemplate>
                                 <DataTemplate>
-                                    <Grid Width="164" Margin="10,10,10,8">
+                                    <Grid Width="164" Margin="10,10,10,8" RightTapped="ArtistCard_RightTapped">
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="164" />
                                             <RowDefinition Height="Auto" />
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <Border Grid.Row="0" Width="164" Height="164" CornerRadius="{StaticResource RadiusLarge}" Background="{ThemeResource CardPlaceholder}">
-                                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE77B;" FontSize="52"
-                                                      Foreground="{ThemeResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            <Grid>
+                                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE77B;" FontSize="52"
+                                                          Foreground="{ThemeResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <!-- Avatar overlays the placeholder glyph: a null Source
+                                                     paints nothing, so the glyph stays visible until the
+                                                     avatar (cached or fetched) lands. -->
+                                                <Image Source="{Binding Avatar}" Stretch="UniformToFill" />
+                                            </Grid>
                                         </Border>
                                         <TextBlock Grid.Row="1" Text="{Binding ArtistName}" Margin="2,9,2,0" FontSize="14"
                                                    FontWeight="SemiBold" Foreground="{ThemeResource TextPrimary}"

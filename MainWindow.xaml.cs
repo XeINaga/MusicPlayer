@@ -8,6 +8,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Dispatching;
+using Windows.Storage.Streams;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -119,13 +120,29 @@ public sealed partial class MainWindow : Window
         public ImageSource? Cover => Tracks.Count > 0 ? Tracks[0].Cover : null;
     }
 
-    /// <summary>Lightweight DTO for the artist grid.</summary>
-    private sealed class ArtistInfo
+    /// <summary>Lightweight DTO for the artist grid. Avatar raises a change
+    /// notification so the grid card updates the moment the background
+    /// warm-up (or a manual re-fetch) caches a picture.</summary>
+    private sealed class ArtistInfo : System.ComponentModel.INotifyPropertyChanged
     {
         public required string ArtistName { get; init; }
         public required int TrackCount { get; init; }
         public required IList<Track> Tracks { get; init; }
         public string TrackCountText => $"{TrackCount} 首歌曲";
+
+        private ImageSource? _avatar;
+        public ImageSource? Avatar
+        {
+            get => _avatar;
+            set
+            {
+                if (Equals(_avatar, value)) return;
+                _avatar = value;
+                PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Avatar)));
+            }
+        }
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
     }
 
     private List<AlbumInfo>? _albumGridCache;
@@ -644,6 +661,10 @@ public sealed partial class MainWindow : Window
             // uncached track blocks the switch on a full ffmpeg scan.
             if (_settings.DynamicVolume)
                 LoudnessCache.WarmLibraryAsync(_library.Select(t => (string?)t.Path));
+
+            // Artist avatar warm-up (every launch; cached artists cost zero
+            // network). Fills the artists grid as results land.
+            StartArtistAvatarWarmup();
         }
 
         LoadRecentFromStore();
@@ -2698,9 +2719,120 @@ public sealed partial class MainWindow : Window
             .OrderBy(a => a.ArtistName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Serve cached avatars immediately; the background warm-up fills the
+        // rest. Decode runs async (fire-and-forget) — each finished load sets
+        // its row's Avatar with change notification.
+        foreach (var a in artists)
+        {
+            var file = ArtistAvatarService.GetAvatarFile(a.ArtistName);
+            if (file != null)
+                _ = ApplyArtistAvatarAsync(a.ArtistName);
+        }
+
         _artistGridCache = artists;
         _groupCacheDirty = false;
         ArtistGrid.ItemsSource = artists;
+    }
+
+    /// <summary>Decode an avatar file WITHOUT the BitmapImage URI cache: a
+    /// manually replaced avatar writes new bytes under the SAME path, and a
+    /// URI-sourced BitmapImage would keep showing the previous picture until
+    /// restart. Reading the bytes through a stream sidesteps that cache.</summary>
+    private static async Task<Microsoft.UI.Xaml.Media.Imaging.BitmapImage?> ArtistAvatarBitmapAsync(string file)
+    {
+        try
+        {
+            var bytes = await System.IO.File.ReadAllBytesAsync(file);
+            var bmp = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+            using var stream = new InMemoryRandomAccessStream();
+            using var writer = new DataWriter(stream);
+            writer.WriteBytes(bytes);
+            await writer.StoreAsync();
+            stream.Seek(0);
+            await bmp.SetSourceAsync(stream);
+            return bmp;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Apply an avatar (from cache) to the matching grid row, if the
+    /// grid is built. Async because the decode must bypass the URI cache.</summary>
+    private async Task ApplyArtistAvatarAsync(string artistName)
+    {
+        var entry = _artistGridCache?.FirstOrDefault(a =>
+            string.Equals(a.ArtistName, artistName, StringComparison.OrdinalIgnoreCase));
+        if (entry == null)
+            return;
+        var file = ArtistAvatarService.GetAvatarFile(artistName);
+        entry.Avatar = file != null ? await ArtistAvatarBitmapAsync(file) : null;
+    }
+
+    /// <summary>Startup warm-up: fetch an avatar for every artist the cache
+    /// doesn't have one for (QQ → NetEase → KuGou). Artists already cached
+    /// cost zero network, so this stays cheap on every launch.</summary>
+    private void StartArtistAvatarWarmup()
+    {
+        var names = _library
+            .Select(t => t.Artist)
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        ArtistAvatarService.WarmMissing(names, artist =>
+            _dispatcher.TryEnqueue(() => _ = ApplyArtistAvatarAsync(artist)));
+    }
+
+    /// <summary>Right-click an artist card: force a re-fetch through the
+    /// source chain, or point the avatar at a local picture file.</summary>
+    private void ArtistCard_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ArtistInfo info })
+            return;
+        e.Handled = true;
+
+        // Manual pick, same interaction as the cover search: a preview window
+        // that writes into the avatar cache on confirm.
+        var search = new MenuFlyoutItem
+        {
+            Text = "搜索歌手头像...",
+            Icon = new FontIcon { Glyph = "\uE721" }
+        };
+        search.Click += (_, _) => SafeRun(async () =>
+        {
+            var win = new OnlineAvatarWindow(_settings, info.ArtistName,
+                WinRT.Interop.WindowNative.GetWindowHandle(this));
+            win.Activate();
+            if (await win.Completion)
+                await ApplyArtistAvatarAsync(info.ArtistName);
+        }, "搜索歌手头像");
+
+        var assign = new MenuFlyoutItem
+        {
+            Text = "指定本地图片...",
+            Icon = new FontIcon { Glyph = "\uE8E5" }
+        };
+        assign.Click += (_, _) => SafeRun(async () =>
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            InitPicker(picker);
+            picker.ViewMode = Windows.Storage.Pickers.PickerViewMode.Thumbnail;
+            picker.FileTypeFilter.Add(".jpg");
+            picker.FileTypeFilter.Add(".jpeg");
+            picker.FileTypeFilter.Add(".png");
+            picker.FileTypeFilter.Add(".webp");
+            var file = await picker.PickSingleFileAsync();
+            if (file == null)
+                return;
+            var bytes = await System.IO.File.ReadAllBytesAsync(file.Path);
+            ArtistAvatarService.SaveAvatar(info.ArtistName, bytes, null);
+            await ApplyArtistAvatarAsync(info.ArtistName);
+            ShowInfoBar($"已为「{info.ArtistName}」设置本地头像");
+        }, "指定本地图片");
+
+        new MenuFlyout { Items = { search, assign } }
+            .ShowAt(sender as FrameworkElement, e.GetPosition(sender as FrameworkElement));
     }
 
     private void AlbumCard_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
