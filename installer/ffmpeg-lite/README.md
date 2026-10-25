@@ -1,6 +1,6 @@
 # ffmpeg-lite — 精简版 ffmpeg.exe（2.1 MB）
 
-本目录的 `ffmpeg.exe` 是从 FFmpeg 8.0 源码以 `--disable-everything` 编译的
+本目录的 `ffmpeg.exe` 是从 FFmpeg 9.0.2 源码以 `--disable-everything` 编译的
 精简版，只保留**响度扫描**所需的能力（动态音量功能用）：
 
 - 解封装：mov(m4a/mp4) mp3 flac ogg opus wav aac ac3 dts ape wv tak matroska(mka) asf(wma) dsf aiff
@@ -16,8 +16,8 @@ avcodec/avformat/avfilter dll。删除此 exe 只会让没有 ReplayGain 标签�
 ## 重新编译（MSYS2 ucrt64 工具链）
 
 ```bash
-# 下载源码 https://ffmpeg.org/releases/ffmpeg-8.0.tar.xz 并解压
-cd ffmpeg-8.0
+# 下载源码 https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz 并解压
+cd ffmpeg-9.0.2
 export PATH="/e/mingw/msys2/ucrt64/bin:$PATH"
 ./configure \
   --disable-everything --disable-autodetect --disable-doc --disable-debug \

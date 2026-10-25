@@ -15,7 +15,7 @@
   - **WiX v4 CLI** (`wix`, installed as a .NET global tool: `dotnet tool install --global wix`)
   - **Python 3** on PATH (regenerates `installer/files.wxs`)
   - `.NET Framework csc` (ships with Windows, no extra install)
-  - `installer/ffmpeg-lite/ffmpeg.exe` — the trimmed FFmpeg 8.0 build used for
+  - `installer/ffmpeg-lite/ffmpeg.exe` — the trimmed FFmpeg 9.0.2 build used for
     loudness scanning. The binary is committed; if missing, rebuild it with the
     recipe in `installer/ffmpeg-lite/README.md`.
 
