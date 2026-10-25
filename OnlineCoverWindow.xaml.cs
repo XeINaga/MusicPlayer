@@ -219,7 +219,8 @@ public sealed partial class OnlineCoverWindow : Window
         List<CoverSearchResult> results;
         try
         {
-            results = await CoverArtService.SearchAsync(kw, SourceIndex);
+            results = await CoverArtService.SearchAsync(kw, SourceIndex,
+                order: CoverArtService.ParseOrder(_settings.CoverSourceOrder));
         }
         catch (Exception ex)
         {

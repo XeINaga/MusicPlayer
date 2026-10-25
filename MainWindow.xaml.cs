@@ -390,6 +390,7 @@ public sealed partial class MainWindow : Window
         this.Closed += MainWindow_Closed;
 
         RestoreSession();
+        InitCoverOrderUi();
         ShowView(NavView.Local);
 
         // Watched folders: reconcile the library with what is on disk (runs
@@ -5490,6 +5491,81 @@ public sealed partial class MainWindow : Window
     private async void BtnCoverStart_Click(object sender, RoutedEventArgs e)
         => await StartCoverCompletionAsync();
 
+    // ---------- Auto-source priority dropdowns (cover completion) ----------
+
+    private bool _suppressCoverOrderEvents;
+
+    /// <summary>Fill the four priority dropdowns from the saved order. Called
+    /// once after InitializeComponent; dropdown contents never change.</summary>
+    private void InitCoverOrderUi()
+    {
+        _suppressCoverOrderEvents = true;
+        try
+        {
+            foreach (var combo in new[] { CoverOrder1, CoverOrder2, CoverOrder3, CoverOrder4 })
+            {
+                for (var i = 0; i < CoverArtService.SourceNames.Length; i++)
+                    combo.Items.Add(new ComboBoxItem { Content = CoverItemLabel(CoverArtService.SourceNames[i]) });
+            }
+
+            var order = CoverArtService.ParseOrder(_settings.CoverSourceOrder);
+            var combos = new[] { CoverOrder1, CoverOrder2, CoverOrder3, CoverOrder4 };
+            for (var i = 0; i < combos.Length && i < order.Count; i++)
+                combos[i].SelectedIndex = IndexOfSourceKey(order[i]);
+        }
+        finally
+        {
+            _suppressCoverOrderEvents = false;
+        }
+    }
+
+    private static string CoverItemLabel(string key) => key switch
+    {
+        "QQ" => "QQ音乐",
+        "Kugou" => "酷狗",
+        "Itunes" => "iTunes",
+        _ => "网易云",
+    };
+
+    private static int IndexOfSourceKey(int key)
+    {
+        var name = CoverArtService.SourceKeyToName(key);
+        return Array.IndexOf(CoverArtService.SourceNames, name);
+    }
+
+    /// <summary>One dropdown changed: keep the permutation complete by
+    /// swapping the new value with whichever dropdown held it, then persist.</summary>
+    private void CoverOrder_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressCoverOrderEvents || CoverOrder1 == null)
+            return;
+        var combos = new[] { CoverOrder1, CoverOrder2, CoverOrder3, CoverOrder4 };
+        var changed = Array.IndexOf(combos, sender);
+        if (changed < 0 || combos[changed].SelectedIndex < 0)
+            return;
+
+        // Duplicate somewhere else → swap so every source stays listed once.
+        for (var i = 0; i < combos.Length; i++)
+        {
+            if (i == changed || combos[i].SelectedIndex != combos[changed].SelectedIndex)
+                continue;
+            var previous = _suppressCoverOrderEvents;
+            _suppressCoverOrderEvents = true;
+            combos[i].SelectedIndex = e.RemovedItems.Count > 0 && e.RemovedItems[0] is ComboBoxItem rem
+                ? combos[changed].Items.IndexOf(rem)
+                : -1;
+            _suppressCoverOrderEvents = previous;
+            break;
+        }
+
+        var order = combos.Select(c => CoverArtService.SourceNameToKey(
+            CoverArtService.SourceNames[Math.Max(0, c.SelectedIndex)])).ToList();
+        _settings.CoverSourceOrder = string.Join(",", order.Select(CoverArtService.SourceKeyToName));
+        SettingsStore.Save(_settings);
+    }
+
+    private List<int> CoverOrderKeys => CoverArtService.ParseOrder(_settings.CoverSourceOrder);
+
     private void BtnCoverStop_Click(object sender, RoutedEventArgs e)
     {
         _coverBatchCts?.Cancel();
@@ -5768,22 +5844,23 @@ public sealed partial class MainWindow : Window
         if (artist.Length == 0 && title.Length == 0)
             return false;
 
+        var order = CoverOrderKeys;
         List<CoverSearchResult> candidates;
         if (album.Length > 0 && !string.Equals(album, title, StringComparison.OrdinalIgnoreCase))
         {
             // Tiered keyword ladder; each tier only runs when the previous
             // one came back empty (a hit at any tier stops the ladder).
-            candidates = await CoverArtService.SearchAsync(Combine(artist, album), CoverArtService.SourceAuto);
+            candidates = await CoverArtService.SearchAsync(Combine(artist, album), CoverArtService.SourceAuto, order: order);
             if (candidates.Count == 0)
-                candidates = await CoverArtService.SearchAsync(album, CoverArtService.SourceAuto);
+                candidates = await CoverArtService.SearchAsync(album, CoverArtService.SourceAuto, order: order);
             if (candidates.Count == 0 && artist.Length > 0)
-                candidates = await CoverArtService.SearchAsync(Combine(artist, title), CoverArtService.SourceAuto);
+                candidates = await CoverArtService.SearchAsync(Combine(artist, title), CoverArtService.SourceAuto, order: order);
         }
         else
         {
             // No album tag (or single-as-album where tag==title): match on
             // artist + title and accept the top hit.
-            candidates = await CoverArtService.SearchAsync(Combine(artist, title), CoverArtService.SourceAuto);
+            candidates = await CoverArtService.SearchAsync(Combine(artist, title), CoverArtService.SourceAuto, order: order);
         }
         if (candidates.Count == 0)
             return false;

@@ -234,6 +234,13 @@ public sealed class AppSettings
     public int CoverSearchW { get; set; } = 780;
     public int CoverSearchH { get; set; } = 600;
 
+    /// <summary>
+    /// Auto cover-search source priority, comma-separated source names in
+    /// try-first order. Names match CoverArtService.SourceName keys. The four
+    /// dropdowns on the cover-completion page keep this permutation complete.
+    /// </summary>
+    public string CoverSourceOrder { get; set; } = "NetEase,QQ,Kugou,Itunes";
+
     // Last.fm scrobbling.
     public string LastFmApiKey { get; set; } = "";
     public string LastFmApiSecret { get; set; } = "";

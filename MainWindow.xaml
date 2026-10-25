@@ -1702,6 +1702,25 @@
                                         <ComboBoxItem Content="仅成功" />
                                     </ComboBox>
                                 </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="自动补全来源优先级" FontSize="12" VerticalAlignment="Center"
+                                               Foreground="{ThemeResource TextSecondary}" />
+                                    <ComboBox x:Name="CoverOrder1" Width="104" MinHeight="32" FontSize="12"
+                                              SelectionChanged="CoverOrder_Changed"
+                                              ToolTipService.ToolTip="第 1 优先：批量补全首先尝试的来源" />
+                                    <TextBlock Text="›" FontSize="13" VerticalAlignment="Center" Foreground="{ThemeResource TextSecondary}" />
+                                    <ComboBox x:Name="CoverOrder2" Width="104" MinHeight="32" FontSize="12"
+                                              SelectionChanged="CoverOrder_Changed"
+                                              ToolTipService.ToolTip="第 2 优先" />
+                                    <TextBlock Text="›" FontSize="13" VerticalAlignment="Center" Foreground="{ThemeResource TextSecondary}" />
+                                    <ComboBox x:Name="CoverOrder3" Width="104" MinHeight="32" FontSize="12"
+                                              SelectionChanged="CoverOrder_Changed"
+                                              ToolTipService.ToolTip="第 3 优先" />
+                                    <TextBlock Text="›" FontSize="13" VerticalAlignment="Center" Foreground="{ThemeResource TextSecondary}" />
+                                    <ComboBox x:Name="CoverOrder4" Width="104" MinHeight="32" FontSize="12"
+                                              SelectionChanged="CoverOrder_Changed"
+                                              ToolTipService.ToolTip="第 4 优先（兜底）" />
+                                </StackPanel>
                             </StackPanel>
                         </Border>
 

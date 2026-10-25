@@ -39,6 +39,10 @@ public static class CoverArtService
 {
     public const int SourceAuto = 0, SourceNetEase = 1, SourceItunes = 2, SourceQq = 3, SourceKugou = 4;
 
+    /// <summary>Canonical source keys, in the default auto order. The settings
+    /// page stores a permutation of these names.</summary>
+    public static readonly string[] SourceNames = { "NetEase", "QQ", "Kugou", "Itunes" };
+
     private static readonly HttpClient Http = CreateClient();
 
     private static HttpClient CreateClient()
@@ -55,9 +59,54 @@ public static class CoverArtService
 
     // ---------- Search ----------
 
-    /// <summary>Search albums. <paramref name="source"/>: 0=auto (NetEase → iTunes),
-    /// 1=NetEase, 2=iTunes. Auto returns the first source that produced hits.</summary>
-    public static async Task<List<CoverSearchResult>> SearchAsync(string keyword, int source, int limit = 20)
+    public static string SourceKeyToName(int source) => source switch
+    {
+        SourceNetEase => "NetEase",
+        SourceQq => "QQ",
+        SourceKugou => "Kugou",
+        SourceItunes => "Itunes",
+        _ => "NetEase",
+    };
+
+    public static int SourceNameToKey(string name) => name switch
+    {
+        "QQ" => SourceQq,
+        "Kugou" => SourceKugou,
+        "Itunes" => SourceItunes,
+        _ => SourceNetEase,
+    };
+
+    /// <summary>Parse a stored "NetEase,QQ,Kugou,Itunes" permutation into
+    /// source keys. Unknown/duplicate names are dropped; missing ones are
+    /// appended in default order so the result is always a complete
+    /// permutation (an empty/missing setting yields the default order).</summary>
+    public static List<int> ParseOrder(string? order)
+    {
+        var result = new List<int>();
+        if (!string.IsNullOrWhiteSpace(order))
+        {
+            foreach (var name in order.Split(','))
+            {
+                var key = SourceNameToKey(name.Trim());
+                if (!result.Contains(key))
+                    result.Add(key);
+            }
+        }
+        foreach (var name in SourceNames)
+        {
+            var key = SourceNameToKey(name);
+            if (!result.Contains(key))
+                result.Add(key);
+        }
+        return result;
+    }
+
+    /// <summary>Search albums. <paramref name="source"/>: 0=auto, 1=NetEase,
+    /// 2=iTunes, 3=QQ, 4=KuGou. Auto walks <paramref name="order"/> (the
+    /// user-configured priority; defaults to NetEase → QQ → KuGou → iTunes)
+    /// and returns the first source that produced hits.</summary>
+    public static async Task<List<CoverSearchResult>> SearchAsync(
+        string keyword, int source, int limit = 20, IReadOnlyList<int>? order = null)
     {
         if (string.IsNullOrWhiteSpace(keyword))
             return new List<CoverSearchResult>();
@@ -71,17 +120,19 @@ public static class CoverArtService
         if (source == SourceKugou)
             return await SearchKugouAsync(keyword, limit);
 
-        // Auto: CN-native sources first, iTunes last (often unreachable here).
-        var ne = await SearchNetEaseAsync(keyword, limit);
-        if (ne.Count > 0)
-            return ne;
-        var qq = await SearchQqAsync(keyword, limit);
-        if (qq.Count > 0)
-            return qq;
-        var kg = await SearchKugouAsync(keyword, limit);
-        if (kg.Count > 0)
-            return kg;
-        return await SearchItunesAsync(keyword, limit);
+        foreach (var s in order ?? ParseOrder(null))
+        {
+            var found = s switch
+            {
+                SourceQq => await SearchQqAsync(keyword, limit),
+                SourceKugou => await SearchKugouAsync(keyword, limit),
+                SourceItunes => await SearchItunesAsync(keyword, limit),
+                _ => await SearchNetEaseAsync(keyword, limit),
+            };
+            if (found.Count > 0)
+                return found;
+        }
+        return new List<CoverSearchResult>();
     }
 
     // ---------- QQ Music ----------
