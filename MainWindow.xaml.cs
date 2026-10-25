@@ -2726,7 +2726,7 @@ public sealed partial class MainWindow : Window
         {
             var file = ArtistAvatarService.GetAvatarFile(a.ArtistName);
             if (file != null)
-                _ = ApplyArtistAvatarAsync(a.ArtistName);
+                _ = LoadAvatarIntoAsync(a, file);
         }
 
         _artistGridCache = artists;
@@ -2748,6 +2748,7 @@ public sealed partial class MainWindow : Window
             using var writer = new DataWriter(stream);
             writer.WriteBytes(bytes);
             await writer.StoreAsync();
+            await writer.FlushAsync();
             stream.Seek(0);
             await bmp.SetSourceAsync(stream);
             return bmp;
@@ -2758,16 +2759,26 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>Decode an avatar file into a grid entry (fire-and-forget safe:
+    /// takes the entry directly, so it works while the grid is still being
+    /// built and _artistGridCache hasn't been swapped yet).</summary>
+    private static async Task LoadAvatarIntoAsync(ArtistInfo entry, string file)
+    {
+        entry.Avatar = await ArtistAvatarBitmapAsync(file);
+    }
+
     /// <summary>Apply an avatar (from cache) to the matching grid row, if the
-    /// grid is built. Async because the decode must bypass the URI cache.</summary>
+    /// grid is built. Decode FIRST, then look the row up — used by paths that
+    /// run after the grid exists (manual write, warm-up callback).</summary>
     private async Task ApplyArtistAvatarAsync(string artistName)
     {
+        var file = ArtistAvatarService.GetAvatarFile(artistName);
+        var bmp = file != null ? await ArtistAvatarBitmapAsync(file) : null;
         var entry = _artistGridCache?.FirstOrDefault(a =>
             string.Equals(a.ArtistName, artistName, StringComparison.OrdinalIgnoreCase));
         if (entry == null)
             return;
-        var file = ArtistAvatarService.GetAvatarFile(artistName);
-        entry.Avatar = file != null ? await ArtistAvatarBitmapAsync(file) : null;
+        entry.Avatar = bmp;
     }
 
     /// <summary>Startup warm-up: fetch an avatar for every artist the cache
@@ -4114,13 +4125,16 @@ public sealed partial class MainWindow : Window
     {
         // Semi-translucent ambience: the artwork tint rides ON TOP of the
         // window material (Mica / acrylic show through) instead of covering
-        // it with an opaque slab. Bottom stays denser for lyric legibility.
+        // it with an opaque slab. The old stops (0xB4 top / 0xE0 bottom) were
+        // dense enough to hide the wallpaper behind the lyric view entirely —
+        // lighter alpha keeps the ambience while letting the wallpaper show
+        // through about as clearly as the sidebar does.
         Windows.UI.Color top = tint.HasValue
-            ? Microsoft.UI.ColorHelper.FromArgb(0xB4, (byte)(tint.Value.R * 55 / 100), (byte)(tint.Value.G * 55 / 100), (byte)(tint.Value.B * 55 / 100))
-            : Microsoft.UI.ColorHelper.FromArgb(0xB4, 0x22, 0x1c, 0x22);
+            ? Microsoft.UI.ColorHelper.FromArgb(0x66, (byte)(tint.Value.R * 55 / 100), (byte)(tint.Value.G * 55 / 100), (byte)(tint.Value.B * 55 / 100))
+            : Microsoft.UI.ColorHelper.FromArgb(0x66, 0x22, 0x1c, 0x22);
         var brush = new LinearGradientBrush { StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1) };
         brush.GradientStops.Add(new GradientStop { Color = top, Offset = 0 });
-        brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(0xE0, 0x0e, 0x0f, 0x14), Offset = 1 });
+        brush.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(0x9E, 0x0e, 0x0f, 0x14), Offset = 1 });
         NowPlayingPanel.Background = brush;
     }
 
