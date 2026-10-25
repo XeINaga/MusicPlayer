@@ -230,6 +230,10 @@ public sealed class AppSettings
     public int LyricSearchW { get; set; } = 560;
     public int LyricSearchH { get; set; } = 640;
 
+    /// <summary>Online cover-art search window size (resizable; remembered).</summary>
+    public int CoverSearchW { get; set; } = 780;
+    public int CoverSearchH { get; set; } = 600;
+
     // Last.fm scrobbling.
     public string LastFmApiKey { get; set; } = "";
     public string LastFmApiSecret { get; set; } = "";

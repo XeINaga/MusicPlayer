@@ -912,6 +912,7 @@ public sealed partial class MainWindow : Window
         BtnRenamePlaylist.Visibility = Visibility.Collapsed;
         BtnSelectMode.Visibility = Visibility.Collapsed;
         BtnBatchLyrics.Visibility = Visibility.Collapsed;
+        BtnCoverBatch.Visibility = Visibility.Collapsed;
         ViewCombo.Visibility = Visibility.Collapsed;
         SortCombo.Visibility = Visibility.Collapsed;
 
@@ -926,6 +927,7 @@ public sealed partial class MainWindow : Window
                 BtnClear.Visibility = Visibility.Visible;
                 BtnSelectMode.Visibility = Visibility.Visible;
                 BtnBatchLyrics.Visibility = Visibility.Visible;
+                BtnCoverBatch.Visibility = Visibility.Visible;
                 ViewCombo.Visibility = Visibility.Visible;
                 SortCombo.Visibility = Visibility.Visible;
                 break;
@@ -2229,6 +2231,15 @@ public sealed partial class MainWindow : Window
         };
         autoLyric.Click += async (_, _) => await AutoDownloadLyricForTrackAsync(t);
         mf.Items.Insert(insert++, autoLyric);
+
+        var searchCover = new MenuFlyoutItem
+        {
+            Text = "搜索专辑图片…",
+            Tag = "dyn",
+            Icon = new FontIcon { Glyph = "\uEB9F" }
+        };
+        searchCover.Click += (_, _) => SafeRun(() => SearchCoverForTrackAsync(t), "搜索专辑图片");
+        mf.Items.Insert(insert++, searchCover);
 
         if (_currentView == NavView.Playlist && _currentPlaylist != null)
         {
@@ -5453,6 +5464,210 @@ public sealed partial class MainWindow : Window
         LyricTaskList.ItemsSource = new ObservableCollection<LyricTaskItem>(src);
     }
 
+    // ---------- Cover-art batch completion (shares the completion page queue) ----------
+
+    private async void BtnCoverBatch_Click(object sender, RoutedEventArgs e)
+    {
+        ShowView(NavView.LyricFill);
+        await StartCoverCompletionAsync();
+    }
+
+    private async void BtnCoverStart_Click(object sender, RoutedEventArgs e)
+        => await StartCoverCompletionAsync();
+
+    /// <summary>
+    /// Scan the current list for tracks WITHOUT an embedded front cover and
+    /// queue a cover download+embed task for each. Tracks that already carry
+    /// cover art are skipped (they are reported in the status line, not
+    /// touched — the manual search window is the way to REPLACE a cover).
+    /// </summary>
+    private async Task StartCoverCompletionAsync()
+    {
+        if (_batchLyricRunning) return;
+        _batchLyricRunning = true;
+        UpdateLyricSummary();
+
+        var snapshot = _activeTracks.ToList();
+
+        LyricStatusText.Text = "正在扫描封面…";
+        List<Track> hasCover, missing;
+        try
+        {
+            (hasCover, missing) = await Task.Run(() => ClassifyCoverTracks(snapshot));
+        }
+        catch (Exception ex)
+        {
+            _batchLyricRunning = false;
+            UpdateLyricSummary();
+            LyricStatusText.Text = $"扫描封面失败：{ex.Message}";
+            return;
+        }
+
+        if (missing.Count == 0)
+        {
+            _batchLyricRunning = false;
+            UpdateLyricSummary();
+            LyricStatusText.Text = hasCover.Count == 0
+                ? "当前列表为空。"
+                : $"当前列表 {hasCover.Count} 首歌曲均已内嵌专辑图片，无需补全。";
+            ShowInfoBar("所有歌曲均已内嵌专辑图片。");
+            return;
+        }
+
+        _lyricTasks.Clear();
+        foreach (var t in missing)
+            _lyricTasks.Add(new LyricTaskItem(t)
+            {
+                Kind = LyricTaskKind.Cover,
+                Detail = hasCover.Count > 0 ? "等待下载" : "等待下载",
+            });
+        foreach (var item in _lyricTasks) StampLyricTaskBrush(item);
+        ApplyLyricFilter();
+        UpdateLyricSummary();
+
+        AppLog.WriteLyricCompletionSection(
+            $"补全封面开始 — 列表 {snapshot.Count} 首（已有封面跳过 {hasCover.Count}，待补 {missing.Count}）");
+
+        await RunLyricQueueAsync(_lyricTasks.ToList());
+    }
+
+    /// <summary>Split the list by whether the audio file already embeds cover
+    /// art. Disk IO per track — run via Task.Run. Returns (hasCover, missing).
+    /// The metadata cache's per-entry cover state short-circuits the TagLib
+    /// read when the file is unchanged since its last scan: a warm batch scan
+    /// costs one stat per track instead of a full tag open.</summary>
+    private static (List<Track> HasCover, List<Track> Missing) ClassifyCoverTracks(List<Track> tracks)
+    {
+        var has = new List<Track>();
+        var missing = new List<Track>();
+        foreach (var t in tracks)
+        {
+            try
+            {
+                long mtime = 0;
+                try { mtime = System.IO.File.GetLastWriteTimeUtc(t.Path).Ticks; } catch { }
+                if (mtime != 0 &&
+                    MetadataCache.TryGet(t.Path, mtime, out _, out _, out _, out _, out var coverState) &&
+                    coverState != MetadataCache.CoverUnknown)
+                {
+                    if (coverState == MetadataCache.CoverYes)
+                        has.Add(t);
+                    else
+                        missing.Add(t);
+                    continue;
+                }
+                if (CoverArtService.HasEmbeddedCover(t.Path))
+                    has.Add(t);
+                else
+                    missing.Add(t);
+            }
+            catch
+            {
+                missing.Add(t); // unreadable file — attempt anyway, embed will fail with a reason
+            }
+        }
+        return (has, missing);
+    }
+
+    /// <summary>
+    /// Search album art for one track (NetEase → iTunes in auto mode), pick
+    /// the best-matching album, download the image and embed it as the front
+    /// cover. Album-tag matching is REQUIRED when the track has an album tag
+    /// (a wrong cover is worse than none); without a tag the top hit is taken.
+    /// Keywords fall through in tiers: many libraries tag Japanese releases
+    /// with the transliterated title (スタートアズユージュアル) while the
+    /// stores index the latin name (Start as Usual) — the artist+album search
+    /// alone misses those entirely.
+    /// </summary>
+    private async Task<bool> CoverFillForTrackAsync(Track track)
+    {
+        var artist = track.Artist is "未知歌手" or "" ? "" : track.Artist;
+        var album = track.Album?.Trim() ?? "";
+        var title = track.Title?.Trim() ?? "";
+        if (artist.Length == 0 && title.Length == 0)
+            return false;
+
+        List<CoverSearchResult> candidates;
+        if (album.Length > 0 && !string.Equals(album, title, StringComparison.OrdinalIgnoreCase))
+        {
+            // Tiered keyword ladder; each tier only runs when the previous
+            // one came back empty (a hit at any tier stops the ladder).
+            candidates = await CoverArtService.SearchAsync(Combine(artist, album), CoverArtService.SourceAuto);
+            if (candidates.Count == 0)
+                candidates = await CoverArtService.SearchAsync(album, CoverArtService.SourceAuto);
+            if (candidates.Count == 0 && artist.Length > 0)
+                candidates = await CoverArtService.SearchAsync(Combine(artist, title), CoverArtService.SourceAuto);
+        }
+        else
+        {
+            // No album tag (or single-as-album where tag==title): match on
+            // artist + title and accept the top hit.
+            candidates = await CoverArtService.SearchAsync(Combine(artist, title), CoverArtService.SourceAuto);
+        }
+        if (candidates.Count == 0)
+            return false;
+
+        CoverSearchResult? pick;
+        if (album.Length > 0 && !string.Equals(album, title, StringComparison.OrdinalIgnoreCase))
+        {
+            var nAlbum = Norm(album);
+            pick = nAlbum.Length >= 2
+                ? candidates.FirstOrDefault(c =>
+                {
+                    var n = Norm(c.Album);
+                    return n.Contains(nAlbum) || nAlbum.Contains(n);
+                })
+                : null;
+            if (pick == null)
+                return false; // album-tagged track, nothing matched its album — refuse to guess
+        }
+        else
+        {
+            pick = candidates[0];
+        }
+
+        var dl = await CoverArtService.DownloadAsync(pick.PicUrl);
+        if (dl == null)
+            return false;
+
+        // Race guard: the track may have gained a cover between classification
+        // and now (another embed finished) — embedding replaces, so re-check.
+        if (CoverArtService.HasEmbeddedCover(track.Path))
+            return true; // treat as success: it does have a cover now
+
+        if (!CoverArtService.EmbedCover(track.Path, dl.Value.Data, dl.Value.Mime))
+            return false;
+
+        // Embedding bumped the file mtime → metadata cache misses → the next
+        // LoadMetadataFor re-reads tags, re-extracts the cover into CoverCache
+        // and pushes it through Track.SetMetadata to every bound UI surface.
+        LoadMetadataFor(track);
+        if (_currentTrack == track)
+            BindCurrentCover(track);
+        return true;
+    }
+
+    private static string Combine(string a, string b) =>
+        string.IsNullOrEmpty(a) ? b : $"{a} {b}";
+
+    /// <summary>Open the manual cover-search window (with preview) for a track.</summary>
+    private async Task SearchCoverForTrackAsync(Track track)
+    {
+        var keyword = ((track.Artist is "未知歌手" or "" ? "" : track.Artist) + " " +
+                       (string.IsNullOrWhiteSpace(track.Album) ? track.Title : track.Album)).Trim();
+        var win = new OnlineCoverWindow(_settings, track, keyword,
+            WinRT.Interop.WindowNative.GetWindowHandle(this));
+        win.Activate();
+        var embedded = await win.Completion;
+        if (embedded)
+        {
+            LoadMetadataFor(track);
+            if (_currentTrack == track)
+                BindCurrentCover(track);
+            ShowInfoBar($"已为「{track.Title}」写入内嵌封面");
+        }
+    }
+
     /// <summary>Scans the library, builds the queue and runs it.</summary>
     private async Task StartLyricCompletionAsync()
     {
@@ -5529,7 +5744,7 @@ public sealed partial class MainWindow : Window
         BtnLyricStop.IsEnabled = true;
         BtnLyricRetry.IsEnabled = false;
 
-        int downloaded = 0, topped = 0, failed = 0;
+        int downloaded = 0, topped = 0, failed = 0, coverDone = 0;
         var refreshCurrent = false;
         var i = 0;
 
@@ -5547,12 +5762,28 @@ public sealed partial class MainWindow : Window
                 var t = item.Track;
                 SetLyricTaskState(item, LyricTaskStatus.Running, "处理中…");
                 LyricStatusText.Text = $"[{i}/{queue.Count}] {t.Title} — {t.Artist}";
-                AppLog.WriteLyricCompletion($"[{i}/{queue.Count}] {(item.NeedsMainLyric ? "缺主歌词" : "检查翻译/罗马音")}：{t.Title} - {t.Artist}");
+                AppLog.WriteLyricCompletion($"[{i}/{queue.Count}] {(item.Kind == LyricTaskKind.Cover ? "补全封面" : item.NeedsMainLyric ? "缺主歌词" : "检查翻译/罗马音")}：{t.Title} - {t.Artist}");
                 AppLog.WriteLyricCompletion($"  音频：{t.Path}");
 
                 try
                 {
-                    if (item.NeedsMainLyric)
+                    if (item.Kind == LyricTaskKind.Cover)
+                    {
+                        if (await CoverFillForTrackAsync(t))
+                        {
+                            coverDone++;
+                            if (_currentTrack == t) refreshCurrent = true;
+                            AppLog.WriteLyricCompletion("  封面已内嵌");
+                            SetLyricTaskState(item, LyricTaskStatus.Success, "封面已内嵌");
+                        }
+                        else
+                        {
+                            failed++;
+                            AppLog.WriteLyricCompletion("  结果：未找到匹配的专辑图片或写入失败");
+                            SetLyricTaskState(item, LyricTaskStatus.Failed, "未匹配专辑或写入失败");
+                        }
+                    }
+                    else if (item.NeedsMainLyric)
                     {
                         if (await TryAutoDownloadAsync(t))
                         {
@@ -5604,9 +5835,10 @@ public sealed partial class MainWindow : Window
                 ReloadLyricsForCurrent();
 
             var stopped = ct.IsCancellationRequested;
+            var kindNote = coverDone > 0 ? $"，封面 {coverDone}" : "";
             var summary = stopped
-                ? $"补全已停止：新下载 {downloaded}，补全翻译/罗马音 {topped}，失败 {failed}"
-                : $"补全歌词完成：新下载 {downloaded}，补全翻译/罗马音 {topped}，失败 {failed} / {queue.Count}";
+                ? $"补全已停止：新下载 {downloaded}，补全翻译/罗马音 {topped}{kindNote}，失败 {failed}"
+                : $"补全完成：新下载 {downloaded}，补全翻译/罗马音 {topped}{kindNote}，失败 {failed} / {queue.Count}";
             AppLog.WriteLyricCompletionSection(summary);
             LyricStatusText.Text = summary;
             ShowInfoBar(summary + $"。日志：{AppLog.LyricCompletionLogPath}");

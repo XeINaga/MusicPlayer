@@ -1,0 +1,107 @@
+<Window
+    x:Class="MusicPlayer.OnlineCoverWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="搜索专辑图片">
+
+    <!-- Same design tokens as the main window (SukiTheme.xaml is merged at the
+         app level). Left: search + results; right: large live preview of the
+         selected album art. -->
+    <Grid x:Name="Root" Background="{ThemeResource AppBackground}" Padding="16,14">
+        <Grid.Resources>
+            <DataTemplate x:Key="CoverSearchRowTemplate">
+                <Grid ColumnSpacing="10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Width="44" Height="44" CornerRadius="6" VerticalAlignment="Center"
+                            Background="{ThemeResource CardPlaceholder}"
+                            BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1">
+                        <Image Source="{Binding Thumb}" Stretch="Uniform" />
+                    </Border>
+                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Album}" FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextPrimary}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock FontSize="11" Foreground="{ThemeResource TextSecondary}"
+                                   TextTrimming="CharacterEllipsis">
+                            <Run Text="{Binding Artist}" /><Run Text="{Binding SourceTag}" />
+                        </TextBlock>
+                    </StackPanel>
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="来源" FontSize="12" VerticalAlignment="Center"
+                       Foreground="{ThemeResource TextSecondary}" />
+            <ComboBox x:Name="SourceCombo" Width="110" MinHeight="32" FontSize="12">
+                <ComboBoxItem Content="自动" IsSelected="True" />
+                <ComboBoxItem Content="网易云" />
+                <ComboBoxItem Content="iTunes" />
+            </ComboBox>
+            <TextBox x:Name="KeywordBox" MinWidth="220" MinHeight="32" FontSize="12"
+                     PlaceholderText="歌手 专辑 / 歌手 歌名" KeyDown="KeywordBox_KeyDown" />
+            <Button x:Name="SearchBtn" Content="搜索" Click="SearchBtn_Click" FontSize="12"
+                    Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                    Background="{ThemeResource ButtonBackground}"
+                    BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" Margin="0,10,0,0" ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="240" />
+            </Grid.ColumnDefinitions>
+            <ListView x:Name="ResultsList" Grid.Column="0" Padding="0,0,16,0"
+                      SelectionMode="Single"
+                      ItemTemplate="{StaticResource CoverSearchRowTemplate}"
+                      SelectionChanged="ResultsList_SelectionChanged">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="CornerRadius" Value="{StaticResource RadiusSmall}" />
+                        <Setter Property="Padding" Value="8,6" />
+                        <Setter Property="MinHeight" Value="0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+            </ListView>
+
+            <!-- Live preview of the selected cover -->
+            <StackPanel Grid.Column="1" Spacing="8">
+                <Border CornerRadius="10" Height="220" VerticalAlignment="Top"
+                        Background="{ThemeResource CardPlaceholder}"
+                        BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1"
+                        Padding="6">
+                    <Image x:Name="PreviewImage" Stretch="Uniform" />
+                </Border>
+                <TextBlock x:Name="PreviewInfo" FontSize="11" Foreground="{ThemeResource TextSecondary}"
+                           TextWrapping="Wrap" Text="选择结果后在此预览" />
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock x:Name="StatusText" FontSize="12" Margin="2,0,2,8"
+                       Foreground="{ThemeResource TextSecondary}" TextWrapping="Wrap"
+                       Text="选择专辑后点击「写入」将图片内嵌到歌曲文件" />
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10" HorizontalAlignment="Right">
+                <Button x:Name="CancelBtn" Content="取消" Click="CancelBtn_Click" MinWidth="88" FontSize="12"
+                        Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                        Background="{ThemeResource ButtonBackground}"
+                        BorderBrush="{ThemeResource BorderSoft}" BorderThickness="1" />
+                <Button x:Name="EmbedBtn" Content="写入" Click="EmbedBtn_Click" MinWidth="88" FontSize="12"
+                        Padding="14,6" CornerRadius="{StaticResource RadiusMedium}"
+                        BorderThickness="0" IsEnabled="False" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

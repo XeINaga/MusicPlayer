@@ -749,6 +749,11 @@
                             </controls:SplitButton.Flyout>
                         </controls:SplitButton>
 
+                        <!-- 一键补全专辑图片：批量内嵌缺失的封面 -->
+                        <Button x:Name="BtnCoverBatch" Content="补全封面" CornerRadius="{StaticResource RadiusMedium}" Padding="14,7" FontSize="12"
+                                Visibility="Collapsed" Click="BtnCoverBatch_Click"
+                                ToolTipService.ToolTip="为没有内嵌封面的歌曲在线搜索专辑图片并写入音频文件（已有封面的跳过）" />
+
                         <!-- 歌单操作 -->
                         <controls:DropDownButton x:Name="BtnPlaylistMenu" Content="歌单" Style="{StaticResource ActionMenuButtonStyle}"
                                                  Visibility="Collapsed" ToolTipService.ToolTip="播放、添加歌曲、重命名或删除此歌单">
@@ -1603,6 +1608,9 @@
                                             Background="{StaticResource QqGreen}" Foreground="White"
                                             CornerRadius="{StaticResource RadiusMedium}"
                                             ToolTipService.ToolTip="扫描全库，为缺歌词的曲目下载歌词，并为已有歌词补齐翻译/罗马音" />
+                                    <Button x:Name="BtnCoverStart" Content="补全封面" Click="BtnCoverStart_Click"
+                                            CornerRadius="{StaticResource RadiusMedium}"
+                                            ToolTipService.ToolTip="扫描当前列表，为没有内嵌封面的歌曲搜索专辑图片并写入（已有封面的跳过）" />
                                     <Button x:Name="BtnLyricStop" Content="停止" Click="BtnLyricStop_Click" IsEnabled="False"
                                             CornerRadius="{StaticResource RadiusMedium}" />
                                     <Button x:Name="BtnLyricRetry" Content="重试失败项" Click="BtnLyricRetry_Click" IsEnabled="False"

@@ -4,6 +4,14 @@ using Microsoft.UI.Xaml.Media;
 
 namespace MusicPlayer.Models;
 
+public enum LyricTaskKind
+{
+    /// <summary>Download / top-up lyrics (the original queue kind).</summary>
+    Lyric,
+    /// <summary>Download album art and embed it into the audio file.</summary>
+    Cover,
+}
+
 public enum LyricTaskStatus
 {
     /// <summary>Queued, not started yet.</summary>
@@ -40,6 +48,9 @@ public sealed class LyricTaskItem : INotifyPropertyChanged
     /// Set once when the queue is built, so it needs no change notification.
     /// </summary>
     public bool NeedsMainLyric { get; init; }
+
+    /// <summary>What this queued row does: lyrics (default) or cover embedding.</summary>
+    public LyricTaskKind Kind { get; init; } = LyricTaskKind.Lyric;
 
     private LyricTaskStatus _status = LyricTaskStatus.Pending;
     public LyricTaskStatus Status
