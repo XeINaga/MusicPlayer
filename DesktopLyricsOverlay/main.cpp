@@ -675,6 +675,33 @@ static void Render() {
     }
 
     // Text (per-pixel alpha, always opaque)
+    // Legibility helpers: lyrics float over arbitrary desktop content, so the
+    // glyphs get a soft drop shadow plus a dark outline around every stroke.
+    // Both are cheap re-draws of the SAME cached layout (only the brush and
+    // offset change); the outline width scales with the font so it reads as
+    // a hairline on small companion rows and a bold rim on the main line.
+    const float outlineW = std::max(1.4f, st.font * 0.045f);
+    const D2D1_POINT_2F outlineOffs[8] = {
+        { outlineW, 0 }, { -outlineW, 0 }, { 0, outlineW }, { 0, -outlineW },
+        { outlineW * 0.7071f, outlineW * 0.7071f },
+        { -outlineW * 0.7071f, outlineW * 0.7071f },
+        { outlineW * 0.7071f, -outlineW * 0.7071f },
+        { -outlineW * 0.7071f, -outlineW * 0.7071f },
+    };
+    ID2D1SolidColorBrush* shadowBrush = nullptr;
+    ID2D1SolidColorBrush* outlineBrush = nullptr;
+    g_dcRT->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0.34f), &shadowBrush);
+    g_dcRT->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0, 0.58f), &outlineBrush);
+    auto drawShadowed = [&](IDWriteTextLayout* l, ID2D1SolidColorBrush* body, float x, float y) {
+        if (shadowBrush)
+            g_dcRT->DrawTextLayout(D2D1::Point2F(x, y + outlineW * 1.3f), l, shadowBrush);
+        if (outlineBrush) {
+            for (auto& o : outlineOffs)
+                g_dcRT->DrawTextLayout(D2D1::Point2F(x + o.x, y + o.y), l, outlineBrush);
+        }
+        g_dcRT->DrawTextLayout(D2D1::Point2F(x, y), l, body);
+    };
+
     if (st.vertical) {
         const float colW = st.font * 1.35f;
         ID2D1SolidColorBrush* tb = nullptr;
@@ -705,7 +732,7 @@ static void Render() {
                     IDWriteTextLayout* lay = nullptr;
                     g_dwriteFactory->CreateTextLayout(
                         c.glyphs[i].c_str(), (UINT32)c.glyphs[i].size(), fmt, colW, charH * 1.3f, &lay);
-                    if (lay) g_dcRT->DrawTextLayout(D2D1::Point2F(x, pad + i * charH), lay, tb);
+                    if (lay) drawShadowed(lay, tb, x, pad + i * charH);
                     if (lay) lay->Release();
                 }
             }
@@ -769,7 +796,7 @@ static void Render() {
         }
 
         if (tb) {
-            if (lay) g_dcRT->DrawTextLayout(D2D1::Point2F(drawX, y), lay, tb);
+            if (lay) drawShadowed(lay, tb, drawX, y);
 
             if (karaoke && lay && doneW > 0.5f) {
                 ID2D1SolidColorBrush* hb = nullptr;
@@ -777,7 +804,7 @@ static void Render() {
                 if (hb) {
                     D2D1_RECT_F lineRect = D2D1::RectF(textX, y, textX + doneW, y + ln.h);
                     g_dcRT->PushAxisAlignedClip(lineRect, D2D1_ANTIALIAS_MODE_ALIASED);
-                    g_dcRT->DrawTextLayout(D2D1::Point2F(drawX, y), lay, hb);
+                    drawShadowed(lay, hb, drawX, y);
                     g_dcRT->PopAxisAlignedClip();
                     hb->Release();
                 }
@@ -787,6 +814,9 @@ static void Render() {
         y += ln.h + gap;
     }
     }
+
+    if (shadowBrush) shadowBrush->Release();
+    if (outlineBrush) outlineBrush->Release();
 
     // Hover frame: thin border + corner resize grips, shown only while the
     // mouse is over the window and never in click-through mode.
