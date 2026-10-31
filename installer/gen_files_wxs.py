@@ -58,6 +58,11 @@ def main():
             h = hashlib.md5(rel.encode("utf-8")).hexdigest()[:12]
             comp_id = "cmp_" + h
             file_id = "file_" + h
+            if name == "MusicPlayer.exe" and not rel_dir:
+                # Stable well-known id: installer.wxs binds the MSI product
+                # version to this file's version, so the package version
+                # always equals the app version with nothing to keep in sync.
+                file_id = "MusicPlayerExe"
             src = esc(abs_path.replace("/", "\\"))
             parts.append(f'      <Component Id="{comp_id}" Guid="*">')
             parts.append(f'        <File Id="{file_id}" Source="{src}" KeyPath="yes" />')
