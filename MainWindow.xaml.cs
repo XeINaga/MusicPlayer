@@ -6947,8 +6947,8 @@ public sealed partial class MainWindow : Window
             }
 
             // Re-apply the wallpaper remembered from the library picker —
-            // routed by extension: video / image / web (WebView2). Scenes
-            // never reach here (filtered out of the library scan).
+            // routed by extension: video / image / web (WebView2) / scene
+            // (WebWallGL page).
             if (!string.IsNullOrEmpty(weLast) && File.Exists(weLast))
             {
                 if (DispatchWallpaperFile(weLast))
@@ -7027,11 +7027,11 @@ public sealed partial class MainWindow : Window
 
     // ---------- Web wallpaper (Wallpaper Engine "web" projects) ----------
 
-    private string? _webWallpaperPath;   // html entry of the running web wallpaper
+    private string? _wePagePath;         // entry of the running WE page (html entry, or scene pkg)
     private bool _webWallpaperAway;      // suspended via TrySuspend (blur / hidden)
 
     /// <summary>Route a wallpaper file by extension to the right layer.
-    /// Returns false when nothing in the app can render it (scenes).</summary>
+    /// Returns false when nothing in the app can render it.</summary>
     private bool DispatchWallpaperFile(string path)
     {
         var ext = (Path.GetExtension(path) ?? "").ToLowerInvariant();
@@ -7054,6 +7054,11 @@ public sealed partial class MainWindow : Window
             _ = StartWebWallpaperAsync(path);
             return true;
         }
+        if (ext == ".pkg")
+        {
+            _ = StartSceneWallpaperAsync(path);
+            return true;
+        }
         return false;
     }
 
@@ -7070,7 +7075,7 @@ public sealed partial class MainWindow : Window
         var fullPath = Path.GetFullPath(htmlPath);
         var dir = Path.GetDirectoryName(fullPath) ?? "";
         var file = Path.GetFileName(fullPath);
-        _webWallpaperPath = fullPath;
+        _wePagePath = fullPath;
 
         WallpaperWebView.Visibility = Visibility.Visible;
         try
@@ -7090,7 +7095,7 @@ public sealed partial class MainWindow : Window
             WallpaperWebView.CoreWebView2.Navigate("https://we.wallpaper/" + Uri.EscapeDataString(file).Replace("%2F", "/"));
             UpdateAspectLock();
         }
-        catch (Exception ex)
+        catch
         {
             // runtime vanished between scan and use, or init failed: fall back
             // to the plain background rather than a dead white layer.
@@ -7098,10 +7103,95 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    /// <summary>Tear the web wallpaper down completely (navigation + hide).</summary>
+    /// <summary>Host a Wallpaper Engine "scene" wallpaper: navigate the same
+    /// WebView2 to the bundled WebWallGL renderer page. The page itself comes
+    /// from the app's wallpaper-engine folder on the "we.renderer" host; the
+    /// project folder maps to "we.wallpaper" with Allow access so the page
+    /// can fetch scene.pkg / project.json across the two hosts. Audio stays
+    /// muted (the wallpaper is a backdrop, music is the foreground) while
+    /// SceneScript still runs — the same trust level as web wallpapers.</summary>
+    private async Task StartSceneWallpaperAsync(string pkgPath)
+    {
+        StopVideoWallpaper();
+        WallpaperImage.Source = null;
+        WallpaperImage.Visibility = Visibility.Collapsed;
+
+        var fullPath = Path.GetFullPath(pkgPath);
+        var dir = Path.GetDirectoryName(fullPath) ?? "";
+        var file = Path.GetFileName(fullPath);
+        var rendererDir = Path.Combine(AppContext.BaseDirectory, "wallpaper-engine");
+
+        // Same scene still assigned and visible: re-apply (theme toggle,
+        // activation patch, tray restore) must not re-parse the package —
+        // the page keeps running, exactly like the video wallpaper keeps
+        // playing through a re-apply.
+        if (_wePagePath != null
+            && string.Equals(_wePagePath, fullPath, StringComparison.OrdinalIgnoreCase)
+            && WallpaperWebView.Visibility == Visibility.Visible)
+            return;
+
+        _wePagePath = fullPath;
+
+        WallpaperWebView.Visibility = Visibility.Visible;
+        try
+        {
+            if (WallpaperWebView.CoreWebView2 == null)
+            {
+                await WallpaperWebView.EnsureCoreWebView2Async();
+                // Mute: scenes ship their own audio, which would fight the
+                // music (the renderer page starts its engine at volume 0 too).
+                WallpaperWebView.CoreWebView2.IsMuted = true;
+                // Keep wallpaper pages inside their folder: no popups, no
+                // navigation out to arbitrary sites.
+                WallpaperWebView.CoreWebView2.NewWindowRequested += (_, e) => e.Handled = true;
+                WallpaperWebView.CoreWebView2.WebMessageReceived += OnWePageWebMessage;
+            }
+            WallpaperWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "we.wallpaper", dir,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            WallpaperWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "we.renderer", rendererDir,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            WallpaperWebView.CoreWebView2.Navigate(
+                "https://we.renderer/we-scene.html"
+                + "?base=" + Uri.EscapeDataString("https://we.wallpaper/")
+                + "&file=" + Uri.EscapeDataString(file));
+            UpdateAspectLock();
+        }
+        catch
+        {
+            // runtime vanished between scan and use, or init failed: fall back
+            // to the plain background rather than a dead layer.
+            StopWebWallpaper();
+        }
+    }
+
+    /// <summary>Status messages from the scene renderer page (postMessage).
+    /// A dead WebGL page is otherwise indistinguishable from an empty
+    /// transparent layer — this is the only failure signal we get.</summary>
+    private void OnWePageWebMessage(object sender,
+        Microsoft.Web.WebView2.Core.CoreWebView2WebMessageReceivedEventArgs e)
+    {
+        try
+        {
+            var msg = e.TryGetWebMessageAsString();
+            if (!string.IsNullOrEmpty(msg))
+                File.AppendAllText(
+                    Path.Combine(Services.AppLog.LogDir, "WeWallpaper.log"),
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + msg + Environment.NewLine);
+        }
+        catch
+        {
+            // logging is best effort
+        }
+    }
+
+    /// <summary>Tear the web/scene wallpaper page down completely
+    /// (navigation + hide). Navigating away discards the page's JS context,
+    /// which also frees the parsed scene package.</summary>
     private void StopWebWallpaper()
     {
-        _webWallpaperPath = null;
+        _wePagePath = null;
         try
         {
             if (WallpaperWebView.CoreWebView2 != null)
@@ -7117,13 +7207,13 @@ public sealed partial class MainWindow : Window
         UpdateAspectLock();
     }
 
-    /// <summary>Blur/hidden handling for the web wallpaper: TrySuspend freezes
-    /// page timers and rendering (fails harmlessly while audio plays, which
-    /// cannot happen — web wallpapers run muted).</summary>
+    /// <summary>Blur/hidden handling for the web/scene wallpaper page:
+    /// TrySuspend freezes page timers and rendering (fails harmlessly while
+    /// audio plays, which cannot happen — wallpaper pages run muted).</summary>
     private void UpdateWebWallpaperVisibility(bool away)
     {
         var core = WallpaperWebView.CoreWebView2;
-        if (core == null || _webWallpaperPath == null)
+        if (core == null || _wePagePath == null)
             return;
         if (away && !_webWallpaperAway)
         {
@@ -7416,8 +7506,9 @@ public sealed partial class MainWindow : Window
         if (picked == null)
             return;
 
-        // Everything Scan() returns renders natively now: scenes are filtered
-        // out entirely and web entries only appear with WebView2 present.
+        // Everything Scan() returns renders natively now: web entries only
+        // appear with the WebView2 runtime present, scenes only with the
+        // bundled WebWallGL renderer.
         bool renderable = true;
         _settings.WallpaperWeLast = picked.FilePath;
         _settings.WallpaperPath = "";
@@ -7508,7 +7599,7 @@ public sealed partial class MainWindow : Window
     private void UpdateVideoWallpaperVisibility()
     {
         // Web wallpaper rides the same away/pause rules as the video layer.
-        if (_webWallpaperPath != null)
+        if (_wePagePath != null)
         {
             var ahwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             bool aAway = Services.NativeMethods.IsIconic(ahwnd)

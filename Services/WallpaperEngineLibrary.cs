@@ -12,7 +12,7 @@ public sealed class WeWallpaperInfo
     public string Title = "";
     public string Type = "";        // video | web | scene | application
     public string ProjectDir = "";
-    public string FilePath = "";    // main content file (mp4 / html / scene.json)
+    public string FilePath = "";    // main content file (mp4 / html / scene.pkg)
     public string PreviewPath = ""; // preview image (may not exist)
 
     public string TypeDisplay => Type switch
@@ -35,9 +35,9 @@ public static class WallpaperEngineLibrary
 {
     private const uint WorkshopAppId = 431960;
 
-    // Web wallpapers render through WebView2; scenes have no renderer here
-    // at all. Both are filtered out of the library list: scenes always, web
-    // only when the Evergreen runtime is missing.
+    // Renderability gates for the library list: web wallpapers need the
+    // WebView2 runtime, scene wallpapers need the bundled WebWallGL renderer
+    // files — anything unrenderable on this machine is filtered out.
     private static bool? _webView2Available;
 
     public static bool WebView2Available
@@ -57,6 +57,26 @@ public static class WallpaperEngineLibrary
                 }
             }
             return _webView2Available.Value;
+        }
+    }
+
+    /// <summary>Scene wallpapers render through the bundled WebWallGL page
+    /// (wallpaper-engine\we-scene.html + webwallgl.global.min.js next to the
+    /// exe). Scenes are only listed when both files shipped with the app.</summary>
+    public static bool SceneAvailable
+    {
+        get
+        {
+            try
+            {
+                var dir = Path.Combine(AppContext.BaseDirectory, "wallpaper-engine");
+                return File.Exists(Path.Combine(dir, "we-scene.html"))
+                    && File.Exists(Path.Combine(dir, "webwallgl.global.min.js"));
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 
@@ -152,15 +172,20 @@ public static class WallpaperEngineLibrary
             if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(file))
                 return;
 
-            // Renderability filter: scenes need the WE scene engine (closed
-            // source) — never listed; web needs the WebView2 runtime.
-            bool web = type.Equals("web", StringComparison.OrdinalIgnoreCase);
-            if (type.Equals("scene", StringComparison.OrdinalIgnoreCase))
+            // Renderability filter: scenes need the bundled WebWallGL page,
+            // web needs the WebView2 runtime.
+            bool scene = type.Equals("scene", StringComparison.OrdinalIgnoreCase);
+            if (scene && !SceneAvailable)
                 return;
-            if (web && !WebView2Available)
+            if (type.Equals("web", StringComparison.OrdinalIgnoreCase) && !WebView2Available)
                 return;
 
             var filePath = Path.Combine(dir, file);
+            // Workshop scenes usually declare file: "scene.json" while only
+            // scene.pkg exists on disk — resolve to the package then (the
+            // renderer page makes the same resolution).
+            if (scene && !File.Exists(filePath) && File.Exists(Path.Combine(dir, "scene.pkg")))
+                filePath = Path.Combine(dir, "scene.pkg");
             if (!File.Exists(filePath))
                 return;
 

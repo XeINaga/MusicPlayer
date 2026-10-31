@@ -19,7 +19,7 @@
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AssemblyName>MusicPlayer</AssemblyName>
     <RootNamespace>MusicPlayer</RootNamespace>
-    <Version>1.9.11</Version>
+    <Version>1.9.12</Version>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
@@ -36,6 +36,18 @@
        fails with CS0017 (multiple entry points). -->
   <ItemGroup>
     <Compile Remove="installer\**\*.cs" />
+  </ItemGroup>
+
+  <!--
+    Wallpaper Engine scene renderer: a single-page WebGL2 host for the
+    WebWallGL engine (MIT, bundled). Served to the wallpaper WebView2 through
+    the "we.renderer" virtual host; the wallpaper's project folder maps to
+    "we.wallpaper" so the renderer can fetch scene.pkg cross-origin. Listed
+    at runtime only when the files exist (WallpaperEngineLibrary.SceneAvailable),
+    so a manually stripped install just hides scene wallpapers again.
+  -->
+  <ItemGroup>
+    <Content Include="wallpaper-engine\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

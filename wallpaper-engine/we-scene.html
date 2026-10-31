@@ -1,0 +1,106 @@
+<!doctype html>
+<!--
+  Wallpaper Engine "scene" wallpaper renderer (WebWallGL engine, MIT — see
+  LICENSE-webwallgl.txt). Loaded from the "we.renderer" virtual host; the
+  wallpaper's project folder is mapped on "we.wallpaper" with Allow access so
+  the scene.pkg / project.json fetches below succeed cross-origin.
+
+  Query: base = mapped project folder URL (trailing /), file = entry file
+  (scene.pkg for packaged workshop content, or the entry json of a loose
+  project — the engine then reads materials/models by name).
+
+  Status is reported back to the host via window.chrome.webview.postMessage
+  ("wwgl-ready" / "wwgl-error: …"): a dead WebGL page is otherwise
+  indistinguishable from an empty transparent layer.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>wwgl-loading</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
+               background: transparent; user-select: none; }
+  #wp { position: fixed; inset: 0; }
+</style>
+</head>
+<body>
+<div id="wp"></div>
+<script src="webwallgl.global.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  function report(msg) {
+    try { window.chrome && window.chrome.webview && window.chrome.webview.postMessage(msg); } catch (e) {}
+    document.title = msg;
+  }
+  document.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  try {
+    var q = new URLSearchParams(location.search);
+    var base = q.get("base") || "";   // wallpaper project folder, trailing "/"
+    var file = q.get("file") || "";   // entry: *.pkg or the loose project's *.json
+    if (typeof WebWallGL === "undefined")
+      throw new Error("WebWallGL engine script failed to load");
+    if (!base || !file)
+      throw new Error("missing base/file parameters");
+
+    function enc(p) { return p.split("/").map(encodeURIComponent).join("/"); }
+    function fetchProject(signal) {
+      return fetch(base + "project.json", { signal: signal })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; });
+    }
+
+    var isPkg = /\.pkg$/i.test(file);
+    var source = {
+      key: base + (isPkg ? file : "scene.pkg"),
+      scenePkg: function (signal) {
+        return fetch(base + enc(isPkg ? file : "scene.pkg"), { signal: signal })
+          .then(function (r) {
+            if (!r.ok) throw new Error("scene.pkg HTTP " + r.status);
+            return r.arrayBuffer();
+          });
+      },
+      project: fetchProject
+    };
+    if (!isPkg) {
+      // Loose project (the editor's myprojects folders): assets are read by
+      // relative path. Returning null from sceneDir makes the engine fall
+      // back to scene.pkg; aborts must propagate, not look like "missing".
+      source.sceneDir = function () {
+        return fetch(base + enc(file)).then(function (r) {
+          return r.ok ? {
+            entry: file,
+            read: function (name, signal) {
+              return fetch(base + enc(name), { signal: signal }).then(
+                function (r2) {
+                  if (!r2.ok) return null;
+                  return r2.arrayBuffer().then(function (b) { return new Uint8Array(b); });
+                },
+                function (err) {
+                  if (signal && signal.aborted) throw err;
+                  return null;
+                });
+            }
+          } : null;
+        }).catch(function () { return null; });
+      };
+    }
+
+    WebWallGL.mount(document.getElementById("wp"), {
+      source: source,
+      volume: 0,   // wallpaper audio stays muted — music is the foreground
+      onError: function (err) { report("wwgl-error:" + (err && err.message || err)); },
+      onDiagnostic: function (msg, level) {
+        if (level === "error") console.error(msg);
+        else if (level === "warn") console.warn(msg);
+      }
+    }).then(function () { report("wwgl-ready"); })
+      .catch(function (err) { report("wwgl-error:" + (err && err.message || err)); });
+  } catch (err) {
+    report("wwgl-error:" + (err && err.message || err));
+  }
+})();
+</script>
+</body>
+</html>
