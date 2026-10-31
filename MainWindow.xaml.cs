@@ -6922,8 +6922,8 @@ public sealed partial class MainWindow : Window
 
         if (kind == WindowMaterialKind.WallpaperEngine)
         {
-            // No backdrop: the WE content (video / image / capture) fully
-            // covers the root, which fills opaque.
+            // No backdrop: the wallpaper layer fully covers the root, which
+            // fills opaque.
             WindowMaterialService.Apply(this, WindowMaterialKind.None);
             RootGrid.Background = FindResource("AppBackground") as Microsoft.UI.Xaml.Media.Brush;
             BtnWallpaperWe.IsEnabled = true;
@@ -6932,11 +6932,10 @@ public sealed partial class MainWindow : Window
             // A static image picked through the generic wallpaper picker is
             // the newest explicit user choice in this mode too (the library
             // picker clears WallpaperPath), so it outranks the remembered
-            // library pick — otherwise the next re-apply here would clobber
-            // it with the capture again.
+            // library pick.
             if (!string.IsNullOrEmpty(wallpaperPath) && File.Exists(wallpaperPath))
             {
-                StopWallpaperEngineCapture();
+                StopWebWallpaper();
                 WallpaperImage.Source = new BitmapImage(new Uri(wallpaperPath));
                 WallpaperImage.Stretch = _settings.WallpaperFill
                     ? Stretch.Fill
@@ -6947,35 +6946,21 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            // Re-apply the wallpaper remembered from the library picker.
-            var ext = string.IsNullOrEmpty(weLast) ? "" : Path.GetExtension(weLast).ToLowerInvariant();
-            if (!string.IsNullOrEmpty(weLast) && File.Exists(weLast) &&
-                (ext is ".mp4" or ".webm" or ".mov" or ".mkv" or ".avi"))
+            // Re-apply the wallpaper remembered from the library picker —
+            // routed by extension: video / image / web (WebView2). Scenes
+            // never reach here (filtered out of the library scan).
+            if (!string.IsNullOrEmpty(weLast) && File.Exists(weLast))
             {
-                StartVideoWallpaper(weLast);
-                UpdateAspectLock();
-                return;
-            }
-            if (!string.IsNullOrEmpty(weLast) && File.Exists(weLast) &&
-                (ext is ".jpg" or ".jpeg" or ".png" or ".bmp"))
-            {
-                StopWallpaperEngineCapture();
-                WallpaperImage.Source = new BitmapImage(new Uri(weLast));
-                WallpaperImage.Stretch = _settings.WallpaperFill
-                    ? Stretch.Fill
-                    : Stretch.Uniform;
-                WallpaperImage.Opacity = _settings.WallpaperOpacity;
-                WallpaperImage.Visibility = Visibility.Visible;
-                UpdateAspectLock();
-                return;
+                if (DispatchWallpaperFile(weLast))
+                    return;
             }
 
-            // Nothing (or nothing playable) remembered: fall back to
-            // capturing whatever WE renders on the desktop.
-            StartWallpaperEngineCapture();
+            // Nothing (or nothing renderable) remembered: plain background.
+            StopWebWallpaper();
+            UpdateAspectLock();
             return;
         }
-        StopWallpaperEngineCapture();
+        StopWebWallpaper();
         WindowMaterialService.Apply(this, kind);
         RootGrid.Background = kind == WindowMaterialKind.None
             ? FindResource("AppBackground") as Microsoft.UI.Xaml.Media.Brush
@@ -7040,39 +7025,116 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    // ---------- Wallpaper Engine live background ----------
+    // ---------- Web wallpaper (Wallpaper Engine "web" projects) ----------
 
-    private WallpaperEngineCaptureService? _weCapture;
+    private string? _webWallpaperPath;   // html entry of the running web wallpaper
+    private bool _webWallpaperAway;      // suspended via TrySuspend (blur / hidden)
 
-    private void StartWallpaperEngineCapture()
+    /// <summary>Route a wallpaper file by extension to the right layer.
+    /// Returns false when nothing in the app can render it (scenes).</summary>
+    private bool DispatchWallpaperFile(string path)
     {
-        _weCapture ??= new WallpaperEngineCaptureService();
-        _weCapture.BitmapReplaced -= OnWeBitmapReplaced;
-        _weCapture.BitmapReplaced += OnWeBitmapReplaced;
-        _weCapture.PauseOnBlur = _settings.WallpaperPauseOnBlur;
-        var hwnd = WindowNative.GetWindowHandle(this);
-        _weCapture.Start(_dispatcher, hwnd);
-        OnWeBitmapReplaced(_weCapture.Bitmap!);
+        var ext = (Path.GetExtension(path) ?? "").ToLowerInvariant();
+        if (ext is ".mp4" or ".webm" or ".mov" or ".mkv" or ".avi")
+        {
+            StartVideoWallpaper(path);
+            return true;
+        }
+        if (ext is ".jpg" or ".jpeg" or ".png" or ".bmp")
+        {
+            StopWebWallpaper();
+            WallpaperImage.Source = new BitmapImage(new Uri(path));
+            WallpaperImage.Stretch = _settings.WallpaperFill ? Stretch.Fill : Stretch.Uniform;
+            WallpaperImage.Opacity = _settings.WallpaperOpacity;
+            WallpaperImage.Visibility = Visibility.Visible;
+            return true;
+        }
+        if (ext is ".html" or ".htm")
+        {
+            _ = StartWebWallpaperAsync(path);
+            return true;
+        }
+        return false;
     }
 
-    private void StopWallpaperEngineCapture()
+    /// <summary>Host a Wallpaper Engine "web" wallpaper in WebView2. The
+    /// wallpaper folder maps to a virtual host so relative js/css/images
+    /// resolve (file:// would be blocked by Chromium policy). Audio is muted:
+    /// the wallpaper is a backdrop, music is the foreground.</summary>
+    private async Task StartWebWallpaperAsync(string htmlPath)
     {
-        _weCapture?.Stop();
-        if (_weCapture != null)
-            _weCapture.BitmapReplaced -= OnWeBitmapReplaced;
-        ApplyWallpaper(); // restore the static wallpaper layer
+        StopVideoWallpaper();
+        WallpaperImage.Source = null;
+        WallpaperImage.Visibility = Visibility.Collapsed;
+
+        var fullPath = Path.GetFullPath(htmlPath);
+        var dir = Path.GetDirectoryName(fullPath) ?? "";
+        var file = Path.GetFileName(fullPath);
+        _webWallpaperPath = fullPath;
+
+        WallpaperWebView.Visibility = Visibility.Visible;
+        try
+        {
+            if (WallpaperWebView.CoreWebView2 == null)
+            {
+                await WallpaperWebView.EnsureCoreWebView2Async();
+                // Mute: pages ship their own audio, which would fight the music.
+                WallpaperWebView.CoreWebView2.IsMuted = true;
+                // Keep workshop pages inside their folder: no popups, no
+                // navigation out to arbitrary sites.
+                WallpaperWebView.CoreWebView2.NewWindowRequested += (_, e) => e.Handled = true;
+            }
+            WallpaperWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                "we.wallpaper", dir,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            WallpaperWebView.CoreWebView2.Navigate("https://we.wallpaper/" + Uri.EscapeDataString(file).Replace("%2F", "/"));
+            UpdateAspectLock();
+        }
+        catch (Exception ex)
+        {
+            // runtime vanished between scan and use, or init failed: fall back
+            // to the plain background rather than a dead white layer.
+            StopWebWallpaper();
+        }
     }
 
-    private void OnWeBitmapReplaced(WriteableBitmap bmp)
+    /// <summary>Tear the web wallpaper down completely (navigation + hide).</summary>
+    private void StopWebWallpaper()
     {
-        WallpaperImage.Source = bmp;
-        WallpaperImage.Stretch = Stretch.Fill;
-        // Follow the shared opacity instead of forcing 1: the slider keeps
-        // working live in capture mode and a resize re-apply no longer
-        // resets a dimmed capture to fully opaque.
-        WallpaperImage.Opacity = _settings.WallpaperOpacity;
-        WallpaperImage.Visibility = Visibility.Visible;
+        _webWallpaperPath = null;
+        try
+        {
+            if (WallpaperWebView.CoreWebView2 != null)
+                WallpaperWebView.CoreWebView2.Navigate("about:blank");
+            if (WallpaperWebView.CoreWebView2 != null)
+                WallpaperWebView.CoreWebView2.Resume();
+        }
+        catch
+        {
+            // not initialized yet
+        }
+        WallpaperWebView.Visibility = Visibility.Collapsed;
         UpdateAspectLock();
+    }
+
+    /// <summary>Blur/hidden handling for the web wallpaper: TrySuspend freezes
+    /// page timers and rendering (fails harmlessly while audio plays, which
+    /// cannot happen — web wallpapers run muted).</summary>
+    private void UpdateWebWallpaperVisibility(bool away)
+    {
+        var core = WallpaperWebView.CoreWebView2;
+        if (core == null || _webWallpaperPath == null)
+            return;
+        if (away && !_webWallpaperAway)
+        {
+            _webWallpaperAway = true;
+            _ = core.TrySuspendAsync();
+        }
+        else if (!away && _webWallpaperAway)
+        {
+            _webWallpaperAway = false;
+            core.Resume();
+        }
     }
 
     // ---------- Window wallpaper ----------
@@ -7096,8 +7158,6 @@ public sealed partial class MainWindow : Window
         if (WallpaperImage.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage bi &&
             bi.PixelWidth > 0 && bi.PixelHeight > 0)
             return (double)bi.PixelWidth / bi.PixelHeight;
-        if (_weCapture?.IsRunning == true && _weCapture.Bitmap is { PixelWidth: > 0, PixelHeight: > 0 } wb)
-            return (double)wb.PixelWidth / wb.PixelHeight;
         // Video wallpaper: TagLibSharp reads the container's video dimensions
         // (the WinUI MediaPlayer surface doesn't expose them).
         if (!string.IsNullOrEmpty(_videoWallpaperSourcePath))
@@ -7195,13 +7255,6 @@ public sealed partial class MainWindow : Window
     /// layer of the root grid.</summary>
     private void ApplyWallpaper()
     {
-        // WE capture mode owns the wallpaper layer — frames arrive through
-        // OnWeBitmapReplaced. Re-running the static-image logic here (e.g.
-        // from the fill toggle) used to blank the captured frame back to the
-        // opaque root background.
-        if (_weCapture?.IsRunning == true)
-            return;
-
         var path = _settings.WallpaperPath;
         if (!string.IsNullOrEmpty(path) && File.Exists(path))
         {
@@ -7284,11 +7337,10 @@ public sealed partial class MainWindow : Window
         SettingsStore.Save(_settings);
 
         // A static image replaces the video wallpaper (mutually exclusive
-        // background layers). In WE capture mode the capture must also stop,
-        // otherwise it keeps feeding frames over the freshly picked image and
-        // the next OnWeBitmapReplaced (any resize) pushes it out again.
+        // background layers). The web wallpaper must also stop, otherwise it
+        // keeps rendering over the freshly picked image.
         StopVideoWallpaper();
-        StopWallpaperEngineCapture();
+        StopWebWallpaper();
 
         _suppressSettingEvents = true;
         try
@@ -7364,14 +7416,13 @@ public sealed partial class MainWindow : Window
         if (picked == null)
             return;
 
-        // Video and image wallpapers render natively; scene/web/application
-        // need the WE scene engine and fall back to the capture mode.
-        bool renderable = picked.Type is "video" or "image";
-        if (renderable)
-            _settings.WallpaperWeLast = picked.FilePath;
+        // Everything Scan() returns renders natively now: scenes are filtered
+        // out entirely and web entries only appear with WebView2 present.
+        bool renderable = true;
+        _settings.WallpaperWeLast = picked.FilePath;
         _settings.WallpaperPath = "";
         StopVideoWallpaper();
-        StopWallpaperEngineCapture();
+        StopWebWallpaper();
         if (renderable)
         {
             // Selecting from the library switches to the WE material, which
@@ -7397,7 +7448,6 @@ public sealed partial class MainWindow : Window
     /// stretch follow the shared wallpaper settings.</summary>
     private void StartVideoWallpaper(string videoPath)
     {
-        _weCapture?.Stop();
         WallpaperImage.Source = null;
         WallpaperImage.Visibility = Visibility.Collapsed;
 
@@ -7457,6 +7507,23 @@ public sealed partial class MainWindow : Window
     /// an event (e.g. another app stealing focus via a flash).</summary>
     private void UpdateVideoWallpaperVisibility()
     {
+        // Web wallpaper rides the same away/pause rules as the video layer.
+        if (_webWallpaperPath != null)
+        {
+            var ahwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            bool aAway = Services.NativeMethods.IsIconic(ahwnd)
+                         || !Services.NativeMethods.IsWindowVisible(ahwnd);
+            if (!aAway && _settings.WallpaperPauseOnBlur)
+            {
+                var fg = Services.NativeMethods.GetForegroundWindow();
+                if (fg != ahwnd)
+                {
+                    Services.NativeMethods.GetWindowThreadProcessId(fg, out var fgPid);
+                    aAway = fgPid != (uint)Environment.ProcessId;
+                }
+            }
+            UpdateWebWallpaperVisibility(aAway);
+        }
         if (_videoWallpaperSource == null)
             return;
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -7550,11 +7617,9 @@ public sealed partial class MainWindow : Window
             return;
         _settings.WallpaperPauseOnBlur = WallpaperBlurPauseToggle.IsOn;
         ScheduleSettingsSave();
-        // Push to the capture thread and re-evaluate the video wallpaper
-        // immediately: turning the switch on while unfocused must pause right
-        // now, turning it off must resume right now.
-        if (_weCapture != null)
-            _weCapture.PauseOnBlur = _settings.WallpaperPauseOnBlur;
+        // Re-evaluate the video/web wallpaper immediately: turning the switch
+        // on while unfocused must pause right now, turning it off must resume
+        // right now.
         UpdateVideoWallpaperVisibility();
     }
 
@@ -8170,9 +8235,9 @@ public sealed partial class MainWindow : Window
             try { this.AppWindow.Hide(); }
             catch { /* best-effort */ }
             EnsureTrayIcon();
-            // Hidden window = nothing to composite: pause the WE capture and
-            // resume it when the window is restored.
-            _weCapture?.Stop();
+            // Hidden window = nothing to composite: suspend the web wallpaper
+            // and resume it when the window is restored.
+            UpdateWebWallpaperVisibility(true);
             // Remember the hidden state: the next activation re-applies the
             // window material (the compositor drops the backdrop target for
             // a hidden window; see OnFirstActivatedReapplyMaterial).
@@ -8218,12 +8283,7 @@ public sealed partial class MainWindow : Window
         // (the tray-hide path above keeps the service alive via Stop()).
         // The video wallpaper layer goes down with the window as well.
         StopVideoWallpaper();
-        if (_weCapture != null)
-        {
-            _weCapture.BitmapReplaced -= OnWeBitmapReplaced;
-            _weCapture.Dispose();
-            _weCapture = null;
-        }
+        StopWebWallpaper();
 
         PlaylistStore.SaveProgress(_playback.CurrentIndex, _playback.Position, CurrentPath());
 

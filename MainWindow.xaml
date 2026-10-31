@@ -477,6 +477,12 @@
              decoded, muted, looping; sits above the static image layer. -->
         <MediaPlayerElement x:Name="WallpaperVideoPlayer" Grid.RowSpan="2"
                             Visibility="Collapsed" IsHitTestVisible="False" />
+        <!-- Web wallpaper (Wallpaper Engine "web" projects): WebView2 hosts
+             the page; transparent default background lets the material show
+             through pages that don't paint their own. -->
+        <WebView2 x:Name="WallpaperWebView" Grid.RowSpan="2"
+                  Visibility="Collapsed" IsHitTestVisible="False"
+                  DefaultBackgroundColor="Transparent" />
 
         <!-- Title bar strip: content extends into the caption area (see
              ExtendsContentIntoTitleBar / SetTitleBar in code-behind). The whole

@@ -35,6 +35,31 @@ public static class WallpaperEngineLibrary
 {
     private const uint WorkshopAppId = 431960;
 
+    // Web wallpapers render through WebView2; scenes have no renderer here
+    // at all. Both are filtered out of the library list: scenes always, web
+    // only when the Evergreen runtime is missing.
+    private static bool? _webView2Available;
+
+    public static bool WebView2Available
+    {
+        get
+        {
+            if (_webView2Available == null)
+            {
+                try
+                {
+                    var version = Microsoft.Web.WebView2.Core.CoreWebView2Environment.GetAvailableBrowserVersionString();
+                    _webView2Available = !string.IsNullOrEmpty(version);
+                }
+                catch
+                {
+                    _webView2Available = false; // runtime not installed
+                }
+            }
+            return _webView2Available.Value;
+        }
+    }
+
     public static List<WeWallpaperInfo> Scan()
     {
         var list = new List<WeWallpaperInfo>();
@@ -125,6 +150,14 @@ public static class WallpaperEngineLibrary
             string file = root.TryGetProperty("file", out var f) ? f.GetString() ?? "" : "";
             string preview = root.TryGetProperty("preview", out var pv) ? pv.GetString() ?? "preview.jpg" : "preview.jpg";
             if (string.IsNullOrEmpty(type) || string.IsNullOrEmpty(file))
+                return;
+
+            // Renderability filter: scenes need the WE scene engine (closed
+            // source) — never listed; web needs the WebView2 runtime.
+            bool web = type.Equals("web", StringComparison.OrdinalIgnoreCase);
+            if (type.Equals("scene", StringComparison.OrdinalIgnoreCase))
+                return;
+            if (web && !WebView2Available)
                 return;
 
             var filePath = Path.Combine(dir, file);
