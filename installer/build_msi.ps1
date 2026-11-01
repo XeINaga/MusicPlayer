@@ -45,7 +45,7 @@ function Ensure-Ffmpeg {
     Write-Host "FFmpeg (trimmed build, $size MB) deployed to publish/" -ForegroundColor DarkGray
 }
 
-Write-Host "1/4  dotnet publish -c Release (self-contained, trims locales) ..." -ForegroundColor Cyan
+Write-Host "1/5  dotnet publish -c Release (framework-dependent, trims locales) ..." -ForegroundColor Cyan
 # DeleteExistingFiles=false keeps incremental publish fast, but stale files
 # from older builds then leak into files.wxs and ship in the MSI. Wipe first.
 if (Test-Path $publishDir) {
@@ -68,7 +68,21 @@ dotnet publish -c Release @publishProps
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
 Ensure-Ffmpeg
 
-Write-Host "2/4  building standalone Uninstall.exe ..." -ForegroundColor Cyan
+Write-Host "2/5  compiling installer custom actions (MinGW g++) ..." -ForegroundColor Cyan
+# Both custom actions ship as ONE normalize.dll: BrowseInstallDir (modern
+# IFileDialog folder picker for the wizard) and NormalizeInstallDir (path
+# normalizer). Compiled here on EVERY build — the dll used to be a stale
+# binary committed next to its newer source and silently missed a fix for
+# months. -static keeps msiexec loading it with zero C++ runtime dependency.
+$gxxDir = if ($GxxPath -ne "") { $GxxPath } else { "E:\mingw\msys2\ucrt64\bin\" }
+if (-not $gxxDir.EndsWith('\') -and -not $gxxDir.EndsWith('/')) { $gxxDir += '\' }
+& (Join-Path $gxxDir "g++.exe") -O2 -static -shared -std=c++17 `
+    -o "$root\installer\ca\normalize.dll" `
+    "$root\installer\ca\normalize.cpp" "$root\installer\ca\normalize.def" `
+    -lmsi -lole32 -lshell32 -luser32
+if ($LASTEXITCODE -ne 0) { throw "g++ failed (exit $LASTEXITCODE)" }
+
+Write-Host "3/5  building standalone Uninstall.exe ..." -ForegroundColor Cyan
 # Compiled with the .NET Framework csc that ships with Windows: zero
 # dependencies, a few KB, and no .NET SDK needed on the target machine.
 $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
@@ -77,13 +91,13 @@ $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
        "$root\installer\uninstall\Uninstall.cs"
 if ($LASTEXITCODE -ne 0) { throw "csc failed (exit $LASTEXITCODE)" }
 
-Write-Host "3/4  regenerating installer/files.wxs ..." -ForegroundColor Cyan
+Write-Host "4/5  regenerating installer/files.wxs ..." -ForegroundColor Cyan
 python installer/gen_files_wxs.py $publishDir installer/files.wxs
 if ($LASTEXITCODE -ne 0) { throw "gen_files_wxs.py failed (exit $LASTEXITCODE)" }
 # gen_files_wxs.py picks up everything in the publish dir (except .pdb),
 # so Uninstall.exe lands in INSTALLFOLDER automatically.
 
-Write-Host "4/4  wix build MusicPlayer.msi ..." -ForegroundColor Cyan
+Write-Host "5/5  wix build MusicPlayer.msi ..." -ForegroundColor Cyan
 wix build installer/installer.wxs installer/files.wxs `
        -ext WixToolset.UI.wixext `
        -ext WixToolset.Util.wixext `

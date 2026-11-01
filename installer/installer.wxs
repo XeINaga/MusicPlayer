@@ -54,6 +54,13 @@
                   DllEntry="NormalizeInstallDir"
                   Execute="immediate"
                   Return="check" />
+    <!-- Modern Windows folder picker (IFileDialog, FOS_PICKFOLDERS) shown by
+         the wizard's Browse button; writes the choice into INSTALLFOLDER. -->
+    <CustomAction Id="BrowseInstallDir"
+                  BinaryRef="CaBinary"
+                  DllEntry="BrowseInstallDir"
+                  Execute="immediate"
+                  Return="check" />
 
     <!-- Add/Remove Programs (Programs and Features) entry polish. -->
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
@@ -155,22 +162,75 @@
       </Component>
     </StandardDirectory>
 
-    <!-- Destination-folder selection dialog. -->
+    <!-- Custom UI on top of the WiX common dialogs. The stock
+         WixUI_InstallDir folder browser is the ancient Win32 BrowseDlg tree
+         ("Look in:" + a flat folder list); its ChangeFolder control is
+         hard-wired to SpawnDialog BrowseDlg and cannot be re-targeted. So
+         the wizard is built from WixUI_Common (every other dialog plus the
+         fonts/bitmaps) with our own dialog, whose Browse button runs the
+         BrowseInstallDir custom action — the modern Windows folder picker —
+         which writes the choice with MsiSetTargetPath so the already-costed
+         directory resolves to the new value. -->
     <UI>
-      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
-      <!-- Normalize the path as soon as the user leaves the folder dialog, so
-           the Confirmation dialog shows the corrected target.
-           WixUI_InstallDir's own Next events write the chosen path into the
-           directory table (SetTargetPath) around Order 1-2; a single DoAction
-           published without an Order ran too late, after that write, so the UI
-           kept showing the un-normalized path even though the final install
-           directory was correct. Publishing the CA at Order 1 plus our own
-           SetTargetPath at Order 2 re-applies the corrected value: whichever
-           of the two SetTargetPath calls lands first, the last one carries the
-           normalized path. -->
-      <Publish Dialog="InstallDirDlg" Control="Next" Event="DoAction" Value="NormalizeInstallDir" Condition="1" Order="1" />
-      <Publish Dialog="InstallDirDlg" Control="Next" Event="SetTargetPath" Value="INSTALLFOLDER" Condition="1" Order="2" />
+      <ui:WixUI Id="WixUI_Common" />
+
+      <!-- The WixUI_InstallDir variant normally carries these text styles;
+           WixUI_Common does not, and without them every styled Text control
+           logs error 2874 (font change failed) and renders in the fallback
+           MS Sans Serif. -->
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <TextStyle Id="WixUI_Font_Emphasized" FaceName="Tahoma" Size="8" Bold="yes" />
+
+      <Dialog Id="SetupDirDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="210" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Change destination folder" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Browse to the destination folder" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="FolderLabel" Type="Text" X="20" Y="62" Width="330" Height="15" NoPrefix="yes" Text="Install [ProductName] to:" />
+        <Control Id="Folder" Type="PathEdit" X="20" Y="80" Width="330" Height="17" Property="INSTALLFOLDER" Indirect="no" />
+        <Control Id="Browse" Type="PushButton" X="20" Y="102" Width="80" Height="17" Text="Browse...">
+          <!-- The CA writes the picked path into the BROWSED_PATH scratch
+               property. A SetProperty control event moves it into
+               INSTALLFOLDER — a control event refreshes the bound PathEdit
+               right away, while a property write from inside the CA leaves
+               the control stale until the dialog is rebuilt. SetTargetPath
+               then makes the directory manager adopt the value. (Before the
+               CostFinalize fix this chain died with 2732/267.) -->
+          <Publish Event="DoAction" Value="BrowseInstallDir" Order="1" />
+          <Publish Property="INSTALLFOLDER" Value="[BROWSED_PATH]" Order="2" />
+          <Publish Event="SetTargetPath" Value="INSTALLFOLDER" Order="3" />
+        </Control>
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="WelcomeDlg" Order="1" />
+        </Control>
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+          <Publish Event="DoAction" Value="NormalizeInstallDir" Order="1" />
+          <Publish Event="SetTargetPath" Value="INSTALLFOLDER" Order="2" />
+          <Publish Event="NewDialog" Value="VerifyReadyDlg" Order="3" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" Order="1" />
+        </Control>
+      </Dialog>
+
+      <!-- Cross-dialog navigation that the WixUI variants used to provide:
+           the common dialogs themselves carry no Next/Back wiring. -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="SetupDirDlg" Order="2" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="SetupDirDlg" Order="2" />
     </UI>
+
+    <!-- Full-UI entry point. The wizard must show AFTER CostFinalize (the
+         built-in cost actions run at sequence 800-1000): the folder picker
+         and SetTargetPath need the directory manager initialized, and with
+         the naive "After=LaunchConditions" (400) the dialog appeared before
+         costing ever ran — every SetTargetPath then failed with 2732
+         ("directory manager not initialized"). -->
+    <InstallUISequence>
+      <Show Dialog="WelcomeDlg" After="CostFinalize" Condition="NOT Installed" />
+    </InstallUISequence>
 
     <!-- Also normalize before costing in the execute sequence (covers silent
         installs and guarantees the final path ends with the software name). -->

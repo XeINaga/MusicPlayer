@@ -11,6 +11,11 @@ import hashlib
 
 NS = "http://wixtoolset.org/schemas/v4/wxs"
 SKIP_EXT = {".pdb"}
+# Runtime-generated data that must never ship in the MSI: WebView2's
+# per-exe user data folder (Chromium cache, grows unbounded while the app
+# runs from the publish output) and the app's own log folder (the installer
+# creates a clean one via the LogFolder component).
+SKIP_DIRS = {"MusicPlayer.exe.WebView2", "log"}
 
 
 def esc(s: str) -> str:
@@ -70,6 +75,8 @@ def main():
             comp_ids.append(comp_id)
         # Then subdirectories.
         for name in entries:
+            if name in SKIP_DIRS:
+                continue
             abs_path = os.path.join(abs_dir, name)
             if not os.path.isdir(abs_path):
                 continue

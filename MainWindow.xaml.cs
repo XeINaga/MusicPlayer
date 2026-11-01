@@ -328,6 +328,11 @@ public sealed partial class MainWindow : Window
         // Apply the persisted data/cache directory (default = %LOCALAPPDATA%\MusicPlayer).
         // Must run before any PlaylistStore / LyricBindingStore access below.
         DataLocation.Apply(_settings.CacheDir);
+
+        // Only now is the cache directory known — the WebView2 junction must
+        // point into it (at ctor start DataLocation still holds the default).
+        EnsureWebView2DataJunction();
+
         // AFTER the data dir is applied — CoverCache resolves its folder from
         // DataLocation.Root, and a custom CacheDir used to make the trim scan
         // the default location instead.
@@ -6849,6 +6854,43 @@ public sealed partial class MainWindow : Window
                 // best-effort; leave files where they are
             }
         }
+
+        // Whole cache folders follow the root too: extracted cover art, the
+        // downloaded artist avatars and the WebView2 user data (Chromium
+        // cache the junction points at). Same newer-wins rule per file; a
+        // running WebView may hold locks — locked files simply stay behind
+        // in the old root and the cache keeps working from the new one.
+        var dirs = new[] { "covers", "avatars", "webview2" };
+        foreach (var name in dirs)
+        {
+            var src = Path.Combine(oldRoot, name);
+            var dst = Path.Combine(newRoot, name);
+            if (!Directory.Exists(src))
+                continue;
+
+            try
+            {
+                if (!Directory.Exists(dst))
+                {
+                    Directory.Move(src, dst); // atomic fast path
+                    continue;
+                }
+                foreach (var f in Directory.GetFiles(src, "*", SearchOption.AllDirectories))
+                {
+                    var rel = Path.GetRelativePath(src, f);
+                    var d = Path.Combine(dst, rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(d));
+                    if (File.Exists(d) && File.GetLastWriteTimeUtc(f) <= File.GetLastWriteTimeUtc(d))
+                        continue;
+                    File.Move(f, d, overwrite: true);
+                }
+                Directory.Delete(src, recursive: true);
+            }
+            catch
+            {
+                // best-effort; leftovers stay in the old root
+            }
+        }
     }
 
     private void AccentColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
@@ -7026,6 +7068,66 @@ public sealed partial class MainWindow : Window
     }
 
     // ---------- Web wallpaper (Wallpaper Engine "web" projects) ----------
+
+    /// <summary>Redirect the WebView2 user data folder into the cache
+    /// directory. The WinUI3 WebView2 always uses
+    /// <c>{exe}.WebView2</c> next to the exe and the WinRT environment API
+    /// exposes no userDataFolder parameter (verified against the projection),
+    /// so the folder itself is replaced by a directory junction — the real
+    /// data lands in the cache dir and the install folder stays at its
+    /// shipped size. Best effort: any failure leaves the plain folder (the
+    /// default WebView2 behaviour).</summary>
+    private static void EnsureWebView2DataJunction()
+    {
+        try
+        {
+            var link = Path.Combine(AppContext.BaseDirectory, "MusicPlayer.exe.WebView2");
+            var target = Path.Combine(Services.DataLocation.Root, "webview2");
+            Directory.CreateDirectory(target);
+
+            var di = new DirectoryInfo(link);
+            if (di.Exists && di.Attributes.HasFlag(System.IO.FileAttributes.ReparsePoint))
+            {
+                // Already redirected; rebuild only if it points elsewhere.
+                if (string.Equals(Path.GetFullPath(di.LinkTarget ?? ""),
+                                  Path.GetFullPath(target),
+                                  StringComparison.OrdinalIgnoreCase))
+                    return;
+                di.Delete(); // junction delete: removes only the reparse point
+            }
+            else if (di.Exists)
+            {
+                // Real folder from older runs: migrate the content, then
+                // swap. Fails on a read-only install dir — caught below.
+                foreach (var f in Directory.GetFiles(link, "*", SearchOption.AllDirectories))
+                {
+                    var rel = Path.GetRelativePath(link, f);
+                    var dst = Path.Combine(target, rel);
+                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                    File.Move(f, dst, overwrite: true);
+                }
+                foreach (var d in Directory.GetDirectories(link, "*", SearchOption.AllDirectories)
+                                             .OrderByDescending(d => d.Length))
+                    Directory.Delete(d, recursive: true);
+                Directory.Delete(link);
+            }
+
+            // Directory junctions need no admin rights (unlike symlinks).
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/c mklink /J \"{link}\" \"{target}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            };
+            using var p = System.Diagnostics.Process.Start(psi);
+            p?.WaitForExit(5000);
+        }
+        catch
+        {
+            // Fall back to the plain default folder; the app works either way.
+        }
+    }
 
     private string? _wePagePath;         // entry of the running WE page (html entry, or scene pkg)
     private bool _webWallpaperAway;      // suspended via TrySuspend (blur / hidden)

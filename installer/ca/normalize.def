@@ -1,3 +1,4 @@
 LIBRARY normalize
 EXPORTS
 NormalizeInstallDir
+BrowseInstallDir
